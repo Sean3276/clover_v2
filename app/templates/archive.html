@@ -25,7 +25,8 @@
 
 <div class="runhdr">
   <div><h1>Archive monitor</h1>
-    <p class="note">Mailbox <code>{{ cfg.auth.imap.user or "not set" }}</code> · Destination <code>{{ cfg.archive_path }}</code></p></div>
+    <p class="note">Mailbox <code>{{ cfg.auth.imap.user or "not set" }}</code> · Destination <code>{{ cfg.archive_path }}</code></p>
+    <p id="sessionLine" class="note dim" style="margin:4px 0 0"></p></div>
   <span id="runPill" class="pill down">● idle</span>
 </div>
 
@@ -68,9 +69,13 @@
           {{ f.name }}{% if f.messages is not none %} <span class="note">({{ f.messages }})</span>{% endif %}</label>
       {% endfor %}
     </div>
-    <div class="row" style="margin-top:16px;max-width:380px">
+    <label style="display:flex;gap:9px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink);margin-top:14px">
+      <input type="checkbox" name="auto_resume" value="on" checked style="width:auto;accent-color:var(--clover)">
+      Auto-resume on disconnect (keep retrying until the whole archive completes)</label>
+    <div class="row3" style="margin-top:12px;max-width:540px">
       <div><label>Limit per folder (0 = all)</label><input type="number" name="limit" value="0"></div>
       <div style="display:flex;align-items:flex-end"><button id="runBtn" type="button" onclick="run()">Archive selected →</button></div>
+      <div style="display:flex;align-items:flex-end"><button id="stopBtn" type="button" class="ghost" onclick="stop()" disabled>Stop</button></div>
     </div>
   </form>
   {% endif %}
@@ -112,9 +117,14 @@ function render(s){
 
   const pill = $("runPill");
   if(s.running){ pill.className="pill up"; pill.textContent="● running"; }
+  else if(s.manifest && s.manifest.aborted){ pill.className="pill down"; pill.textContent="● stopped"; }
   else if(s.manifest){ pill.className="pill up"; pill.style.animation="none"; pill.textContent="● finished"; }
   else { pill.className="pill down"; pill.textContent="● idle"; }
   if($("runBtn")) $("runBtn").disabled = !!s.running;
+  if($("stopBtn")) $("stopBtn").disabled = !s.running;
+  const sl = $("sessionLine");
+  if(sl) sl.textContent = (s.session_saved || s.attempt > 1)
+      ? `Session: ${s.session_saved || 0} archived across ${s.attempt || 1} attempt(s)` : "";
 
   const box = $("folBars");
   if((s.folders||[]).length){
@@ -146,6 +156,11 @@ async function run(){
   m.className="msg "+(res.ok?"ok":"err"); m.textContent=res.message;
   if(res.ok){ poll(); if(!timer) timer=setInterval(poll,1000); $("monitor").scrollIntoView({behavior:"smooth"}); }
   else btn.disabled=false;
+}
+async function stop(){
+  const b=$("stopBtn"); b.disabled=true;
+  await fetch("/archive/stop",{method:"POST"});
+  const m=$("runMsg"); m.className="msg ok"; m.textContent="Stopping after the current attempt…";
 }
 document.addEventListener("DOMContentLoaded", poll);
 </script>

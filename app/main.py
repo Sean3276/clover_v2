@@ -25,12 +25,15 @@ app = FastAPI(title="Clover v2 — Phase 1")
 
 _lock = threading.Lock()
 # live run state — per-folder progress drives the dashboard
-_status = {"running": False, "started_at": None, "folders": {}, "log": [], "manifest": None}
+_status = {"running": False, "started_at": None, "folders": {}, "log": [], "manifest": None,
+           "stop": False, "attempt": 0, "session_saved": 0}
 
 
 def _log(line: str) -> None:
     with _lock:
         _status["log"].append(str(line))
+        if len(_status["log"]) > 1000:            # bound memory on long auto-resume runs
+            del _status["log"][:len(_status["log"]) - 1000]
 
 
 def _progress(p: dict) -> None:
@@ -113,7 +116,7 @@ def archive_page(request: Request):
     })
 
 
-def _run_archive_bg(folders: list[str], limit: int | None):
+def _run_archive_bg(folders: list[str], limit: int | None, auto_resume: bool):
     try:
         cfg = cfgmod.load_config()
         cfg["folders"] = folders
@@ -122,9 +125,20 @@ def _run_archive_bg(folders: list[str], limit: int | None):
         if not pw:
             _log("No IMAP password stored — save credentials on Setup first.")
             return
-        manifest = archive.run_archive(cfg, pw, log=_log, limit_per_folder=limit, progress=_progress)
-        with _lock:
-            _status["manifest"] = manifest
+
+        def run_once():
+            with _lock:
+                _status["attempt"] += 1
+            m = archive.run_archive(cfg, pw, log=_log, limit_per_folder=limit, progress=_progress)
+            with _lock:
+                _status["manifest"] = m
+                _status["session_saved"] += m.get("saved", 0)
+            return m
+
+        archive.run_until_complete(
+            run_once, auto_resume=auto_resume, log=_log, sleep=time.sleep,
+            should_stop=lambda: _status.get("stop", False),
+        )
     except Exception as e:
         _log(f"ERROR: {type(e).__name__}: {e}")
     finally:
@@ -133,15 +147,26 @@ def _run_archive_bg(folders: list[str], limit: int | None):
 
 
 @app.post("/archive/run")
-def archive_run(folders: list[str] = Form(default=[]), limit: int = Form(0)):
+def archive_run(folders: list[str] = Form(default=[]), limit: int = Form(0),
+                auto_resume: str = Form("off")):
+    ar = str(auto_resume).lower() in ("on", "true", "1", "yes")
     with _lock:
         if _status["running"]:
             return JSONResponse({"ok": False, "message": "An archive run is already in progress."})
         if not folders:
             return JSONResponse({"ok": False, "message": "Select at least one folder."})
-        _status.update(running=True, started_at=time.time(), folders={}, log=[], manifest=None)
-    threading.Thread(target=_run_archive_bg, args=(folders, limit or None), daemon=True).start()
-    return JSONResponse({"ok": True, "message": f"Archiving {len(folders)} folder(s)…"})
+        _status.update(running=True, started_at=time.time(), folders={}, log=[], manifest=None,
+                       stop=False, attempt=0, session_saved=0)
+    threading.Thread(target=_run_archive_bg, args=(folders, limit or None, ar), daemon=True).start()
+    return JSONResponse({"ok": True,
+                         "message": f"Archiving {len(folders)} folder(s)" + (" · auto-resume on" if ar else "")})
+
+
+@app.post("/archive/stop")
+def archive_stop():
+    with _lock:
+        _status["stop"] = True
+    return JSONResponse({"ok": True, "message": "Stopping after the current attempt…"})
 
 
 @app.get("/archive/status")
@@ -153,4 +178,6 @@ def archive_status():
             "folders": list(_status["folders"].values()),
             "log": _status["log"][-200:],   # cap payload on long runs
             "manifest": _status["manifest"],
+            "attempt": _status["attempt"],
+            "session_saved": _status["session_saved"],
         })

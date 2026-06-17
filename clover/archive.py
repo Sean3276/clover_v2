@@ -29,6 +29,8 @@ from .sources import get_source
 _FETCH_TIMEOUT = 180        # seconds
 _RECONNECT_ATTEMPTS = 3     # retries (with backoff) before giving up on a dropped connection
 _MAX_CONSEC_ERRORS = 10     # consecutive failures => connection/server is dead, stop the run
+_AUTO_MAX_IDLE = 30         # auto-resume: pause after this many consecutive attempts with zero progress
+_AUTO_BASE_WAIT = 20        # auto-resume: base seconds to wait between retry attempts
 
 
 def _fetch_guarded(src, key, timeout):
@@ -281,6 +283,44 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
     verb = "STOPPED (re-run to resume)" if manifest["aborted"] else "FINISHED"
     log(f"{verb} — {manifest['saved']} saved, {manifest['skipped']} skipped, {manifest['errors']} errors")
     return manifest
+
+
+def run_until_complete(run_once, *, auto_resume=True, should_stop=lambda: False,
+                       sleep=time.sleep, log=print,
+                       max_idle=_AUTO_MAX_IDLE, base_wait=_AUTO_BASE_WAIT) -> dict:
+    """Call run_once() (a resumable run returning a manifest) repeatedly until it completes
+    without a connection-loss abort. Rides out transient drops with backoff.
+
+    Stops when: a run completes (manifest['aborted'] is False), the user requests stop,
+    auto_resume is off, or max_idle consecutive attempts make zero progress.
+    Returns {'attempts': n, 'manifest': last_manifest}.
+    """
+    attempt = 0
+    idle = 0
+    last: dict = {}
+    while True:
+        attempt += 1
+        last = run_once()
+        if not last.get("aborted"):
+            if attempt > 1:
+                log(f"Auto-resume: complete after {attempt} attempts.")
+            break
+        if not auto_resume or should_stop():
+            break
+        idle = 0 if last.get("saved", 0) > 0 else idle + 1
+        if idle >= max_idle:
+            log(f"Auto-resume paused: {idle} attempts with no progress — re-run when the connection is back.")
+            break
+        wait = min(base_wait * (idle + 1), 180)
+        log(f"Auto-resume: connection dropped — retrying in {wait}s (next attempt {attempt + 1})…")
+        slept = 0
+        while slept < wait and not should_stop():
+            sleep(1)
+            slept += 1
+        if should_stop():
+            log("Auto-resume: stopped by user.")
+            break
+    return {"attempts": attempt, "manifest": last}
 
 
 if __name__ == "__main__":

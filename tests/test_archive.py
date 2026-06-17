@@ -64,6 +64,46 @@ class _DeadSource(MailSource):
     def reconnect(self, folder=None): raise OSError("getaddrinfo failed")
 
 
+def test_run_until_complete_retries_until_success():
+    calls = {"n": 0}
+
+    def run_once():
+        calls["n"] += 1
+        return {"aborted": True, "saved": 5} if calls["n"] < 3 else {"aborted": False, "saved": 2}
+
+    out = ar.run_until_complete(run_once, sleep=lambda *_: None, log=lambda *_: None)
+    assert out["attempts"] == 3 and out["manifest"]["aborted"] is False
+
+
+def test_run_until_complete_pauses_on_no_progress():
+    def run_once():
+        return {"aborted": True, "saved": 0}        # never makes progress
+    out = ar.run_until_complete(run_once, sleep=lambda *_: None, log=lambda *_: None, max_idle=4)
+    assert out["attempts"] == 4                       # paused after max_idle zero-progress attempts
+
+
+def test_run_until_complete_honors_stop():
+    state = {"stop": False}
+
+    def run_once():
+        state["stop"] = True                          # user hits Stop during the first attempt
+        return {"aborted": True, "saved": 1}
+
+    out = ar.run_until_complete(run_once, should_stop=lambda: state["stop"],
+                                sleep=lambda *_: None, log=lambda *_: None)
+    assert out["attempts"] == 1
+
+
+def test_run_until_complete_no_auto_resume_runs_once():
+    calls = {"n": 0}
+
+    def run_once():
+        calls["n"] += 1
+        return {"aborted": True, "saved": 0}
+    out = ar.run_until_complete(run_once, auto_resume=False, sleep=lambda *_: None, log=lambda *_: None)
+    assert out["attempts"] == 1
+
+
 class _SelectFailSource(MailSource):
     """Connection dropped at a folder boundary: select() fails and cannot be recovered."""
 
