@@ -113,6 +113,7 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
                     skipped = len(keys) - len(new)
                     if limit_per_folder:
                         new = new[:limit_per_folder]
+                    step = max(1, len(new) // 20)   # ~20 progress updates regardless of folder size
                     log(f"[{fol}] {len(keys)} total · {len(new)} to archive · {skipped} already done")
                     fol_dir.mkdir(parents=True, exist_ok=True)
                     for key in new:
@@ -145,8 +146,8 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
                             idx_fh.flush()
                             done.add((fol, validity, str(key)))
                             saved += 1
-                            if saved % 25 == 0:
-                                log(f"  [{fol}] {saved} saved…")
+                            if saved % step == 0:
+                                log(f"  [{fol}] {saved}/{len(new)} saved…")
                         except Exception as e:
                             errors += 1
                             log(f"  ! [{fol}] key {key}: {type(e).__name__}: {e}")
