@@ -10,7 +10,7 @@
   <div class="card">
     <h2>IMAP (mailbox)</h2>
     <div class="row3">
-      <div><label>Host</label><input name="host" value="{{ cfg.auth.imap.host }}" placeholder="imap.ccccltd.sg" required></div>
+      <div><label>Host</label><input name="host" value="{{ cfg.auth.imap.host }}" placeholder="imap.example.com" required></div>
       <div><label>Port</label><input name="port" type="number" value="{{ cfg.auth.imap.port or 993 }}"></div>
       <div><label>Security</label>
         <select name="security">
@@ -20,7 +20,7 @@
       </div>
     </div>
     <div class="row">
-      <div><label>Username</label><input name="user" value="{{ cfg.auth.imap.user }}" placeholder="sean.tan@ccccltd.sg" required></div>
+      <div><label>Username</label><input name="user" value="{{ cfg.auth.imap.user }}" placeholder="you@example.com" required></div>
       <div><label>Password {% if has_pw %}(stored — leave blank to keep){% endif %}</label>
            <input name="password" type="password" placeholder="{% if has_pw %}••••••••{% else %}IMAP password{% endif %}"></div>
     </div>

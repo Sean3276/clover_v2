@@ -7,16 +7,17 @@
   .top{display:flex;gap:26px;align-items:center;flex-wrap:wrap}
   .ringwrap{position:relative;width:150px;height:150px;flex:none}
   .ringtxt{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
-  .ringtxt .pct{font-size:30px;font-weight:800;font-family:var(--mono);color:#fff}
+  .ringtxt .pct{font-size:30px;font-weight:800;font-family:var(--mono);color:var(--ink)}
+  .ringtrack{stroke:var(--track-bg)}
   .ringtxt .sub{font-size:11px;color:var(--sub);font-family:var(--mono);margin-top:2px}
   .tiles{flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:12px;min-width:260px}
-  .tile{background:#0c1813;border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+  .tile{background:var(--tile-bg);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
   .tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--sub)}
   .tile .v{font-size:22px;font-weight:700;font-family:var(--mono);color:var(--ink);margin-top:3px}
   .tile.err .v{color:var(--amber)}
   .fol{margin:9px 0}
   .folhdr{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px}
-  .track{height:9px;background:#0a1410;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .track{height:9px;background:var(--track-bg);border:1px solid var(--line);border-radius:6px;overflow:hidden}
   .fill{height:100%;background:linear-gradient(90deg,var(--clover),var(--cyan));border-radius:6px;transition:width .4s ease}
   .runhdr{display:flex;align-items:center;gap:12px;justify-content:space-between}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
@@ -34,7 +35,7 @@
   <div class="top">
     <div class="ringwrap">
       <svg viewBox="0 0 120 120" width="150" height="150">
-        <circle cx="60" cy="60" r="52" fill="none" stroke="#16291f" stroke-width="11"/>
+        <circle class="ringtrack" cx="60" cy="60" r="52" fill="none" stroke-width="11"/>
         <circle id="ring" cx="60" cy="60" r="52" fill="none" stroke="url(#g)" stroke-width="11"
                 stroke-linecap="round" transform="rotate(-90 60 60)"
                 stroke-dasharray="326.73" stroke-dashoffset="326.73" style="transition:stroke-dashoffset .5s ease"/>
@@ -44,7 +45,7 @@
       <div class="ringtxt"><span id="ringPct" class="pct">0%</span><span id="ringSub" class="sub">0 / 0</span></div>
     </div>
     <div class="tiles">
-      <div class="tile"><div class="k">Saved</div><div id="cSaved" class="v">0</div></div>
+      <div class="tile"><div class="k">Archived</div><div id="cSaved" class="v">0</div></div>
       <div class="tile"><div class="k">Remaining</div><div id="cRemain" class="v">0</div></div>
       <div class="tile err"><div class="k">Errors</div><div id="cErr" class="v">0</div></div>
       <div class="tile"><div class="k">Rate /s</div><div id="cRate" class="v">—</div></div>
@@ -102,17 +103,24 @@ function fmtETA(s){ if(s==null||!isFinite(s)||s<0) return "—"; s=Math.round(s)
   return h? `${h}h ${m}m` : (m? `${m}m ${ss}s` : `${ss}s`); }
 
 function render(s){
-  let saved=0,toArch=0,errs=0;
-  (s.folders||[]).forEach(f=>{saved+=f.saved||0; toArch+=f.to_archive||0; errs+=f.errors||0;});
-  const processed = saved+errs, remaining = Math.max(0, toArch-processed);
-  const pct = toArch>0 ? processed/toArch*100 : 0;
+  // CUMULATIVE across attempts: done = already-archived (skipped) + this attempt's saved; total = folder size
+  let doneAll=0, totalAll=0, errs=0, savedAttempt=0;
+  (s.folders||[]).forEach(f=>{
+    doneAll  += (f.skipped||0) + (f.saved||0);
+    totalAll += (f.total||0);
+    errs     += f.errors||0;
+    savedAttempt += f.saved||0;
+  });
+  const remaining = Math.max(0, totalAll - doneAll);
+  const pct = totalAll>0 ? doneAll/totalAll*100 : 0;
   $("ring").style.strokeDashoffset = C*(1-pct/100);
   $("ringPct").textContent = Math.round(pct)+"%";
-  $("ringSub").textContent = saved+" / "+toArch;
-  $("cSaved").textContent = saved; $("cRemain").textContent = remaining; $("cErr").textContent = errs;
+  $("ringSub").textContent = doneAll+" / "+totalAll;
+  $("cSaved").textContent = doneAll; $("cRemain").textContent = remaining; $("cErr").textContent = errs;
   const elapsed = s.started_at ? (Date.now()/1000 - s.started_at) : 0;
-  const rate = elapsed>1 ? saved/elapsed : 0;
-  $("cRate").textContent = rate>0 ? rate.toFixed(1) : "—";
+  const sessionProgress = (s.session_saved||0) + savedAttempt;   // effective throughput incl. reconnect waits
+  const rate = elapsed>1 ? sessionProgress/elapsed : 0;
+  $("cRate").textContent = rate>0 ? rate.toFixed(2) : "—";
   $("cEta").textContent = (rate>0 && remaining>0) ? fmtETA(remaining/rate) : (s.running? "…" : "—");
 
   const pill = $("runPill");
@@ -129,11 +137,12 @@ function render(s){
   const box = $("folBars");
   if((s.folders||[]).length){
     box.innerHTML = s.folders.map(f=>{
-      const p = f.to_archive>0 ? Math.min(100,(f.saved+f.errors)/f.to_archive*100) : 100;
-      const e = f.errors ? ` · <span style="color:var(--amber)">${f.errors} err</span>` : "";
-      const d = f.done ? " <span style='color:var(--clover)'>✓</span>" : "";
+      const fdone = (f.skipped||0)+(f.saved||0), ftot = f.total||0;
+      const p = ftot>0 ? Math.min(100, fdone/ftot*100) : 100;
+      const e = f.errors ? ` · <span style="color:var(--amber)">${f.errors} err this attempt</span>` : "";
+      const d = (ftot>0 && fdone>=ftot) ? " <span style='color:var(--clover)'>✓</span>" : "";
       return `<div class="fol"><div class="folhdr"><span>${esc(f.folder)}${d}</span>
-        <span class="mono dim">${f.saved}/${f.to_archive}${e}</span></div>
+        <span class="mono dim">${fdone}/${ftot}${e}</span></div>
         <div class="track"><div class="fill" style="width:${p}%"></div></div></div>`;
     }).join("");
   } else { box.innerHTML = '<p class="note dim">No active run — select folders below and click Archive.</p>'; }

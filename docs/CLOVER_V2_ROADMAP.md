@@ -47,7 +47,7 @@ Pull every email from selected mailbox locations into a faithful local `.eml` ar
    | Exchange (on-prem) | EWS | ⬜ planned |
    | Yahoo Mail | IMAP (app password) | ⬜ planned |
    | iCloud Mail | IMAP (app-specific password) | ⬜ planned |
-   | Coremail (ccccltd.sg, 163/126/QQ) | IMAP / Coremail API | ⬜ planned |
+   | Coremail (NetEase 163/126, QQ, etc.) | IMAP / Coremail API | ⬜ planned |
    | Zoho Mail | IMAP / API | ⬜ planned |
    | Fastmail | JMAP / IMAP | ⬜ planned |
    | Proton Mail | IMAP via Proton Bridge | ⬜ planned |
@@ -235,7 +235,7 @@ can re-organize (P2), re-comprehend (P3), or re-cluster issues (P4) without re-f
 
 ## Current status snapshot
 - **P1:** IMAP prototype **built, reviewed (17 findings fixed), self-verified** — pending a
-  live trial on `ccccltd.sg` + the full-suite/verify completion work.
+  a live trial + the full-suite/verify completion work.
 - **P2–P5:** not started (P4, P5 conceptual; approaches proposed above).
 
 ## Open decisions (summary)

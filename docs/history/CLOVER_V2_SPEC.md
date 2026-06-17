@@ -7,7 +7,7 @@
 
 ## Operator decisions baked into Rev D
 - **(a) Auth:** IMAP **password login** (no OAuth in prototype). Target mailbox
-  `sean.tan@ccccltd.sg`.
+  `you@example.com`.
 - **(b) AI / no redaction:** Phase 2 runs on the **local Claude Code agent** (the Clover v2
   skill), **not** a built API integration. **No redaction anywhere** — the archive is
   full-fidelity; a redacted archive defeats the purpose. Confidentiality is structural: the
@@ -267,7 +267,7 @@ persistent profile the operator authenticates once**, so any gated provider down
 | **SharePoint / OneDrive** `/:b: :w: :x: :p:/` | single file | **Tier 2** authed: open + Download (or `&download=1`) | corporate session |
 | **SharePoint / OneDrive** `/:f:/` | folder | **Tier 2** authed: folder "Download" zip, **or** enumerate `GetFolderByServerRelativeUrl(...)/Files` → navigate each `/_layouts/15/download.aspx?SourceUrl=` | cookie-auth, no token in URL |
 | **Autodesk ACC** (autode.sk) | file / folder | **Tier 2** authed profile | construction-cloud login |
-| **Coremail netdisk** (ccccltd.sg) | file | Tier 1: provider download endpoint w/ embedded token; else Tier 2 same-origin | likely relevant for `ccccltd.sg` |
+| **Coremail netdisk** (example.com) | file | Tier 1: provider download endpoint w/ embedded token; else Tier 2 same-origin | likely relevant for `example.com` |
 | **Generic URL** | file | Tier 1 HEAD → if `Content-Disposition: attachment` stream; else Tier 2 | fallback |
 
 **Validate every download** (non-zero size; `zipfile.testzip()` for zips — agent/browser
@@ -429,10 +429,10 @@ downloaded (resolver §3.7) · Telegram digest.
 **New/раised:**
 - **SMTP dropped** from prototype (unused) — confirm OK.
 - **Playwright one-time provider login** is required for gated shares — acceptable operator step?
-- **`ccccltd.sg` mail system** — confirm IMAP host/port (likely Coremail IMAP; netdisk shares via
+- **`example.com` mail system** — confirm IMAP host/port (likely Coremail IMAP; netdisk shares via
   resolver). *[requires the operator's IMAP settings]*
 
-**Risks:** IMAP-password may be disabled by some corporate tenants *(verify for ccccltd.sg)*;
+**Risks:** IMAP-password may be disabled by some corporate tenants *(verify for example.com)*;
 gated-share download depends on a live Playwright session (mitigated by persistent profile);
 scanned-doc text loss (OCR roadmap); misclassification (council + QAQC + golden-set).
 

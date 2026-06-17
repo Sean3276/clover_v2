@@ -4,59 +4,87 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Clover v2{% endblock %}</title>
+<script>
+  // resolve theme before paint (no flash): saved choice, else match the OS
+  (function () {
+    try {
+      var t = localStorage.getItem("clover_theme");
+      if (t !== "light" && t !== "dark")
+        t = (window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    } catch (e) { document.documentElement.setAttribute("data-theme", "dark"); }
+  })();
+</script>
 <style>
-  :root{
+  :root, :root[data-theme="dark"]{
     --bg:#0b1110; --bg2:#0e1714; --card:#12201b; --card2:#152721; --line:#1f3a30;
     --ink:#dcefe2; --sub:#7fa594; --dim:#5c7f70;
-    --clover:#34d27b; --clover-d:#22a862; --cyan:#2bd4c4; --amber:#f0b24a; --red:#ff6b5e;
-    --mono:ui-monospace,"Cascadia Code",Consolas,"SF Mono",monospace;
+    --clover:#34d27b; --clover-d:#13632f; --cyan:#2bd4c4; --amber:#f0b24a; --red:#ff6b5e;
+    --input-bg:#0c1512; --tile-bg:#0c1813; --track-bg:#0a1410; --th-bg:#0e1a16; --code-bg:#0c1512;
+    --header-bg:rgba(8,14,12,.72); --shadow:rgba(0,0,0,.28); --btn-ink:#06140d;
+    --log-bg:#060b09; --log-ink:#9fdcb8;
+    --body-grad:radial-gradient(1200px 600px at 70% -10%,#10211b 0%,var(--bg) 55%);
+    --mono:ui-monospace,"Cascadia Code",Consolas,"SF Mono",monospace;   /* theme-independent */
+  }
+  :root[data-theme="light"]{
+    --bg:#eef2f0; --bg2:#f5f9f7; --card:#ffffff; --card2:#f6faf8; --line:#d7e2dc;
+    --ink:#15211b; --sub:#51695d; --dim:#90a89b;
+    --clover:#1f8a4c; --clover-d:#0f5e30; --cyan:#138f82; --amber:#b07514; --red:#c0392b;
+    --input-bg:#ffffff; --tile-bg:#f3f7f4; --track-bg:#e6eee9; --th-bg:#eef3f0; --code-bg:#eef3f0;
+    --header-bg:rgba(255,255,255,.85); --shadow:rgba(20,40,30,.08); --btn-ink:#ffffff;
+    --log-bg:#0c1612; --log-ink:#bfe8cf;          /* console stays dark in both themes */
+    --body-grad:radial-gradient(1100px 560px at 75% -12%,#ffffff 0%,var(--bg) 62%);
   }
   *{box-sizing:border-box}
-  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#10211b 0%,var(--bg) 55%);
-    color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  body{margin:0;background:var(--body-grad);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     line-height:1.55;min-height:100vh}
   header{display:flex;gap:18px;align-items:center;padding:13px 24px;border-bottom:1px solid var(--line);
-    background:rgba(8,14,12,.7);backdrop-filter:blur(6px);position:sticky;top:0;z-index:5}
-  header .logo{font-weight:700;letter-spacing:.06em;color:#fff}
+    background:var(--header-bg);backdrop-filter:blur(6px);position:sticky;top:0;z-index:5}
+  header .logo{font-weight:700;letter-spacing:.06em;color:var(--ink)}
   header .logo .v{color:var(--clover)}
   header a{color:var(--sub);text-decoration:none;font-size:14px}
   header a:hover{color:var(--ink)}
   header a.active{color:var(--clover);font-weight:600}
   header .right{margin-left:auto;font-size:11px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
+  .themetoggle{background:transparent;border:1px solid var(--line);color:var(--ink);border-radius:8px;
+    padding:4px 9px;font-size:14px;line-height:1;cursor:pointer}
+  .themetoggle:hover{border-color:var(--clover)}
   main{max-width:1000px;margin:0 auto;padding:26px 24px 70px}
   h1{font-size:22px;margin:0 0 4px;letter-spacing:.01em}
   h2{font-size:13px;margin:0 0 12px;text-transform:uppercase;letter-spacing:.12em;color:var(--sub)}
-  .card{background:linear-gradient(180deg,var(--card),var(--bg2));border:1px solid var(--line);
-    border-radius:14px;padding:20px 22px;margin-top:16px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+  .card{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--line);
+    border-radius:14px;padding:20px 22px;margin-top:16px;box-shadow:0 8px 30px var(--shadow)}
   label{display:block;font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.08em;margin:12px 0 4px}
   input,select{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font-size:14px;
-    background:#0c1512;color:var(--ink)}
+    background:var(--input-bg);color:var(--ink)}
   input:focus,select:focus{outline:none;border-color:var(--clover);box-shadow:0 0 0 3px rgba(52,210,123,.15)}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .row3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:14px}
-  button,.btn{background:var(--clover);color:#06140d;border:0;border-radius:8px;padding:10px 18px;font-size:14px;
+  button,.btn{background:var(--clover);color:var(--btn-ink);border:0;border-radius:8px;padding:10px 18px;font-size:14px;
     font-weight:700;cursor:pointer;letter-spacing:.01em}
-  button:hover,.btn:hover{background:#43e389}
+  button:hover,.btn:hover{filter:brightness(1.07)}
   button.ghost{background:transparent;color:var(--clover);border:1px solid var(--clover)}
-  button.ghost:hover{background:rgba(52,210,123,.1)}
-  button:disabled,.btn.disabled{opacity:.45;cursor:not-allowed;background:#2a4438;color:#86a294}
+  button.ghost:hover{background:rgba(52,210,123,.1);filter:none}
+  button:disabled,.btn.disabled{opacity:.45;cursor:not-allowed;filter:none}
   .msg{margin-top:10px;font-size:13px;padding:8px 12px;border-radius:8px;display:none;border:1px solid transparent}
-  .msg.ok{display:block;background:rgba(52,210,123,.1);color:var(--clover);border-color:rgba(52,210,123,.3)}
+  .msg.ok{display:block;background:rgba(52,210,123,.12);color:var(--clover-d);border-color:rgba(52,210,123,.32)}
   .msg.err{display:block;background:rgba(255,107,94,.1);color:var(--red);border-color:rgba(255,107,94,.35)}
   table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
   th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
-  th{background:#0e1a16;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--sub)}
-  td a{color:var(--clover)}
+  th{background:var(--th-bg);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--sub)}
+  td a{color:var(--clover-d)}
   .note{font-size:12px;color:var(--sub)} .dim{color:var(--dim)}
-  code{background:#0c1512;border:1px solid var(--line);padding:1px 6px;border-radius:5px;font-family:var(--mono);font-size:12.5px;color:var(--cyan)}
+  code{background:var(--code-bg);border:1px solid var(--line);padding:1px 6px;border-radius:5px;
+    font-family:ui-monospace,Consolas,monospace;font-size:12.5px;color:var(--cyan)}
   .folders{display:grid;grid-template-columns:repeat(2,1fr);gap:7px 20px;margin-top:8px}
   .folders label{display:flex;gap:9px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink);margin:0}
   .folders input{width:auto;accent-color:var(--clover)}
-  pre.log{background:#060b09;color:#9fdcb8;border:1px solid var(--line);border-radius:10px;padding:13px;
-    font-family:var(--mono);font-size:12px;max-height:260px;overflow:auto;white-space:pre-wrap;margin-top:12px}
+  pre.log{background:var(--log-bg);color:var(--log-ink);border:1px solid var(--line);border-radius:10px;padding:13px;
+    font-family:ui-monospace,Consolas,monospace;font-size:12px;max-height:260px;overflow:auto;white-space:pre-wrap;margin-top:12px}
   .pill{font-size:11px;font-weight:700;border-radius:20px;padding:4px 11px;letter-spacing:.04em;white-space:nowrap}
-  .pill.up{background:rgba(52,210,123,.14);color:var(--clover);border:1px solid rgba(52,210,123,.35)}
-  .pill.down{background:rgba(240,178,74,.12);color:var(--amber);border:1px solid rgba(240,178,74,.3)}
+  .pill.up{background:rgba(52,210,123,.16);color:var(--clover-d);border:1px solid rgba(52,210,123,.4)}
+  .pill.down{background:rgba(240,178,74,.14);color:var(--amber);border:1px solid rgba(240,178,74,.34)}
 </style>
 </head>
 <body>
@@ -65,7 +93,22 @@
   <a href="/setup" class="{% block nav_setup %}{% endblock %}">Setup</a>
   <a href="/archive" class="{% block nav_archive %}{% endblock %}">Archive</a>
   <span class="right">control room</span>
+  <button id="themeBtn" class="themetoggle" type="button" onclick="toggleTheme()" title="Toggle light / dark">☀️</button>
 </header>
 <main>{% block body %}{% endblock %}</main>
+<script>
+  function setThemeIcon(){
+    var t = document.documentElement.getAttribute("data-theme");
+    var b = document.getElementById("themeBtn");
+    if (b) b.textContent = (t === "light") ? "🌙" : "☀️";   // icon = the mode you'll switch TO
+  }
+  function toggleTheme(){
+    var next = (document.documentElement.getAttribute("data-theme") === "light") ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("clover_theme", next); } catch (e) {}
+    setThemeIcon();
+  }
+  setThemeIcon();
+</script>
 </body>
 </html>

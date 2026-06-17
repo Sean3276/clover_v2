@@ -31,7 +31,7 @@ pip install -r requirements.txt
 ```
 python -m uvicorn app.main:app --port 8765      # → http://127.0.0.1:8765
 ```
-1. **Setup** — enter IMAP host/port/user/password (e.g. `sean.tan@ccccltd.sg`),
+1. **Setup** — enter IMAP host/port/user/password (e.g. `you@example.com`),
    click **Test IMAP**, set the archive destination path, **Save**.
 2. **Archive** — tick the folders to archive, optionally set a per-folder limit
    (start with e.g. 20 to trial), click **Archive selected**. Re-running is

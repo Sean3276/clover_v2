@@ -21,7 +21,7 @@ SUITE = [
     {"id": "exchange", "label": "Exchange (on-prem)", "protocol": "EWS", "status": "planned"},
     {"id": "yahoo", "label": "Yahoo Mail", "protocol": "IMAP (app password)", "status": "planned"},
     {"id": "icloud", "label": "iCloud Mail", "protocol": "IMAP (app-specific password)", "status": "planned"},
-    {"id": "coremail", "label": "Coremail (ccccltd.sg, 163/126/QQ)", "protocol": "IMAP / Coremail API", "status": "planned"},
+    {"id": "coremail", "label": "Coremail (NetEase 163/126, QQ, etc.)", "protocol": "IMAP / Coremail API", "status": "planned"},
     {"id": "zoho", "label": "Zoho Mail", "protocol": "IMAP / API", "status": "planned"},
     {"id": "fastmail", "label": "Fastmail", "protocol": "JMAP / IMAP", "status": "planned"},
     {"id": "proton", "label": "Proton Mail", "protocol": "IMAP via Proton Bridge", "status": "planned"},
