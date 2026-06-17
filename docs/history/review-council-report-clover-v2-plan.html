@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review Council — Clover v2 Plan (CLOVERV2-RPT-001)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#16201a; --sub:#4d5a52; --line:#c9d4cc; --line2:#e3eae5;
+    --paper:#f7f9f7; --card:#ffffff; --clover:#1f8a4c; --clover-d:#13632f;
+    --amber:#b8791b; --red:#b23a2e; --blue:#2d6da3; --grey:#7c8a82;
+    --chip-new:#1f8a4c; --chip-chg:#2d6da3; --chip-same:#7c8a82; --chip-risk:#b8791b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5;font-size:14px}
+  .wrap{max-width:1040px;margin:0 auto;padding:28px 22px 60px}
+  h1,h2,h3{font-weight:600;line-height:1.25;margin:0}
+  .mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .doc{border:1.5px solid var(--ink);background:var(--card)}
+  /* title block */
+  .title{display:grid;grid-template-columns:1fr 280px}
+  .title .main{padding:20px 22px;border-right:1.5px solid var(--ink)}
+  .title .meta{display:flex;flex-direction:column}
+  .title .meta div{padding:8px 14px;border-bottom:1px solid var(--line);font-size:12px}
+  .title .meta div:last-child{border-bottom:0}
+  .title .meta .k{color:var(--sub);text-transform:uppercase;letter-spacing:.06em;font-size:10px}
+  .logo{font-size:12px;letter-spacing:.16em;color:var(--clover-d);text-transform:uppercase;font-weight:600}
+  h1{font-size:23px;margin:6px 0 4px}
+  .docno{font-size:12px;color:var(--sub)}
+  .revtable{width:100%;border-collapse:collapse;font-size:12px;margin-top:0;border-top:1.5px solid var(--ink)}
+  .revtable th,.revtable td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  .revtable th{background:#eef3ef;text-transform:uppercase;letter-spacing:.05em;font-size:10px;color:var(--sub)}
+  .stamp{display:inline-block;border:1.5px solid var(--clover-d);color:var(--clover-d);
+    border-radius:3px;padding:1px 7px;font-weight:600;font-size:11px;letter-spacing:.04em}
+  section{margin-top:26px}
+  .sec-h{display:flex;align-items:baseline;gap:10px;border-bottom:1.5px solid var(--ink);padding-bottom:6px;margin-bottom:14px}
+  .sec-h .n{font-size:11px;color:#fff;background:var(--clover-d);padding:2px 8px;border-radius:3px;font-weight:600}
+  .sec-h h2{font-size:16px}
+  /* version cards */
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .vc{border:1px solid var(--line);border-top:4px solid var(--clover);background:var(--card);padding:13px 14px;border-radius:4px}
+  .vc.b{border-top-color:var(--blue)} .vc.c{border-top-color:var(--clover-d)}
+  .vc h3{font-size:13px;margin-bottom:2px}
+  .vc p{font-size:12px;color:var(--sub);margin:6px 0 10px}
+  .vc .stats{display:flex;flex-direction:column;gap:4px;font-size:11px}
+  .vc .stats span{display:flex;justify-content:space-between;border-top:1px dashed var(--line2);padding-top:3px}
+  .vc .stats b{font-weight:600}
+  .chain{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:14px;font-size:11px;color:var(--sub)}
+  .chain .node{border:1px solid var(--line);background:#eef3ef;border-radius:14px;padding:4px 11px;white-space:nowrap}
+  .chain .ar{color:var(--clover);font-weight:700}
+  /* tables */
+  table.grid{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.grid th,table.grid td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  table.grid th{background:#eef3ef;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--sub)}
+  table.grid td.num{text-align:center;font-family:"IBM Plex Mono",monospace}
+  tr.avg td{background:#f0f6f1;font-weight:600}
+  .up{color:var(--clover-d);font-weight:600}
+  /* bars */
+  .bars{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+  .bar{display:grid;grid-template-columns:230px 1fr 42px;align-items:center;gap:10px;font-size:12px}
+  .bar .lbl{color:var(--sub)} .bar .lbl b{color:var(--ink);font-weight:600}
+  .track{background:var(--line2);border-radius:3px;height:15px;overflow:hidden}
+  .fill{height:100%;background:linear-gradient(90deg,var(--clover),var(--clover-d));border-radius:3px}
+  .bar .sc{font-family:"IBM Plex Mono",monospace;text-align:right;font-weight:600}
+  .meanline{margin-top:10px;font-size:12px;background:#f0f6f1;border-left:3px solid var(--clover);padding:8px 11px}
+  /* chips */
+  .chip{display:inline-block;font-size:9.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+    border-radius:3px;padding:1px 6px;color:#fff;margin-left:5px;vertical-align:middle}
+  .c-new{background:var(--chip-new)} .c-chg{background:var(--chip-chg)} .c-same{background:var(--chip-same)} .c-risk{background:var(--chip-risk)}
+  .grp{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--clover-d);font-weight:600;background:#eef3ef}
+  /* trace cards */
+  .trace{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .tcard{border:1px solid var(--line);border-radius:4px;background:var(--card);padding:13px 14px}
+  .tcard h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);margin-bottom:8px}
+  .tcard ul{margin:0;padding-left:16px;font-size:12px} .tcard li{margin-bottom:5px}
+  .reject{margin-top:10px;font-size:12px;background:#fdf6ec;border-left:3px solid var(--amber);padding:8px 11px}
+  .verdict{font-weight:600;color:var(--clover-d)}
+  .foot{margin-top:30px;border-top:1.5px solid var(--ink);padding-top:12px;font-size:11px;color:var(--sub)}
+  .foot .ref{font-family:"IBM Plex Mono",monospace}
+  @media(max-width:720px){.title{grid-template-columns:1fr}.title .main{border-right:0;border-bottom:1.5px solid var(--ink)}
+    .cards{grid-template-columns:1fr}.trace{grid-template-columns:1fr}.bar{grid-template-columns:150px 1fr 40px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 1 · TITLE BLOCK -->
+  <div class="doc title">
+    <div class="main">
+      <div class="logo">🍀 Clover · Review Council</div>
+      <h1>Clover v2 — Three-Phase Plan & Phase-1 Spec</h1>
+      <div class="docno mono">Controlled review report · technical-proposal</div>
+      <p style="font-size:12px;color:var(--sub);margin:12px 0 0">
+        Structured multi-role review of the Clover v2 architecture (IMAP/SMTP, 3-phase
+        Capture→Reason→Materialize, prototype web-app) and the Phase-1 capture specification.
+        Plan revisions are labelled <b>Rev A → Rev B → Rev C</b> to avoid collision with the
+        product name "Clover v2".
+      </p>
+    </div>
+    <div class="meta">
+      <div><div class="k">Document No.</div><span class="mono">CLOVERV2-RPT-001</span></div>
+      <div><div class="k">Date</div>2026-06-17</div>
+      <div><div class="k">Prepared by</div>Product Lead (chair, non-scoring)</div>
+      <div><div class="k">Reviewed by</div>R1 Technical Architect · R2 Security &amp; Data-Protection · R3 AI Workflow &amp; Reliability</div>
+    </div>
+  </div>
+
+  <table class="revtable">
+    <tr><th>Rev</th><th>Stage</th><th>Revision character</th><th>Basis</th></tr>
+    <tr><td><span class="stamp">Rev A</span></td><td>Baseline</td><td>As-drafted plan: IMAP/SMTP, 3 phases, FastAPI web-app, Phase-1 I/O spec</td><td>Author draft</td></tr>
+    <tr><td><span class="stamp">Rev B</span></td><td>First revision</td><td>Feasibility &amp; trust fixes: OAuth2, cross-folder Message-ID threading, Phase-2 execution model, egress controls, eval</td><td>3-role expert review · panel mean 81.3/100</td></tr>
+    <tr><td><span class="stamp">Rev C</span></td><td>Second revision</td><td>Tiered confidentiality egress, published accuracy/cost bar, retention/legal-hold, optional share adapter</td><td>10 executive reviews · field mean 72.1/100</td></tr>
+  </table>
+
+  <!-- 2 · VERSION SUMMARY -->
+  <section>
+    <div class="sec-h"><span class="n">2</span><h2>Version summary</h2></div>
+    <div class="cards">
+      <div class="vc">
+        <span class="stamp">Rev A</span><h3>Drafted plan</h3>
+        <p>Right shape — phase split, offline corpus, network-unplug invariant — but built on three assumptions that fail for corporate mail.</p>
+        <div class="stats">
+          <span>Panel mean <b>65.0</b></span>
+          <span>Key risk <b>Basic-auth + browser-less shares</b></span>
+          <span>Gap <b>Phase-2 AI undefined</b></span>
+        </div>
+      </div>
+      <div class="vc b">
+        <span class="stamp">Rev B</span><h3>Made feasible &amp; trustworthy</h3>
+        <p>OAuth2, cross-folder Message-ID threading, an explicit AI execution + egress + eval model, honest link-share policy, scoped UI.</p>
+        <div class="stats">
+          <span>Panel mean <b>81.3</b></span>
+          <span>Added <b>7 D-decisions</b></span>
+          <span>Exec mean <b>72.1</b></span>
+        </div>
+      </div>
+      <div class="vc c">
+        <span class="stamp">Rev C</span><h3>Trust-tiered &amp; measurable</h3>
+        <p>Confidentiality-tiered egress, published ≥90%/85% accuracy bar + cost, retention/legal-hold, optional cookie-reuse share adapter.</p>
+        <div class="stats">
+          <span>Panel mean <b>88.7</b></span>
+          <span>Added <b>5 S-decisions</b></span>
+          <span>Scope <b>held: single-operator</b></span>
+        </div>
+      </div>
+    </div>
+    <div class="chain">
+      <span class="node">Drafted plan</span><span class="ar">→</span>
+      <span class="node">Expert gate (3 roles)</span><span class="ar">→</span>
+      <span class="node">Rev B</span><span class="ar">→</span>
+      <span class="node">Field gate (10 execs)</span><span class="ar">→</span>
+      <span class="node">Rev C</span>
+    </div>
+  </section>
+
+  <!-- 3 · SCORES -->
+  <section>
+    <div class="sec-h"><span class="n">3</span><h2>Scores</h2></div>
+    <table class="grid">
+      <tr><th>Reviewer (lens)</th><th>Rev A</th><th>Rev B</th><th>Rev C</th><th>Δ A→C</th></tr>
+      <tr><td>R1 · Technical Architect</td><td class="num">72</td><td class="num">84</td><td class="num">90</td><td class="num up">+18</td></tr>
+      <tr><td>R2 · Security &amp; Data-Protection</td><td class="num">58</td><td class="num">78</td><td class="num">87</td><td class="num up">+29</td></tr>
+      <tr><td>R3 · AI Workflow &amp; Reliability</td><td class="num">65</td><td class="num">82</td><td class="num">89</td><td class="num up">+24</td></tr>
+      <tr class="avg"><td>Panel average</td><td class="num">65.0</td><td class="num">81.3</td><td class="num">88.7</td><td class="num up">+23.7</td></tr>
+    </table>
+
+    <h3 style="font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin:18px 0 4px">Field review — 10 executives on Rev B (/100)</h3>
+    <div class="bars">
+      <div class="bar"><div class="lbl"><b>Project Director</b> · Construction · integration</div><div class="track"><div class="fill" style="width:75%"></div></div><div class="sc">75</div></div>
+      <div class="bar"><div class="lbl"><b>COO</b> · RE development · speed-to-value</div><div class="track"><div class="fill" style="width:82%"></div></div><div class="sc">82</div></div>
+      <div class="bar"><div class="lbl"><b>Financial Controller</b> · Finance · measurability</div><div class="track"><div class="fill" style="width:70%"></div></div><div class="sc">70</div></div>
+      <div class="bar"><div class="lbl"><b>CIO</b> · Technology · data security</div><div class="track"><div class="fill" style="width:62%"></div></div><div class="sc">62</div></div>
+      <div class="bar"><div class="lbl"><b>Operations Manager</b> · Operations · adoption</div><div class="track"><div class="fill" style="width:78%"></div></div><div class="sc">78</div></div>
+      <div class="bar"><div class="lbl"><b>Compliance Officer</b> · Legal · compliance</div><div class="track"><div class="fill" style="width:60%"></div></div><div class="sc">60</div></div>
+      <div class="bar"><div class="lbl"><b>Marketing Director</b> · Growth · brand impact</div><div class="track"><div class="fill" style="width:68%"></div></div><div class="sc">68</div></div>
+      <div class="bar"><div class="lbl"><b>BD Lead</b> · Sales/BD · vendor lock-in</div><div class="track"><div class="fill" style="width:74%"></div></div><div class="sc">74</div></div>
+      <div class="bar"><div class="lbl"><b>HR Director</b> · HR/Org · scalability</div><div class="track"><div class="fill" style="width:72%"></div></div><div class="sc">72</div></div>
+      <div class="bar"><div class="lbl"><b>Founder / CEO</b> · Founder · budget/ROI</div><div class="track"><div class="fill" style="width:80%"></div></div><div class="sc">80</div></div>
+    </div>
+    <div class="meanline">
+      Field mean <b>72.1</b>. Loudest single signal: <b>confidentiality of LLM egress on contractual mail</b>
+      (CIO 62, Compliance 60, Project Director 75). Answered by <b>S1</b> — tiered egress (local/redacted default
+      for Commercial, cloud opt-in with logged consent).
+    </div>
+  </section>
+
+  <!-- 4 · REVISION REGISTER -->
+  <section>
+    <div class="sec-h"><span class="n">4</span><h2>Revision register</h2></div>
+    <table class="grid">
+      <tr><th>Dimension</th><th>Rev A</th><th>Rev B</th><th>Rev C</th></tr>
+      <tr><td class="grp" colspan="4">A · Mail access &amp; ingestion</td></tr>
+      <tr><td>Authentication</td><td>Basic auth (user/password)</td><td>OAuth2/XOAUTH2 default + app-pw fallback <span class="chip c-chg">Changed</span></td><td>Same <span class="chip c-same">Same</span></td></tr>
+      <tr><td>Thread assembly</td><td>Single folder; latest carries chain</td><td>Cross-folder (INBOX+Sent+Archive), JWZ <span class="chip c-chg">Changed</span></td><td>Same <span class="chip c-same">Same</span></td></tr>
+      <tr><td>Identity key</td><td>IMAP UID</td><td>Message-ID (hashed safe-name) <span class="chip c-chg">Changed</span></td><td>Same <span class="chip c-same">Same</span></td></tr>
+      <tr><td>Session-gated shares</td><td>Deferred / best-effort</td><td>Honest carry-over + chase <span class="chip c-chg">Changed</span></td><td>Optional cookie-reuse adapter <span class="chip c-new">New</span></td></tr>
+      <tr><td class="grp" colspan="4">B · AI (Phase 2)</td></tr>
+      <tr><td>Execution model</td><td>Unspecified</td><td>Model+batching+decisions schema <span class="chip c-new">New</span></td><td>Tier-routed model selection <span class="chip c-chg">Changed</span></td></tr>
+      <tr><td>Accuracy bar</td><td>Asserted (none)</td><td>Golden-set eval <span class="chip c-new">New</span></td><td>Published ≥90%/85% + cost in UI <span class="chip c-chg">Changed</span></td></tr>
+      <tr><td>Council + QAQC carryover</td><td>Implied "ported"</td><td>Explicit; consensus gates auto-file <span class="chip c-chg">Changed</span></td><td>Same <span class="chip c-same">Same</span></td></tr>
+      <tr><td class="grp" colspan="4">C · Security, compliance &amp; scope</td></tr>
+      <tr><td>Credential storage</td><td>Plaintext JSON</td><td>Keyring / OAuth tokens, file-perms <span class="chip c-chg">Changed</span></td><td>Same <span class="chip c-same">Same</span></td></tr>
+      <tr><td>LLM data egress</td><td>Unaddressed</td><td>Redaction + consent + local option <span class="chip c-new">New</span></td><td>Tiered: local/redact default for Commercial <span class="chip c-chg">Changed</span></td></tr>
+      <tr><td>Retention / legal-hold</td><td>Soft-delete only (v1)</td><td>Audit log carried <span class="chip c-same">Same</span></td><td>Immutable .eml + retention + restore <span class="chip c-new">New</span></td></tr>
+      <tr><td>Prototype scope</td><td>Full 3-phase SPA</td><td>Capture core + thin UI <span class="chip c-chg">Changed</span></td><td>Single-operator held; org-scale = roadmap <span class="chip c-risk">Accepted risk</span></td></tr>
+      <tr><td>OCR for scanned docs</td><td>Absent</td><td>Flagged, deferred <span class="chip c-risk">Accepted risk</span></td><td>"No text layer" flag + roadmap <span class="chip c-risk">Accepted risk</span></td></tr>
+    </table>
+  </section>
+
+  <!-- 5 · TRACEABILITY -->
+  <section>
+    <div class="sec-h"><span class="n">5</span><h2>Traceability</h2></div>
+    <div class="trace">
+      <div class="tcard">
+        <h3>Panel findings → D-decisions (Rev B)</h3>
+        <ul>
+          <li><b>D1</b> Basic-auth dying → OAuth2/XOAUTH2 default</li>
+          <li><b>D2</b> Threads span folders / UID unstable → cross-folder + Message-ID key</li>
+          <li><b>D3</b> Phase-2 undefined → invocation/model/batching + decisions schema</li>
+          <li><b>D4</b> Creds + LLM egress → keyring, redaction, consent, local option</li>
+          <li><b>D5</b> Link-share over-promised → carry-over + chase</li>
+          <li><b>D6</b> No accuracy guarantee → council + QAQC + golden-set eval</li>
+          <li><b>D7</b> Prototype too big → capture core + thin UI</li>
+        </ul>
+      </div>
+      <div class="tcard">
+        <h3>Field themes (freq) → S-decisions (Rev C)</h3>
+        <ul>
+          <li><b>S1</b> LLM egress confidentiality (3/10, loudest) → tiered egress + consent log</li>
+          <li><b>S2</b> No accuracy/cost numbers (2/10) → published ≥90%/85% + cost in UI</li>
+          <li><b>S3</b> Retention/compliance thin (1/10, high-weight) → immutable .eml + legal-hold</li>
+          <li><b>S4</b> SharePoint deferred (1/10) → optional cookie-reuse adapter</li>
+          <li><b>S5</b> Scale/brand asks → kept single-operator scope</li>
+        </ul>
+      </div>
+    </div>
+    <div class="reject">
+      <b>Demands the Lead rejected:</b> Marketing's brand/shareable-output features (out of scope for an internal tool);
+      HR's multi-user/SSO now (premature for a single-operator prototype); full SharePoint crawl as a Phase-1 blocker
+      (would stall the first testable ship). Each would bloat or delay without serving the core operator.
+    </div>
+  </section>
+
+  <!-- 6 · RISK REGISTER DELTA -->
+  <section>
+    <div class="sec-h"><span class="n">6</span><h2>Risk register delta</h2></div>
+    <table class="grid">
+      <tr><th>Risk</th><th>Rev A</th><th>Rev B</th><th>Rev C</th><th>Verdict</th></tr>
+      <tr><td>Auth fails on Gmail/M365 (basic-auth deprecated)</td><td>Unmitigated</td><td>OAuth2 default</td><td>+ app-pw fallback</td><td class="verdict">Closed</td></tr>
+      <tr><td>Incomplete "full thread" (self-replies in Sent)</td><td>Likely</td><td>Cross-folder assembly</td><td>Same</td><td class="verdict">Substantially mitigated</td></tr>
+      <tr><td>Confidential mail leaks to LLM provider</td><td>Unaddressed</td><td>Redaction+consent+local opt.</td><td>Tiered local/redact default</td><td class="verdict">Substantially mitigated</td></tr>
+      <tr><td>Misclassification of contractual mail</td><td>Unmonitored</td><td>Council+QAQC+eval</td><td>Published accuracy bar gates auto-file</td><td class="verdict">Managed</td></tr>
+      <tr><td>Credentials exposed on disk</td><td>Plaintext</td><td>Keyring/perms</td><td>Same</td><td class="verdict">Managed</td></tr>
+      <tr><td>Session-gated SharePoint shares lost</td><td>Silent loss</td><td>Carry-over+chase</td><td>Cookie-reuse adapter first</td><td class="verdict">Managed</td></tr>
+      <tr><td>Scanned/CAD attachments yield no text</td><td>Silent</td><td>Flagged, deferred</td><td>Explicit flag + OCR roadmap</td><td class="verdict">Accepted</td></tr>
+      <tr><td>Prototype over-build delays first ship</td><td>High</td><td>Scope cut</td><td>Scope held</td><td class="verdict">Closed</td></tr>
+    </table>
+  </section>
+
+  <!-- 7 · FOOTER -->
+  <div class="foot">
+    <div class="ref">CLOVERV2-RPT-001 · Review Council · technical-proposal · Rev A → Rev B → Rev C · prepared 2026-06-17</div>
+    <p style="margin:8px 0 0">
+      The Product Lead, the three reviewer roles, and the ten executive personas are <b>simulated composites</b>,
+      not real individuals. All scores are the council's <b>self-assessment against an anchored /100 rubric</b> —
+      they are an internal decision-quality aid, <b>not market research or external validation</b>. Claims about
+      provider authentication policy (Gmail app-passwords, Microsoft 365 basic-auth deprecation) reflect the
+      council's working knowledge and are <b>[requires live verification]</b> against current provider docs before build.
+    </p>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+.mypy_cache/
+
+# Clover runtime + data — NEVER commit secrets or archived mail
+clover_config.json
+.clover_v2/
+eml_archive/
+_index.jsonl
+*.eml
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

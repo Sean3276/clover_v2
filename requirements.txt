@@ -1,0 +1,8 @@
+# 🍀 Clover v2 — Phase 1 (.eml archiver) dependencies
+fastapi>=0.110
+uvicorn[standard]>=0.29
+jinja2>=3.1
+python-multipart>=0.0.9
+imap-tools>=1.5
+keyring>=24
+pytest>=8.0

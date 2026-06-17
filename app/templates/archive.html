@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Archive · Clover v2{% endblock %}
+{% block nav_archive %}active{% endblock %}
+{% block body %}
+<h1>Phase 1 — Archive emails to .eml</h1>
+<p class="note">Mailbox: <code>{{ cfg.auth.imap.user or "not set" }}</code> · Destination: <code>{{ cfg.archive_path }}</code></p>
+
+<div class="card">
+  <h2>Folders to archive</h2>
+  {% if folder_err %}
+    <div class="msg err" style="display:block">Could not list folders: {{ folder_err }} — check Setup.</div>
+  {% elif not folders %}
+    <p class="note">No folders loaded. Save IMAP credentials on the <a href="/setup">Setup</a> page first.</p>
+  {% else %}
+  <form id="runForm">
+    <div class="folders">
+      {% for f in folders %}
+        <label><input type="checkbox" name="folders" value="{{ f.name }}"
+          {% if f.name in selected %}checked{% endif %}>
+          {{ f.name }}{% if f.messages is not none %} <span class="note">({{ f.messages }})</span>{% endif %}</label>
+      {% endfor %}
+    </div>
+    <div class="row" style="margin-top:14px;max-width:360px">
+      <div><label>Limit per folder (0 = all)</label><input type="number" name="limit" value="0"></div>
+      <div style="display:flex;align-items:flex-end">
+        <button id="runBtn" type="button" onclick="run()">Archive selected →</button>
+      </div>
+    </div>
+  </form>
+  {% endif %}
+  <div id="m" class="msg"></div>
+  <pre id="log" class="log" style="display:none"></pre>
+</div>
+
+<div class="card">
+  <h2>Archived so far</h2>
+  <p class="note">{{ summary.total }} .eml file(s) · {{ summary.unique_ids }} unique email(s) (linked across folders)</p>
+  {% if summary.per_folder %}
+  <table>
+    <tr><th>Folder</th><th>Emails archived</th></tr>
+    {% for fol, n in summary.per_folder.items() %}
+      <tr><td>{{ fol }}</td><td>{{ n }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+
+<script>
+let poll=null;
+async function run(){
+  const form=document.getElementById('runForm');
+  const fd=new FormData(form);
+  const m=document.getElementById('m'); const btn=document.getElementById('runBtn');
+  btn.disabled=true; m.className='msg ok'; m.textContent='Starting…';
+  const r=await fetch('/archive/run',{method:'POST',body:new URLSearchParams(fd)});
+  const res=await r.json();
+  if(!res.ok){m.className='msg err';m.textContent=res.message;btn.disabled=false;return;}
+  m.textContent=res.message;
+  document.getElementById('log').style.display='block';
+  poll=setInterval(check,1000);
+}
+async function check(){
+  const r=await fetch('/archive/status'); const s=await r.json();
+  document.getElementById('log').textContent=(s.log||[]).join('\n');
+  if(!s.running){clearInterval(poll);
+    const m=document.getElementById('m'); m.className='msg ok'; m.textContent='Done — reloading…';
+    setTimeout(()=>location.reload(),1400);
+  }
+}
+</script>
+{% endblock %}

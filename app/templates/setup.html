@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Setup · Clover v2{% endblock %}
+{% block nav_setup %}active{% endblock %}
+{% block body %}
+<h1>Setup</h1>
+<p class="note">IMAP password is stored in your OS keyring (never in config files or logs).</p>
+{% if error %}<div class="msg err" style="display:block">{{ error }}</div>{% endif %}
+
+<form id="f" method="post" action="/setup/save">
+  <div class="card">
+    <h2>IMAP (mailbox)</h2>
+    <div class="row3">
+      <div><label>Host</label><input name="host" value="{{ cfg.auth.imap.host }}" placeholder="imap.ccccltd.sg" required></div>
+      <div><label>Port</label><input name="port" type="number" value="{{ cfg.auth.imap.port or 993 }}"></div>
+      <div><label>Security</label>
+        <select name="security">
+          <option value="ssl" {% if cfg.auth.imap.security=='ssl' %}selected{% endif %}>SSL/TLS (993)</option>
+          <option value="starttls" {% if cfg.auth.imap.security=='starttls' %}selected{% endif %}>STARTTLS (143)</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div><label>Username</label><input name="user" value="{{ cfg.auth.imap.user }}" placeholder="sean.tan@ccccltd.sg" required></div>
+      <div><label>Password {% if has_pw %}(stored — leave blank to keep){% endif %}</label>
+           <input name="password" type="password" placeholder="{% if has_pw %}••••••••{% else %}IMAP password{% endif %}"></div>
+    </div>
+    <p style="margin-top:12px"><button type="button" class="ghost" onclick="testImap()">Test IMAP</button></p>
+    <div id="m" class="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Archive destination</h2>
+    <label>Local archive path (where .eml files are saved — change anytime)</label>
+    <input name="archive_path" value="{{ cfg.archive_path }}" placeholder="D:\\CloverArchive or a Dropbox folder">
+    <p class="note" style="margin-top:8px">Each email is saved as <code>&lt;path&gt;/&lt;folder&gt;/&lt;message-id&gt;.eml</code>
+    (full raw message incl. embedded attachments). An <code>_index.jsonl</code> links the same email across folders.</p>
+  </div>
+
+  <p style="margin-top:18px"><button type="submit">Save &amp; continue →</button></p>
+</form>
+
+<div class="card">
+  <h2>Ingestion suite</h2>
+  <p class="note">IMAP is available now; the rest are planned and added one by one (pluggable sources).</p>
+  <table>
+    <tr><th>Source</th><th>Protocol</th><th>Status</th></tr>
+    {% for s in suite %}
+    <tr><td>{{ s.label }}</td><td>{{ s.protocol }}</td>
+      <td>{% if s.status=='available' %}<span style="color:#13632f;font-weight:600">✅ available</span>{% else %}<span class="note">⬜ planned</span>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<script>
+async function testImap(){
+  const f=document.getElementById('f'); const m=document.getElementById('m');
+  m.className='msg ok'; m.textContent='Testing…';
+  const b=new URLSearchParams({host:f.host.value,port:f.port.value,security:f.security.value,user:f.user.value,password:f.password.value});
+  const r=await fetch('/setup/test-imap',{method:'POST',body:b}); const res=await r.json();
+  m.className='msg '+(res.ok?'ok':'err'); m.textContent=res.message;
+}
+</script>
+{% endblock %}

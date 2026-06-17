@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review Council #2 — Clover v2 Spec (CLOVERV2-RPT-002)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#16201a; --sub:#4d5a52; --line:#c9d4cc; --line2:#e3eae5;
+    --paper:#f7f9f7; --card:#ffffff; --clover:#1f8a4c; --clover-d:#13632f;
+    --amber:#b8791b; --red:#b23a2e; --blue:#2d6da3; --grey:#7c8a82;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5;font-size:14px}
+  .wrap{max-width:1040px;margin:0 auto;padding:28px 22px 60px}
+  h1,h2,h3{font-weight:600;line-height:1.25;margin:0}
+  .mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .doc{border:1.5px solid var(--ink);background:var(--card)}
+  .title{display:grid;grid-template-columns:1fr 280px}
+  .title .main{padding:20px 22px;border-right:1.5px solid var(--ink)}
+  .title .meta{display:flex;flex-direction:column}
+  .title .meta div{padding:8px 14px;border-bottom:1px solid var(--line);font-size:12px}
+  .title .meta div:last-child{border-bottom:0}
+  .title .meta .k{color:var(--sub);text-transform:uppercase;letter-spacing:.06em;font-size:10px}
+  .logo{font-size:12px;letter-spacing:.16em;color:var(--clover-d);text-transform:uppercase;font-weight:600}
+  h1{font-size:23px;margin:6px 0 4px}
+  .docno{font-size:12px;color:var(--sub)}
+  .revtable{width:100%;border-collapse:collapse;font-size:12px;border-top:1.5px solid var(--ink)}
+  .revtable th,.revtable td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  .revtable th{background:#eef3ef;text-transform:uppercase;letter-spacing:.05em;font-size:10px;color:var(--sub)}
+  .stamp{display:inline-block;border:1.5px solid var(--clover-d);color:var(--clover-d);
+    border-radius:3px;padding:1px 7px;font-weight:600;font-size:11px;letter-spacing:.04em}
+  section{margin-top:26px}
+  .sec-h{display:flex;align-items:baseline;gap:10px;border-bottom:1.5px solid var(--ink);padding-bottom:6px;margin-bottom:14px}
+  .sec-h .n{font-size:11px;color:#fff;background:var(--clover-d);padding:2px 8px;border-radius:3px;font-weight:600}
+  .sec-h h2{font-size:16px}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .vc{border:1px solid var(--line);border-top:4px solid var(--clover);background:var(--card);padding:13px 14px;border-radius:4px}
+  .vc.b{border-top-color:var(--blue)} .vc.c{border-top-color:var(--clover-d)}
+  .vc h3{font-size:13px;margin-bottom:2px}
+  .vc p{font-size:12px;color:var(--sub);margin:6px 0 10px}
+  .vc .stats{display:flex;flex-direction:column;gap:4px;font-size:11px}
+  .vc .stats span{display:flex;justify-content:space-between;border-top:1px dashed var(--line2);padding-top:3px}
+  .chain{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:14px;font-size:11px;color:var(--sub)}
+  .chain .node{border:1px solid var(--line);background:#eef3ef;border-radius:14px;padding:4px 11px;white-space:nowrap}
+  .chain .ar{color:var(--clover);font-weight:700}
+  table.grid{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.grid th,table.grid td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  table.grid th{background:#eef3ef;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--sub)}
+  table.grid td.num{text-align:center;font-family:"IBM Plex Mono",monospace}
+  tr.avg td{background:#f0f6f1;font-weight:600}
+  .up{color:var(--clover-d);font-weight:600}
+  .bars{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+  .bar{display:grid;grid-template-columns:230px 1fr 42px;align-items:center;gap:10px;font-size:12px}
+  .bar .lbl{color:var(--sub)} .bar .lbl b{color:var(--ink);font-weight:600}
+  .track{background:var(--line2);border-radius:3px;height:15px;overflow:hidden}
+  .fill{height:100%;background:linear-gradient(90deg,var(--clover),var(--clover-d));border-radius:3px}
+  .bar .sc{font-family:"IBM Plex Mono",monospace;text-align:right;font-weight:600}
+  .meanline{margin-top:10px;font-size:12px;background:#f0f6f1;border-left:3px solid var(--clover);padding:8px 11px}
+  .chip{display:inline-block;font-size:9.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+    border-radius:3px;padding:1px 6px;color:#fff;margin-left:5px;vertical-align:middle}
+  .c-new{background:var(--clover)} .c-chg{background:var(--blue)} .c-same{background:var(--grey)} .c-risk{background:var(--amber)}
+  .grp{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--clover-d);font-weight:600;background:#eef3ef}
+  .trace{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .tcard{border:1px solid var(--line);border-radius:4px;background:var(--card);padding:13px 14px}
+  .tcard h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);margin-bottom:8px}
+  .tcard ul{margin:0;padding-left:16px;font-size:12px} .tcard li{margin-bottom:5px}
+  .reject{margin-top:10px;font-size:12px;background:#fdf6ec;border-left:3px solid var(--amber);padding:8px 11px}
+  .verdict{font-weight:600;color:var(--clover-d)}
+  .foot{margin-top:30px;border-top:1.5px solid var(--ink);padding-top:12px;font-size:11px;color:var(--sub)}
+  .foot .ref{font-family:"IBM Plex Mono",monospace}
+  @media(max-width:720px){.title{grid-template-columns:1fr}.title .main{border-right:0;border-bottom:1.5px solid var(--ink)}
+    .cards{grid-template-columns:1fr}.trace{grid-template-columns:1fr}.bar{grid-template-columns:150px 1fr 40px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="doc title">
+    <div class="main">
+      <div class="logo">🍀 Clover · Review Council #2</div>
+      <h1>Clover v2 Specification — Prototype Scope</h1>
+      <div class="docno mono">Controlled review report · technical-proposal · second pass</div>
+      <p style="font-size:12px;color:var(--sub);margin:12px 0 0">
+        Second council review of <span class="mono">CLOVER_V2_SPEC.md</span> after operator decisions
+        (IMAP password login · local Claude Code agent as AI with no redaction · link-shares fully
+        downloaded · Telegram digest · SMTP dropped). Revisions labelled <b>Rev D → Rev E → Rev F</b>.
+      </p>
+    </div>
+    <div class="meta">
+      <div><div class="k">Document No.</div><span class="mono">CLOVERV2-RPT-002</span></div>
+      <div><div class="k">Date</div>2026-06-17</div>
+      <div><div class="k">Prepared by</div>Product Lead (chair, non-scoring)</div>
+      <div><div class="k">Reviewed by</div>R1 Technical Architect · R2 Security &amp; Data-Governance · R3 AI Workflow &amp; Reliability</div>
+    </div>
+  </div>
+
+  <table class="revtable">
+    <tr><th>Rev</th><th>Stage</th><th>Revision character</th><th>Basis</th></tr>
+    <tr><td><span class="stamp">Rev D</span></td><td>Baseline</td><td>Operator-decision spec: IMAP password, local-agent AI + no redaction, full link-share download, Telegram</td><td>Operator decisions a–d on Rev C</td></tr>
+    <tr><td><span class="stamp">Rev E</span></td><td>First revision</td><td>Egress honesty + acknowledgment, IMAP preflight + fallback, agent orchestration + runnable eval, profile protection</td><td>3-role expert review · panel mean 85.0/100</td></tr>
+    <tr><td><span class="stamp">Rev F</span></td><td>Second revision</td><td>Hard gates (preflight + data-handling), minimal-egress + on-device committed to M5, UI accuracy/cost, retention log</td><td>10 executive reviews · field mean 76.2/100</td></tr>
+  </table>
+
+  <section>
+    <div class="sec-h"><span class="n">2</span><h2>Version summary</h2></div>
+    <div class="cards">
+      <div class="vc">
+        <span class="stamp">Rev D</span><h3>Operator-scoped spec</h3>
+        <p>Right calls (no redaction; agent-as-AI; strong link-share resolver) but frames a cloud-backed agent as "local," and assumes basic IMAP works on a SOE tenant.</p>
+        <div class="stats"><span>Panel mean <b>74.0</b></span><span>Key risk <b>Egress framing + IMAP availability</b></span><span>Gap <b>Agent orchestration/eval</b></span></div>
+      </div>
+      <div class="vc b">
+        <span class="stamp">Rev E</span><h3>Honest &amp; orchestrated</h3>
+        <p>Discloses Claude-Code egress + acknowledgment, adds IMAP preflight + fallback, an agent worklist/eval harness, and protects the browser profile.</p>
+        <div class="stats"><span>Panel mean <b>85.0</b></span><span>Added <b>6 D-decisions</b></span><span>Exec mean <b>76.2</b></span></div>
+      </div>
+      <div class="vc c">
+        <span class="stamp">Rev F</span><h3>Gated &amp; measurable</h3>
+        <p>Turns disclosures into hard gates, commits the on-device model to M5, practices minimal-egress, and surfaces accuracy% + per-batch cost.</p>
+        <div class="stats"><span>Panel mean <b>90.0</b></span><span>Added <b>5 S-decisions</b></span><span>Scope <b>held: single-operator, no API</b></span></div>
+      </div>
+    </div>
+    <div class="chain">
+      <span class="node">Operator-scoped spec</span><span class="ar">→</span>
+      <span class="node">Expert gate (3 roles)</span><span class="ar">→</span>
+      <span class="node">Rev E</span><span class="ar">→</span>
+      <span class="node">Field gate (10 execs)</span><span class="ar">→</span>
+      <span class="node">Rev F</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><span class="n">3</span><h2>Scores</h2></div>
+    <table class="grid">
+      <tr><th>Reviewer (lens)</th><th>Rev D</th><th>Rev E</th><th>Rev F</th><th>Δ D→F</th></tr>
+      <tr><td>R1 · Technical Architect</td><td class="num">80</td><td class="num">88</td><td class="num">92</td><td class="num up">+12</td></tr>
+      <tr><td>R2 · Security &amp; Data-Governance</td><td class="num">68</td><td class="num">82</td><td class="num">88</td><td class="num up">+20</td></tr>
+      <tr><td>R3 · AI Workflow &amp; Reliability</td><td class="num">74</td><td class="num">85</td><td class="num">90</td><td class="num up">+16</td></tr>
+      <tr class="avg"><td>Panel average</td><td class="num">74.0</td><td class="num">85.0</td><td class="num">90.0</td><td class="num up">+16.0</td></tr>
+    </table>
+
+    <h3 style="font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin:18px 0 4px">Field review — 10 executives on Rev E (/100)</h3>
+    <div class="bars">
+      <div class="bar"><div class="lbl"><b>Project Director</b> · Construction · integration</div><div class="track"><div class="fill" style="width:80%"></div></div><div class="sc">80</div></div>
+      <div class="bar"><div class="lbl"><b>COO</b> · RE development · speed-to-value</div><div class="track"><div class="fill" style="width:84%"></div></div><div class="sc">84</div></div>
+      <div class="bar"><div class="lbl"><b>Financial Controller</b> · Finance · measurability</div><div class="track"><div class="fill" style="width:78%"></div></div><div class="sc">78</div></div>
+      <div class="bar"><div class="lbl"><b>CIO</b> · Technology · data security</div><div class="track"><div class="fill" style="width:66%"></div></div><div class="sc">66</div></div>
+      <div class="bar"><div class="lbl"><b>Operations Manager</b> · Operations · adoption</div><div class="track"><div class="fill" style="width:80%"></div></div><div class="sc">80</div></div>
+      <div class="bar"><div class="lbl"><b>Compliance Officer</b> · Legal · compliance</div><div class="track"><div class="fill" style="width:64%"></div></div><div class="sc">64</div></div>
+      <div class="bar"><div class="lbl"><b>Marketing Director</b> · Growth · brand impact</div><div class="track"><div class="fill" style="width:70%"></div></div><div class="sc">70</div></div>
+      <div class="bar"><div class="lbl"><b>BD Lead</b> · Sales/BD · vendor lock-in</div><div class="track"><div class="fill" style="width:82%"></div></div><div class="sc">82</div></div>
+      <div class="bar"><div class="lbl"><b>HR Director</b> · HR/Org · scalability</div><div class="track"><div class="fill" style="width:74%"></div></div><div class="sc">74</div></div>
+      <div class="bar"><div class="lbl"><b>Founder / CEO</b> · Founder · budget/ROI</div><div class="track"><div class="fill" style="width:84%"></div></div><div class="sc">84</div></div>
+    </div>
+    <div class="meanline">
+      Field mean <b>76.2</b>. Loudest single signal: <b>data governance — CCCC contractual email reaching
+      Anthropic via Claude Code</b> (CIO 66, Compliance 64). Answered by <b>S1</b> (hard acknowledgment gate +
+      minimal-egress + on-device model committed to M5) and <b>S4</b> (egress + retention log).
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><span class="n">4</span><h2>Revision register</h2></div>
+    <table class="grid">
+      <tr><th>Dimension</th><th>Rev D</th><th>Rev E</th><th>Rev F</th></tr>
+      <tr><td class="grp" colspan="4">A · Data governance &amp; AI egress</td></tr>
+      <tr><td>Confidentiality framing</td><td>"Structural / local" (misleading)</td><td>Explicit egress disclosure + acknowledgment <span class="chip c-chg">Changed</span></td><td>Hard ack gate + minimal-egress <span class="chip c-chg">Changed</span></td></tr>
+      <tr><td>Archive redaction</td><td>None (operator call)</td><td>None — affirmed <span class="chip c-same">Same</span></td><td>None — affirmed <span class="chip c-same">Same</span></td></tr>
+      <tr><td>True-local path</td><td>Absent</td><td>On-device model noted <span class="chip c-new">New</span></td><td>On-device committed to M5 <span class="chip c-chg">Changed</span></td></tr>
+      <tr><td>Egress / retention log</td><td>Absent</td><td>Council audit logs <span class="chip c-chg">Changed</span></td><td>egress_log.jsonl + retention schedule <span class="chip c-new">New</span></td></tr>
+      <tr><td class="grp" colspan="4">B · Ingestion (IMAP / shares)</td></tr>
+      <tr><td>IMAP auth availability</td><td>Assumed (password)</td><td>M0 preflight + fallback <span class="chip c-chg">Changed</span></td><td>Preflight = hard gate <span class="chip c-chg">Changed</span></td></tr>
+      <tr><td>Link-share download</td><td>Tiered resolver, "must"</td><td>Resolver + carry-over+retry honesty <span class="chip c-chg">Changed</span></td><td>Same <span class="chip c-same">Same</span></td></tr>
+      <tr><td>Coremail netdisk / APPEND</td><td>Listed, generic</td><td>Netdisk via authed profile; APPEND verified <span class="chip c-chg">Changed</span></td><td>Same <span class="chip c-same">Same</span></td></tr>
+      <tr><td>browser_profile/ (live sessions)</td><td>Unprotected</td><td>Perms + expiry handling <span class="chip c-new">New</span></td><td>Same <span class="chip c-same">Same</span></td></tr>
+      <tr><td class="grp" colspan="4">C · AI execution &amp; scope</td></tr>
+      <tr><td>Agent orchestration</td><td>Thin</td><td>Worklist + done-file + restart + UI monitor <span class="chip c-new">New</span></td><td>Same <span class="chip c-same">Same</span></td></tr>
+      <tr><td>Accuracy / cost measurement</td><td>Asserted target</td><td>Runnable eval harness <span class="chip c-new">New</span></td><td>+ UI accuracy% + per-batch cost <span class="chip c-chg">Changed</span></td></tr>
+      <tr><td>Architecture style</td><td>Agent-driven, no API</td><td>Same <span class="chip c-same">Same</span></td><td>Held; API pipeline rejected <span class="chip c-risk">Accepted risk</span></td></tr>
+      <tr><td>OCR for scanned docs</td><td>Deferred</td><td>Deferred <span class="chip c-risk">Accepted risk</span></td><td>Deferred (roadmap) <span class="chip c-risk">Accepted risk</span></td></tr>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-h"><span class="n">5</span><h2>Traceability</h2></div>
+    <div class="trace">
+      <div class="tcard">
+        <h3>Panel findings → D-decisions (Rev E)</h3>
+        <ul>
+          <li><b>D1</b> "Local/structural" misleading → explicit egress disclosure + acknowledgment; on-device path; no redaction kept</li>
+          <li><b>D2</b> Basic IMAP unverified on SOE → M0 preflight + app-pw / Coremail-API fallback</li>
+          <li><b>D3</b> Agent orchestration thin → worklist + done-file + idempotent restart + UI monitor</li>
+          <li><b>D4</b> Accuracy unmeasurable → runnable agent eval harness</li>
+          <li><b>D5</b> Profile = live sessions; "must download" absolute → perms + expiry; carry-over+retry honesty</li>
+          <li><b>D6</b> Netdisk/APPEND specifics → netdisk via authed profile; APPEND verified</li>
+        </ul>
+      </div>
+      <div class="tcard">
+        <h3>Field themes (freq) → S-decisions (Rev F)</h3>
+        <ul>
+          <li><b>S1</b> SOE data-export to Anthropic (2/10, loudest) → hard ack gate + minimal-egress + on-device M5</li>
+          <li><b>S2</b> IMAP availability (1/10, high-weight) → preflight = hard M0 gate + fallback ladder</li>
+          <li><b>S3</b> No cost/measurement number (2/10) → UI accuracy% + per-batch cost estimate</li>
+          <li><b>S4</b> Retention/compliance thin (1/10, high-weight) → egress_log + retention/legal-hold</li>
+          <li><b>S5</b> Scale asks → held single-operator</li>
+        </ul>
+      </div>
+    </div>
+    <div class="reject">
+      <b>Demands the Lead rejected:</b> a programmatic cloud-API pipeline for throughput (operator chose
+      no-API / agent-driven — kept); Marketing brand/shareable outputs (out of scope); HR multi-user/SSO now
+      (premature). Each contradicts an operator decision or bloats a single-operator prototype.
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><span class="n">6</span><h2>Risk register delta</h2></div>
+    <table class="grid">
+      <tr><th>Risk</th><th>Rev D</th><th>Rev E</th><th>Rev F</th><th>Verdict</th></tr>
+      <tr><td>SOE contractual mail egress to Anthropic (Claude Code)</td><td>Mis-framed as "local"</td><td>Disclosed + acknowledged</td><td>Hard gate + minimal-egress + on-device M5</td><td class="verdict">Substantially mitigated</td></tr>
+      <tr><td>Basic IMAP blocked on ccccltd.sg</td><td>Assumed works</td><td>Preflight + fallback</td><td>Hard M0 gate</td><td class="verdict">Managed</td></tr>
+      <tr><td>Link-shares not fully retrieved</td><td>Resolver</td><td>+ carry-over+retry, no silent loss</td><td>Same</td><td class="verdict">Substantially mitigated</td></tr>
+      <tr><td>Agent pass unreproducible / not resumable</td><td>Undefined</td><td>Worklist + done-file + restart</td><td>Same</td><td class="verdict">Managed</td></tr>
+      <tr><td>Classification accuracy unmeasured</td><td>Asserted</td><td>Runnable eval</td><td>+ surfaced in UI</td><td class="verdict">Managed</td></tr>
+      <tr><td>Stored provider sessions (browser_profile)</td><td>Unprotected</td><td>Perms + expiry</td><td>Same</td><td class="verdict">Managed</td></tr>
+      <tr><td>Scanned/CAD attachments yield no text</td><td>Flagged</td><td>Flagged</td><td>OCR roadmap</td><td class="verdict">Accepted</td></tr>
+      <tr><td>Archive value lost to redaction</td><td>None (operator call)</td><td>Affirmed none</td><td>Affirmed none</td><td class="verdict">Closed</td></tr>
+    </table>
+  </section>
+
+  <div class="foot">
+    <div class="ref">CLOVERV2-RPT-002 · Review Council (2nd pass) · technical-proposal · Rev D → Rev E → Rev F · prepared 2026-06-17</div>
+    <p style="margin:8px 0 0">
+      The Product Lead, the three reviewer roles, and the ten executive personas are <b>simulated composites</b>,
+      not real individuals. Scores are the council's <b>self-assessment against an anchored /100 rubric</b> — an
+      internal decision-quality aid, <b>not market research or external validation</b>. Claims about
+      <b>ccccltd.sg IMAP policy</b> and provider basic-auth availability are <b>[requires live verification]</b>
+      before build. The statement that Claude Code transmits content to Anthropic reflects how the local agent
+      operates and should be confirmed against the operator's data-handling obligations.
+    </p>
+  </div>
+
+</div>
+</body>
+</html>
