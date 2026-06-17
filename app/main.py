@@ -7,6 +7,7 @@ Run from .clover_v2_github:
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -23,12 +24,18 @@ templates = Jinja2Templates(directory=str(BASE / "templates"))
 app = FastAPI(title="Clover v2 — Phase 1")
 
 _lock = threading.Lock()
-_status = {"running": False, "log": [], "manifest": None}
+# live run state — per-folder progress drives the dashboard
+_status = {"running": False, "started_at": None, "folders": {}, "log": [], "manifest": None}
 
 
 def _log(line: str) -> None:
     with _lock:
         _status["log"].append(str(line))
+
+
+def _progress(p: dict) -> None:
+    with _lock:
+        _status["folders"][p["folder"]] = p
 
 
 def _imap_conn(cfg: dict) -> dict:
@@ -115,7 +122,7 @@ def _run_archive_bg(folders: list[str], limit: int | None):
         if not pw:
             _log("No IMAP password stored — save credentials on Setup first.")
             return
-        manifest = archive.run_archive(cfg, pw, log=_log, limit_per_folder=limit)
+        manifest = archive.run_archive(cfg, pw, log=_log, limit_per_folder=limit, progress=_progress)
         with _lock:
             _status["manifest"] = manifest
     except Exception as e:
@@ -132,9 +139,7 @@ def archive_run(folders: list[str] = Form(default=[]), limit: int = Form(0)):
             return JSONResponse({"ok": False, "message": "An archive run is already in progress."})
         if not folders:
             return JSONResponse({"ok": False, "message": "Select at least one folder."})
-        _status["running"] = True
-        _status["log"] = []
-        _status["manifest"] = None
+        _status.update(running=True, started_at=time.time(), folders={}, log=[], manifest=None)
     threading.Thread(target=_run_archive_bg, args=(folders, limit or None), daemon=True).start()
     return JSONResponse({"ok": True, "message": f"Archiving {len(folders)} folder(s)…"})
 
@@ -144,6 +149,8 @@ def archive_status():
     with _lock:
         return JSONResponse({
             "running": _status["running"],
-            "log": list(_status["log"]),
+            "started_at": _status["started_at"],
+            "folders": list(_status["folders"].values()),
+            "log": _status["log"][-200:],   # cap payload on long runs
             "manifest": _status["manifest"],
         })

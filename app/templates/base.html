@@ -5,44 +5,66 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Clover v2{% endblock %}</title>
 <style>
-  :root{--ink:#16201a;--sub:#4d5a52;--line:#c9d4cc;--paper:#f7f9f7;--card:#fff;
-        --clover:#1f8a4c;--clover-d:#13632f;--red:#b23a2e;}
+  :root{
+    --bg:#0b1110; --bg2:#0e1714; --card:#12201b; --card2:#152721; --line:#1f3a30;
+    --ink:#dcefe2; --sub:#7fa594; --dim:#5c7f70;
+    --clover:#34d27b; --clover-d:#22a862; --cyan:#2bd4c4; --amber:#f0b24a; --red:#ff6b5e;
+    --mono:ui-monospace,"Cascadia Code",Consolas,"SF Mono",monospace;
+  }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--paper);color:var(--ink);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.5}
-  header{background:var(--clover-d);color:#fff;padding:12px 22px;display:flex;gap:18px;align-items:center}
-  header .logo{font-weight:700;letter-spacing:.04em}
-  header a{color:#dff3e6;text-decoration:none;font-size:14px}
-  header a.active{color:#fff;font-weight:600;border-bottom:2px solid #fff;padding-bottom:2px}
-  main{max-width:920px;margin:0 auto;padding:24px 22px 60px}
-  h1{font-size:21px;margin:0 0 4px} h2{font-size:15px;margin:20px 0 8px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:18px;margin-top:14px}
-  label{display:block;font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin:10px 0 3px}
-  input,select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;background:#fff}
+  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#10211b 0%,var(--bg) 55%);
+    color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55;min-height:100vh}
+  header{display:flex;gap:18px;align-items:center;padding:13px 24px;border-bottom:1px solid var(--line);
+    background:rgba(8,14,12,.7);backdrop-filter:blur(6px);position:sticky;top:0;z-index:5}
+  header .logo{font-weight:700;letter-spacing:.06em;color:#fff}
+  header .logo .v{color:var(--clover)}
+  header a{color:var(--sub);text-decoration:none;font-size:14px}
+  header a:hover{color:var(--ink)}
+  header a.active{color:var(--clover);font-weight:600}
+  header .right{margin-left:auto;font-size:11px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
+  main{max-width:1000px;margin:0 auto;padding:26px 24px 70px}
+  h1{font-size:22px;margin:0 0 4px;letter-spacing:.01em}
+  h2{font-size:13px;margin:0 0 12px;text-transform:uppercase;letter-spacing:.12em;color:var(--sub)}
+  .card{background:linear-gradient(180deg,var(--card),var(--bg2));border:1px solid var(--line);
+    border-radius:14px;padding:20px 22px;margin-top:16px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+  label{display:block;font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.08em;margin:12px 0 4px}
+  input,select{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font-size:14px;
+    background:#0c1512;color:var(--ink)}
+  input:focus,select:focus{outline:none;border-color:var(--clover);box-shadow:0 0 0 3px rgba(52,210,123,.15)}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .row3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:14px}
-  button{background:var(--clover);color:#fff;border:0;border-radius:6px;padding:9px 16px;font-size:14px;font-weight:600;cursor:pointer}
-  button.ghost{background:#fff;color:var(--clover-d);border:1px solid var(--clover)}
-  button:disabled{opacity:.5;cursor:not-allowed}
-  .msg{margin-top:8px;font-size:13px;padding:7px 10px;border-radius:6px;display:none}
-  .msg.ok{display:block;background:#eaf6ee;color:var(--clover-d)}
-  .msg.err{display:block;background:#fbecea;color:var(--red)}
+  button,.btn{background:var(--clover);color:#06140d;border:0;border-radius:8px;padding:10px 18px;font-size:14px;
+    font-weight:700;cursor:pointer;letter-spacing:.01em}
+  button:hover,.btn:hover{background:#43e389}
+  button.ghost{background:transparent;color:var(--clover);border:1px solid var(--clover)}
+  button.ghost:hover{background:rgba(52,210,123,.1)}
+  button:disabled,.btn.disabled{opacity:.45;cursor:not-allowed;background:#2a4438;color:#86a294}
+  .msg{margin-top:10px;font-size:13px;padding:8px 12px;border-radius:8px;display:none;border:1px solid transparent}
+  .msg.ok{display:block;background:rgba(52,210,123,.1);color:var(--clover);border-color:rgba(52,210,123,.3)}
+  .msg.err{display:block;background:rgba(255,107,94,.1);color:var(--red);border-color:rgba(255,107,94,.35)}
   table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
-  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left}
-  th{background:#eef3ef;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--sub)}
-  .folders{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 18px;margin-top:8px}
-  .folders label{display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink);margin:0}
-  .folders input{width:auto}
-  .note{font-size:12px;color:var(--sub)} code{background:#eef3ef;padding:1px 5px;border-radius:4px}
-  pre.log{background:#0e1512;color:#cfe9d8;border-radius:6px;padding:12px;font-size:12px;max-height:300px;overflow:auto;white-space:pre-wrap}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+  th{background:#0e1a16;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--sub)}
+  td a{color:var(--clover)}
+  .note{font-size:12px;color:var(--sub)} .dim{color:var(--dim)}
+  code{background:#0c1512;border:1px solid var(--line);padding:1px 6px;border-radius:5px;font-family:var(--mono);font-size:12.5px;color:var(--cyan)}
+  .folders{display:grid;grid-template-columns:repeat(2,1fr);gap:7px 20px;margin-top:8px}
+  .folders label{display:flex;gap:9px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink);margin:0}
+  .folders input{width:auto;accent-color:var(--clover)}
+  pre.log{background:#060b09;color:#9fdcb8;border:1px solid var(--line);border-radius:10px;padding:13px;
+    font-family:var(--mono);font-size:12px;max-height:260px;overflow:auto;white-space:pre-wrap;margin-top:12px}
+  .pill{font-size:11px;font-weight:700;border-radius:20px;padding:4px 11px;letter-spacing:.04em;white-space:nowrap}
+  .pill.up{background:rgba(52,210,123,.14);color:var(--clover);border:1px solid rgba(52,210,123,.35)}
+  .pill.down{background:rgba(240,178,74,.12);color:var(--amber);border:1px solid rgba(240,178,74,.3)}
 </style>
 </head>
 <body>
 <header>
-  <span class="logo">🍀 Clover v2</span>
+  <span class="logo">🍀 Clover<span class="v"> v2</span></span>
   <a href="/setup" class="{% block nav_setup %}{% endblock %}">Setup</a>
-  <a href="/archive" class="{% block nav_archive %}{% endblock %}">Archive (Phase 1)</a>
-  <span style="margin-left:auto;font-size:12px;opacity:.8">.eml archiver</span>
+  <a href="/archive" class="{% block nav_archive %}{% endblock %}">Archive</a>
+  <span class="right">control room</span>
 </header>
 <main>{% block body %}{% endblock %}</main>
 </body>

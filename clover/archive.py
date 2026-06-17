@@ -14,11 +14,44 @@ import hashlib
 import json
 import re
 import sys
+import threading
 from email import policy
 from pathlib import Path
 
 from .safe_name import safe_name
 from .sources import get_source
+
+# hard per-message wall-clock cap: a single hung/trickling fetch can never freeze the run
+_FETCH_TIMEOUT = 180  # seconds
+
+
+def _fetch_guarded(src, key, folder, timeout):
+    """Fetch one message with a hard timeout. On timeout, force-drop + reconnect the source
+    and return (None, True) so the caller skips+logs it. Returns (raw_bytes_or_None, timed_out)."""
+    state = {"timed_out": False}
+
+    def _kill():
+        state["timed_out"] = True
+        try:
+            src.force_close()       # unblock the in-flight read (closes the socket)
+        except Exception:
+            pass
+
+    timer = threading.Timer(timeout, _kill)
+    timer.start()
+    try:
+        raw = src.fetch_raw(key)
+    except Exception:
+        if not state["timed_out"]:
+            timer.cancel()
+            raise                   # a real fetch error — let the caller handle it
+        raw = None                  # exception was caused by our force_close
+    finally:
+        timer.cancel()
+    if state["timed_out"]:
+        src.reconnect(folder)
+        return None, True
+    return raw, False
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -84,7 +117,8 @@ def index_summary(archive_path: Path) -> dict:
 
 
 # ---------------------------------------------------------------- orchestrator
-def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | None = None) -> dict:
+def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | None = None,
+                source=None, fetch_timeout: int = _FETCH_TIMEOUT, progress=None) -> dict:
     kind = cfg.get("source_kind", "imap")
     conn = cfg["auth"].get(kind) or cfg["auth"].get("imap", {})
     folders = cfg.get("folders") or ["INBOX"]
@@ -102,7 +136,7 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
 
     idx_fh = open(dest / "_index.jsonl", "a", encoding="utf-8")  # incremental, resumable
     try:
-        with get_source(kind, conn, password) as src:
+        with (source or get_source(kind, conn, password)) as src:
             for fol in folders:
                 saved = skipped = errors = 0
                 fol_dir = dest / folder_subpath(fol)
@@ -116,9 +150,20 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
                     step = max(1, len(new) // 20)   # ~20 progress updates regardless of folder size
                     log(f"[{fol}] {len(keys)} total · {len(new)} to archive · {skipped} already done")
                     fol_dir.mkdir(parents=True, exist_ok=True)
+
+                    def report(done=False):
+                        if progress:
+                            progress({"folder": fol, "total": len(keys), "to_archive": len(new),
+                                      "saved": saved, "skipped": skipped, "errors": errors, "done": done})
+                    report()
+
                     for key in new:
                         try:
-                            raw = src.fetch_raw(key)
+                            raw, timed_out = _fetch_guarded(src, key, fol, fetch_timeout)
+                            if timed_out:
+                                errors += 1
+                                log(f"  ! [{fol}] key {key}: fetch exceeded {fetch_timeout}s — reconnected & skipped")
+                                continue
                             if not raw:
                                 errors += 1
                                 log(f"  ! [{fol}] key {key}: empty fetch")
@@ -148,9 +193,16 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
                             saved += 1
                             if saved % step == 0:
                                 log(f"  [{fol}] {saved}/{len(new)} saved…")
+                                report()
                         except Exception as e:
                             errors += 1
                             log(f"  ! [{fol}] key {key}: {type(e).__name__}: {e}")
+                            report()
+                            try:
+                                src.reconnect(fol)   # heal the connection after a fetch error
+                            except Exception:
+                                pass
+                    report(done=True)
                 except Exception as e:
                     log(f"! folder {fol}: {type(e).__name__}: {e}")
                 manifest["folders"][fol] = {"saved": saved, "skipped": skipped, "errors": errors}

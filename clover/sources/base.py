@@ -52,3 +52,18 @@ class MailSource(ABC):
     @abstractmethod
     def fetch_raw(self, key: str) -> bytes | None:
         """Raw RFC822 bytes for a key in the selected folder, or None."""
+
+    # --- connection recovery (overridable) ----------------------------------
+    def force_close(self) -> None:
+        """Forcibly drop the connection to unblock an in-flight read. Default: close()."""
+        self.close()
+
+    def reconnect(self, folder: str | None = None) -> None:
+        """Re-establish the connection after a stuck/failed fetch; re-select a folder."""
+        try:
+            self.close()
+        except Exception:
+            pass
+        self.open()
+        if folder:
+            self.select(folder)

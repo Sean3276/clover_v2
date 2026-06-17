@@ -2,8 +2,57 @@
 {% block title %}Archive · Clover v2{% endblock %}
 {% block nav_archive %}active{% endblock %}
 {% block body %}
-<h1>Phase 1 — Archive emails to .eml</h1>
-<p class="note">Mailbox: <code>{{ cfg.auth.imap.user or "not set" }}</code> · Destination: <code>{{ cfg.archive_path }}</code></p>
+<style>
+  .mono{font-family:var(--mono)}
+  .top{display:flex;gap:26px;align-items:center;flex-wrap:wrap}
+  .ringwrap{position:relative;width:150px;height:150px;flex:none}
+  .ringtxt{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .ringtxt .pct{font-size:30px;font-weight:800;font-family:var(--mono);color:#fff}
+  .ringtxt .sub{font-size:11px;color:var(--sub);font-family:var(--mono);margin-top:2px}
+  .tiles{flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:12px;min-width:260px}
+  .tile{background:#0c1813;border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+  .tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--sub)}
+  .tile .v{font-size:22px;font-weight:700;font-family:var(--mono);color:var(--ink);margin-top:3px}
+  .tile.err .v{color:var(--amber)}
+  .fol{margin:9px 0}
+  .folhdr{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px}
+  .track{height:9px;background:#0a1410;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .fill{height:100%;background:linear-gradient(90deg,var(--clover),var(--cyan));border-radius:6px;transition:width .4s ease}
+  .runhdr{display:flex;align-items:center;gap:12px;justify-content:space-between}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+  .pill.up{animation:pulse 1.6s ease-in-out infinite}
+</style>
+
+<div class="runhdr">
+  <div><h1>Archive monitor</h1>
+    <p class="note">Mailbox <code>{{ cfg.auth.imap.user or "not set" }}</code> · Destination <code>{{ cfg.archive_path }}</code></p></div>
+  <span id="runPill" class="pill down">● idle</span>
+</div>
+
+<div class="card" id="monitor">
+  <div class="top">
+    <div class="ringwrap">
+      <svg viewBox="0 0 120 120" width="150" height="150">
+        <circle cx="60" cy="60" r="52" fill="none" stroke="#16291f" stroke-width="11"/>
+        <circle id="ring" cx="60" cy="60" r="52" fill="none" stroke="url(#g)" stroke-width="11"
+                stroke-linecap="round" transform="rotate(-90 60 60)"
+                stroke-dasharray="326.73" stroke-dashoffset="326.73" style="transition:stroke-dashoffset .5s ease"/>
+        <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#34d27b"/><stop offset="1" stop-color="#2bd4c4"/></linearGradient></defs>
+      </svg>
+      <div class="ringtxt"><span id="ringPct" class="pct">0%</span><span id="ringSub" class="sub">0 / 0</span></div>
+    </div>
+    <div class="tiles">
+      <div class="tile"><div class="k">Saved</div><div id="cSaved" class="v">0</div></div>
+      <div class="tile"><div class="k">Remaining</div><div id="cRemain" class="v">0</div></div>
+      <div class="tile err"><div class="k">Errors</div><div id="cErr" class="v">0</div></div>
+      <div class="tile"><div class="k">Rate /s</div><div id="cRate" class="v">—</div></div>
+      <div class="tile"><div class="k">ETA</div><div id="cEta" class="v">—</div></div>
+    </div>
+  </div>
+  <div id="folBars" style="margin-top:18px"></div>
+  <pre id="log" class="log" style="display:none"></pre>
+</div>
 
 <div class="card">
   <h2>Folders to archive</h2>
@@ -15,57 +64,89 @@
   <form id="runForm">
     <div class="folders">
       {% for f in folders %}
-        <label><input type="checkbox" name="folders" value="{{ f.name }}"
-          {% if f.name in selected %}checked{% endif %}>
+        <label><input type="checkbox" name="folders" value="{{ f.name }}" {% if f.name in selected %}checked{% endif %}>
           {{ f.name }}{% if f.messages is not none %} <span class="note">({{ f.messages }})</span>{% endif %}</label>
       {% endfor %}
     </div>
-    <div class="row" style="margin-top:14px;max-width:360px">
+    <div class="row" style="margin-top:16px;max-width:380px">
       <div><label>Limit per folder (0 = all)</label><input type="number" name="limit" value="0"></div>
-      <div style="display:flex;align-items:flex-end">
-        <button id="runBtn" type="button" onclick="run()">Archive selected →</button>
-      </div>
+      <div style="display:flex;align-items:flex-end"><button id="runBtn" type="button" onclick="run()">Archive selected →</button></div>
     </div>
   </form>
   {% endif %}
-  <div id="m" class="msg"></div>
-  <pre id="log" class="log" style="display:none"></pre>
+  <div id="runMsg" class="msg"></div>
 </div>
 
 <div class="card">
-  <h2>Archived so far</h2>
+  <h2>Archived on disk</h2>
   <p class="note">{{ summary.total }} .eml file(s) · {{ summary.unique_ids }} unique email(s) (linked across folders)</p>
   {% if summary.per_folder %}
-  <table>
-    <tr><th>Folder</th><th>Emails archived</th></tr>
-    {% for fol, n in summary.per_folder.items() %}
-      <tr><td>{{ fol }}</td><td>{{ n }}</td></tr>
-    {% endfor %}
+  <table><tr><th>Folder</th><th>Emails archived</th></tr>
+    {% for fol, n in summary.per_folder.items() %}<tr><td>{{ fol }}</td><td class="mono">{{ n }}</td></tr>{% endfor %}
   </table>
   {% endif %}
 </div>
 
 <script>
-let poll=null;
+const C = 2 * Math.PI * 52;
+let timer = null, wasRunning = false;
+const $ = id => document.getElementById(id);
+const esc = s => (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+function fmtETA(s){ if(s==null||!isFinite(s)||s<0) return "—"; s=Math.round(s);
+  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), ss=s%60;
+  return h? `${h}h ${m}m` : (m? `${m}m ${ss}s` : `${ss}s`); }
+
+function render(s){
+  let saved=0,toArch=0,errs=0;
+  (s.folders||[]).forEach(f=>{saved+=f.saved||0; toArch+=f.to_archive||0; errs+=f.errors||0;});
+  const processed = saved+errs, remaining = Math.max(0, toArch-processed);
+  const pct = toArch>0 ? processed/toArch*100 : 0;
+  $("ring").style.strokeDashoffset = C*(1-pct/100);
+  $("ringPct").textContent = Math.round(pct)+"%";
+  $("ringSub").textContent = saved+" / "+toArch;
+  $("cSaved").textContent = saved; $("cRemain").textContent = remaining; $("cErr").textContent = errs;
+  const elapsed = s.started_at ? (Date.now()/1000 - s.started_at) : 0;
+  const rate = elapsed>1 ? saved/elapsed : 0;
+  $("cRate").textContent = rate>0 ? rate.toFixed(1) : "—";
+  $("cEta").textContent = (rate>0 && remaining>0) ? fmtETA(remaining/rate) : (s.running? "…" : "—");
+
+  const pill = $("runPill");
+  if(s.running){ pill.className="pill up"; pill.textContent="● running"; }
+  else if(s.manifest){ pill.className="pill up"; pill.style.animation="none"; pill.textContent="● finished"; }
+  else { pill.className="pill down"; pill.textContent="● idle"; }
+  if($("runBtn")) $("runBtn").disabled = !!s.running;
+
+  const box = $("folBars");
+  if((s.folders||[]).length){
+    box.innerHTML = s.folders.map(f=>{
+      const p = f.to_archive>0 ? Math.min(100,(f.saved+f.errors)/f.to_archive*100) : 100;
+      const e = f.errors ? ` · <span style="color:var(--amber)">${f.errors} err</span>` : "";
+      const d = f.done ? " <span style='color:var(--clover)'>✓</span>" : "";
+      return `<div class="fol"><div class="folhdr"><span>${esc(f.folder)}${d}</span>
+        <span class="mono dim">${f.saved}/${f.to_archive}${e}</span></div>
+        <div class="track"><div class="fill" style="width:${p}%"></div></div></div>`;
+    }).join("");
+  } else { box.innerHTML = '<p class="note dim">No active run — select folders below and click Archive.</p>'; }
+
+  const logEl = $("log");
+  if((s.log||[]).length){ logEl.style.display="block"; logEl.textContent=s.log.join("\n"); logEl.scrollTop=logEl.scrollHeight; }
+}
+
+async function poll(){
+  try{
+    const s = await (await fetch("/archive/status")).json();
+    render(s);
+    if(s.running){ wasRunning=true; if(!timer) timer=setInterval(poll,1000); }
+    else { if(timer){clearInterval(timer);timer=null;} if(wasRunning){wasRunning=false; setTimeout(()=>location.reload(),1800);} }
+  }catch(e){}
+}
 async function run(){
-  const form=document.getElementById('runForm');
-  const fd=new FormData(form);
-  const m=document.getElementById('m'); const btn=document.getElementById('runBtn');
-  btn.disabled=true; m.className='msg ok'; m.textContent='Starting…';
-  const r=await fetch('/archive/run',{method:'POST',body:new URLSearchParams(fd)});
-  const res=await r.json();
-  if(!res.ok){m.className='msg err';m.textContent=res.message;btn.disabled=false;return;}
-  m.textContent=res.message;
-  document.getElementById('log').style.display='block';
-  poll=setInterval(check,1000);
+  const m=$("runMsg"), btn=$("runBtn"); btn.disabled=true; m.className="msg ok"; m.textContent="Starting…";
+  const res = await (await fetch("/archive/run",{method:"POST",body:new URLSearchParams(new FormData($("runForm")))})).json();
+  m.className="msg "+(res.ok?"ok":"err"); m.textContent=res.message;
+  if(res.ok){ poll(); if(!timer) timer=setInterval(poll,1000); $("monitor").scrollIntoView({behavior:"smooth"}); }
+  else btn.disabled=false;
 }
-async function check(){
-  const r=await fetch('/archive/status'); const s=await r.json();
-  document.getElementById('log').textContent=(s.log||[]).join('\n');
-  if(!s.running){clearInterval(poll);
-    const m=document.getElementById('m'); m.className='msg ok'; m.textContent='Done — reloading…';
-    setTimeout(()=>location.reload(),1400);
-  }
-}
+document.addEventListener("DOMContentLoaded", poll);
 </script>
 {% endblock %}

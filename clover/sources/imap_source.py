@@ -45,6 +45,14 @@ class ImapSource(MailSource):
                 self._mb.logout()
             self._mb = None
 
+    def force_close(self) -> None:
+        """Close the raw socket to unblock a read blocked on a hung/trickling fetch
+        (logout() would itself block on a wedged connection, so close the socket directly)."""
+        mb = self._mb
+        if mb is not None:
+            with suppress(Exception):
+                mb.client.sock.close()
+
     def test(self) -> tuple[bool, str]:
         try:
             mb = self._connect()

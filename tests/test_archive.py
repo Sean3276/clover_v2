@@ -1,7 +1,64 @@
 import json
+import time
 from email.message import EmailMessage
 
 from clover import archive as ar
+from clover.sources.base import MailSource
+
+
+def _raw(mid: str) -> bytes:
+    m = EmailMessage()
+    m["Message-ID"] = f"<{mid}>"
+    m["From"] = "a@b.com"
+    m["Subject"] = "s"
+    m["Date"] = "Thu, 11 Jun 2026 01:22:12 +0000"
+    m.set_content("hi")
+    return m.as_bytes()
+
+
+class _FakeSource(MailSource):
+    """A fake source where message '2' simulates a hung fetch until force_close()d."""
+
+    def __init__(self, msgs):
+        super().__init__({}, "")
+        self.msgs = msgs
+        self.reconnects = 0
+        self._killed = False
+
+    def open(self): self._killed = False
+    def close(self): pass
+    def test(self): return True, "ok"
+    def folders(self): return [{"name": "INBOX", "messages": len(self.msgs)}]
+    def select(self, folder): return "1"
+    def message_keys(self): return list(self.msgs.keys())
+
+    def fetch_raw(self, key):
+        v = self.msgs[key]
+        if v == "SLOW":
+            for _ in range(200):                 # blocks until force_close() trips _killed
+                if self._killed:
+                    raise OSError("socket closed")
+                time.sleep(0.02)
+            return b"late"
+        return v
+
+    def force_close(self): self._killed = True
+
+    def reconnect(self, folder=None):
+        self.reconnects += 1
+        self._killed = False
+
+
+def test_run_archive_skips_hung_fetch(tmp_path):
+    fake = _FakeSource({"1": _raw("a@x"), "2": "SLOW", "3": _raw("b@x")})
+    cfg = {"auth": {"imap": {}}, "folders": ["INBOX"], "archive_path": str(tmp_path)}
+    logs = []
+    manifest = ar.run_archive(cfg, "pw", log=logs.append, source=fake, fetch_timeout=0.4)
+    assert manifest["saved"] == 2          # messages 1 and 3 archived
+    assert manifest["errors"] == 1         # message 2 timed out and was skipped
+    assert fake.reconnects >= 1            # reconnected after the hang
+    assert len(ar.read_index(tmp_path)) == 2
+    assert any("exceeded" in line for line in logs)
 
 
 def test_eml_filename_from_message_id():
