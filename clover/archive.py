@@ -141,7 +141,8 @@ def index_summary(archive_path: Path) -> dict:
 
 # ---------------------------------------------------------------- orchestrator
 def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | None = None,
-                source=None, fetch_timeout: int = _FETCH_TIMEOUT, progress=None) -> dict:
+                source=None, fetch_timeout: int = _FETCH_TIMEOUT, progress=None,
+                should_stop=lambda: False) -> dict:
     kind = cfg.get("source_kind", "imap")
     conn = cfg["auth"].get(kind) or cfg["auth"].get("imap", {})
     folders = cfg.get("folders") or ["INBOX"]
@@ -155,7 +156,7 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
     dest.mkdir(parents=True, exist_ok=True)
 
     done = existing_keys(dest)
-    manifest = {"folders": {}, "saved": 0, "skipped": 0, "errors": 0, "aborted": False, "archive_path": str(dest)}
+    manifest = {"folders": {}, "saved": 0, "skipped": 0, "errors": 0, "aborted": False, "stopped": False, "archive_path": str(dest)}
 
     idx_fh = open(dest / "_index.jsonl", "a", encoding="utf-8")  # incremental, resumable
     try:
@@ -163,6 +164,7 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
             for fol in folders:
                 saved = skipped = errors = 0
                 aborted = False
+                stopped = False
                 fol_dir = dest / folder_subpath(fol)
 
                 # --- establish the folder; recover ONCE if the connection dropped at the boundary ---
@@ -211,6 +213,9 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
                     return False
 
                 for key in new:
+                    if should_stop():            # user hit Stop — break promptly, mid-attempt
+                        stopped = True
+                        break
                     try:
                         raw, killed = _fetch_guarded(src, key, fetch_timeout)
                         if raw is None:
@@ -274,13 +279,18 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
                 manifest["skipped"] += skipped
                 manifest["errors"] += errors
                 log(f"[{fol}] done — {saved} saved, {skipped} already-archived, {errors} errors")
+                if stopped:
+                    manifest["stopped"] = True
+                    log("Stopped by user.")
+                    break
                 if aborted:
                     manifest["aborted"] = True
                     break
     finally:
         idx_fh.close()
 
-    verb = "STOPPED (re-run to resume)" if manifest["aborted"] else "FINISHED"
+    verb = ("STOPPED BY USER" if manifest["stopped"]
+            else "STOPPED (re-run to resume)" if manifest["aborted"] else "FINISHED")
     log(f"{verb} — {manifest['saved']} saved, {manifest['skipped']} skipped, {manifest['errors']} errors")
     return manifest
 
@@ -301,6 +311,8 @@ def run_until_complete(run_once, *, auto_resume=True, should_stop=lambda: False,
     while True:
         attempt += 1
         last = run_once()
+        if last.get("stopped"):           # user stopped mid-attempt — do not retry
+            break
         if not last.get("aborted"):
             if attempt > 1:
                 log(f"Auto-resume: complete after {attempt} attempts.")

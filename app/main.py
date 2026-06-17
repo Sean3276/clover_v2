@@ -129,7 +129,8 @@ def _run_archive_bg(folders: list[str], limit: int | None, auto_resume: bool):
         def run_once():
             with _lock:
                 _status["attempt"] += 1
-            m = archive.run_archive(cfg, pw, log=_log, limit_per_folder=limit, progress=_progress)
+            m = archive.run_archive(cfg, pw, log=_log, limit_per_folder=limit, progress=_progress,
+                                    should_stop=lambda: _status.get("stop", False))
             with _lock:
                 _status["manifest"] = m
                 _status["session_saved"] += m.get("saved", 0)

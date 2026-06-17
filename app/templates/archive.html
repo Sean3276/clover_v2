@@ -125,7 +125,7 @@ function render(s){
 
   const pill = $("runPill");
   if(s.running){ pill.className="pill up"; pill.textContent="● running"; }
-  else if(s.manifest && s.manifest.aborted){ pill.className="pill down"; pill.textContent="● stopped"; }
+  else if(s.manifest && (s.manifest.stopped || s.manifest.aborted)){ pill.className="pill down"; pill.textContent="● stopped"; }
   else if(s.manifest){ pill.className="pill up"; pill.style.animation="none"; pill.textContent="● finished"; }
   else { pill.className="pill down"; pill.textContent="● idle"; }
   if($("runBtn")) $("runBtn").disabled = !!s.running;

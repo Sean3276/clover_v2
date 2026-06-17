@@ -141,6 +141,22 @@ def test_run_archive_aborts_when_unrecoverable(tmp_path, monkeypatch):
     assert any("connection lost" in line for line in logs)
 
 
+def test_run_archive_stops_promptly_midrun(tmp_path):
+    msgs = {str(i): _raw(f"m{i}@x") for i in range(10)}
+    fake = _FakeSource(msgs)
+    n = {"c": 0}
+
+    def stop():
+        n["c"] += 1
+        return n["c"] > 3              # let ~3 through, then request stop
+
+    cfg = {"auth": {"imap": {}}, "folders": ["INBOX"], "archive_path": str(tmp_path)}
+    m = ar.run_archive(cfg, "pw", log=lambda *_: None, source=fake, should_stop=stop)
+    assert m["stopped"] is True
+    assert m["aborted"] is False
+    assert m["saved"] < 10            # stopped before archiving all 10
+
+
 def test_run_archive_skips_hung_fetch(tmp_path):
     fake = _FakeSource({"1": _raw("a@x"), "2": "SLOW", "3": _raw("b@x")})
     cfg = {"auth": {"imap": {}}, "folders": ["INBOX"], "archive_path": str(tmp_path)}
