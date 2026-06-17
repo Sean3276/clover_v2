@@ -5,6 +5,9 @@ later). Saves raw RFC822 (legal-grade, embedded attachments included) at
 <archive>/<folder>/<message-id>.eml and records each message incrementally in
 <archive>/_index.jsonl. Resumable: a (folder, validity, key) already in the index is skipped.
 
+Resilient: a hung fetch is force-timed-out; a dropped connection is reconnected with backoff;
+if it cannot be re-established the run STOPS cleanly (re-run resumes) rather than cascading.
+
 NOTE: .eml contains EMBEDDED attachments in full, but NOT link-shared files — later phase.
 """
 from __future__ import annotations
@@ -15,6 +18,7 @@ import json
 import re
 import sys
 import threading
+import time
 from email import policy
 from pathlib import Path
 
@@ -22,36 +26,53 @@ from .safe_name import safe_name
 from .sources import get_source
 
 # hard per-message wall-clock cap: a single hung/trickling fetch can never freeze the run
-_FETCH_TIMEOUT = 180  # seconds
+_FETCH_TIMEOUT = 180        # seconds
+_RECONNECT_ATTEMPTS = 3     # retries (with backoff) before giving up on a dropped connection
+_MAX_CONSEC_ERRORS = 10     # consecutive failures => connection/server is dead, stop the run
 
 
-def _fetch_guarded(src, key, folder, timeout):
-    """Fetch one message with a hard timeout. On timeout, force-drop + reconnect the source
-    and return (None, True) so the caller skips+logs it. Returns (raw_bytes_or_None, timed_out)."""
-    state = {"timed_out": False}
+def _fetch_guarded(src, key, timeout):
+    """Fetch one message with a hard timeout.
+
+    Returns (raw_or_None, killed). killed=True means the watchdog fired and force-closed the
+    socket (so the connection must be re-established before the next fetch). A fetch that
+    completes successfully keeps its bytes even if the watchdog fired at the same instant.
+    """
+    state = {"killed": False}
 
     def _kill():
-        state["timed_out"] = True
+        state["killed"] = True
         try:
-            src.force_close()       # unblock the in-flight read (closes the socket)
+            src.force_close()       # unblock the in-flight read (shutdown+close the socket)
         except Exception:
             pass
 
     timer = threading.Timer(timeout, _kill)
     timer.start()
+    raw = None
     try:
         raw = src.fetch_raw(key)
     except Exception:
-        if not state["timed_out"]:
-            timer.cancel()
+        if not state["killed"]:
             raise                   # a real fetch error — let the caller handle it
-        raw = None                  # exception was caused by our force_close
+        # else: the exception was caused by our own force_close()
     finally:
         timer.cancel()
-    if state["timed_out"]:
-        src.reconnect(folder)
-        return None, True
-    return raw, False
+        timer.join()                # ensure a started _kill()/force_close() finished before returning
+    return raw, state["killed"]
+
+
+def _recover(src, folder, log, attempts=_RECONNECT_ATTEMPTS):
+    """Re-establish a healthy connection with backoff. Returns True if recovered, else False."""
+    for i in range(attempts):
+        try:
+            src.reconnect(folder)
+            return True
+        except Exception as e:
+            wait = min(2 ** i, 8)
+            log(f"    …reconnect attempt {i + 1}/{attempts} failed ({type(e).__name__}); retrying in {wait}s")
+            time.sleep(wait)
+    return False
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -132,88 +153,133 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
     dest.mkdir(parents=True, exist_ok=True)
 
     done = existing_keys(dest)
-    manifest = {"folders": {}, "saved": 0, "skipped": 0, "errors": 0, "archive_path": str(dest)}
+    manifest = {"folders": {}, "saved": 0, "skipped": 0, "errors": 0, "aborted": False, "archive_path": str(dest)}
 
     idx_fh = open(dest / "_index.jsonl", "a", encoding="utf-8")  # incremental, resumable
     try:
         with (source or get_source(kind, conn, password)) as src:
             for fol in folders:
                 saved = skipped = errors = 0
+                aborted = False
                 fol_dir = dest / folder_subpath(fol)
-                try:
-                    validity = str(src.select(fol))
-                    keys = src.message_keys()
-                    new = [k for k in keys if (fol, validity, str(k)) not in done]
-                    skipped = len(keys) - len(new)
-                    if limit_per_folder:
-                        new = new[:limit_per_folder]
-                    step = max(1, len(new) // 20)   # ~20 progress updates regardless of folder size
-                    log(f"[{fol}] {len(keys)} total · {len(new)} to archive · {skipped} already done")
-                    fol_dir.mkdir(parents=True, exist_ok=True)
 
-                    def report(done=False):
-                        if progress:
-                            progress({"folder": fol, "total": len(keys), "to_archive": len(new),
-                                      "saved": saved, "skipped": skipped, "errors": errors, "done": done})
-                    report()
+                # --- establish the folder; recover ONCE if the connection dropped at the boundary ---
+                validity = keys = None
+                for attempt in range(2):
+                    try:
+                        validity = str(src.select(fol))
+                        keys = src.message_keys()
+                        break
+                    except Exception as e:
+                        log(f"  ! [{fol}] open failed: {type(e).__name__}: {e}")
+                        if attempt == 0 and _recover(src, fol, log):
+                            continue
+                        break
+                if keys is None:
+                    log("  ! connection lost at a folder boundary — stopping; re-run to resume")
+                    manifest["aborted"] = True
+                    break
 
-                    for key in new:
-                        try:
-                            raw, timed_out = _fetch_guarded(src, key, fol, fetch_timeout)
-                            if timed_out:
+                new = [k for k in keys if (fol, validity, str(k)) not in done]
+                skipped = len(keys) - len(new)
+                if limit_per_folder:
+                    new = new[:limit_per_folder]
+                step = max(1, len(new) // 20)   # ~20 progress updates regardless of folder size
+                log(f"[{fol}] {len(keys)} total · {len(new)} to archive · {skipped} already done")
+                fol_dir.mkdir(parents=True, exist_ok=True)
+
+                def report(done=False):
+                    if progress:
+                        progress({"folder": fol, "total": len(keys), "to_archive": len(new),
+                                  "saved": saved, "skipped": skipped, "errors": errors, "done": done})
+                report()
+
+                consec = 0
+
+                def recover_or_abort():
+                    nonlocal aborted
+                    if not _recover(src, fol, log):
+                        log(f"  ! [{fol}] connection lost — stopping; {saved} saved this run kept, re-run to resume")
+                        aborted = True
+                        return True
+                    if consec >= _MAX_CONSEC_ERRORS:
+                        log(f"  ! [{fol}] {consec} consecutive failures — stopping; re-run to resume")
+                        aborted = True
+                        return True
+                    return False
+
+                for key in new:
+                    try:
+                        raw, killed = _fetch_guarded(src, key, fetch_timeout)
+                        if raw is None:
+                            if killed:                       # genuine timeout
                                 errors += 1
-                                log(f"  ! [{fol}] key {key}: fetch exceeded {fetch_timeout}s — reconnected & skipped")
-                                continue
-                            if not raw:
+                                consec += 1
+                                log(f"  ! [{fol}] key {key}: fetch exceeded {fetch_timeout}s — skipped")
+                                report()
+                                if recover_or_abort():
+                                    break
+                            else:                            # empty fetch — per-message anomaly, NOT a conn failure
                                 errors += 1
                                 log(f"  ! [{fol}] key {key}: empty fetch")
-                                continue
-                            sha = hashlib.sha256(raw).hexdigest()
-                            obj = email.message_from_bytes(raw, policy=policy.default)
-                            mid = (obj.get("Message-ID") or "").strip().strip("<>").strip()
-                            path = fol_dir / eml_filename(mid, key)
-                            if path.exists():
-                                try:
-                                    same = hashlib.sha256(path.read_bytes()).hexdigest() == sha
-                                except Exception:
-                                    same = False
-                                if not same:  # genuine different message, same derived name
-                                    path = path.with_name(f"{path.stem}_{key}.eml")
-                            path.write_bytes(raw)
-                            row = {
-                                "id": mid or f"uid_{key}", "folder": fol, "key": key, "validity": validity,
-                                "from": str(obj.get("From", "")), "subject": str(obj.get("Subject", "")),
-                                "date": str(obj.get("Date", "")),
-                                "path": str(path.relative_to(dest)).replace("\\", "/"),
-                                "size": len(raw), "sha256": sha,
-                            }
-                            idx_fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-                            idx_fh.flush()
-                            done.add((fol, validity, str(key)))
-                            saved += 1
-                            if saved % step == 0:
-                                log(f"  [{fol}] {saved}/{len(new)} saved…")
                                 report()
-                        except Exception as e:
-                            errors += 1
-                            log(f"  ! [{fol}] key {key}: {type(e).__name__}: {e}")
-                            report()
+                            continue
+
+                        # success — persist (keep the bytes even if the watchdog fired at the same instant)
+                        sha = hashlib.sha256(raw).hexdigest()
+                        obj = email.message_from_bytes(raw, policy=policy.default)
+                        mid = (obj.get("Message-ID") or "").strip().strip("<>").strip()
+                        path = fol_dir / eml_filename(mid, key)
+                        if path.exists():
                             try:
-                                src.reconnect(fol)   # heal the connection after a fetch error
+                                same = hashlib.sha256(path.read_bytes()).hexdigest() == sha
                             except Exception:
-                                pass
-                    report(done=True)
-                except Exception as e:
-                    log(f"! folder {fol}: {type(e).__name__}: {e}")
+                                same = False
+                            if not same:  # genuine different message, same derived name
+                                path = path.with_name(f"{path.stem}_{key}.eml")
+                        path.write_bytes(raw)
+                        row = {
+                            "id": mid or f"uid_{key}", "folder": fol, "key": key, "validity": validity,
+                            "from": str(obj.get("From", "")), "subject": str(obj.get("Subject", "")),
+                            "date": str(obj.get("Date", "")),
+                            "path": str(path.relative_to(dest)).replace("\\", "/"),
+                            "size": len(raw), "sha256": sha,
+                        }
+                        idx_fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                        idx_fh.flush()
+                        done.add((fol, validity, str(key)))
+                        saved += 1
+                        consec = 0
+                        if saved % step == 0:
+                            log(f"  [{fol}] {saved}/{len(new)} saved…")
+                            report()
+                        if killed:   # the watchdog had force-closed the socket — heal before the next message
+                            if not _recover(src, fol, log):
+                                log(f"  ! [{fol}] connection lost after a late timeout — stopping; re-run to resume")
+                                aborted = True
+                                break
+                    except Exception as e:
+                        errors += 1
+                        consec += 1
+                        log(f"  ! [{fol}] key {key}: {type(e).__name__}: {e}")
+                        report()
+                        if recover_or_abort():
+                            break
+
+                report(done=True)
                 manifest["folders"][fol] = {"saved": saved, "skipped": skipped, "errors": errors}
                 manifest["saved"] += saved
                 manifest["skipped"] += skipped
                 manifest["errors"] += errors
                 log(f"[{fol}] done — {saved} saved, {skipped} already-archived, {errors} errors")
+                if aborted:
+                    manifest["aborted"] = True
+                    break
     finally:
         idx_fh.close()
 
-    log(f"FINISHED — {manifest['saved']} saved, {manifest['skipped']} skipped, {manifest['errors']} errors")
+    verb = "STOPPED (re-run to resume)" if manifest["aborted"] else "FINISHED"
+    log(f"{verb} — {manifest['saved']} saved, {manifest['skipped']} skipped, {manifest['errors']} errors")
     return manifest
 
 

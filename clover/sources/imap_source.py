@@ -1,6 +1,7 @@
 """IMAP implementation of MailSource (the reviewed Phase-1 ingestion logic)."""
 from __future__ import annotations
 
+import socket
 from contextlib import suppress
 
 from .base import MailSource
@@ -46,12 +47,19 @@ class ImapSource(MailSource):
             self._mb = None
 
     def force_close(self) -> None:
-        """Close the raw socket to unblock a read blocked on a hung/trickling fetch
-        (logout() would itself block on a wedged connection, so close the socket directly)."""
+        """Unblock a read wedged on a hung/trickling fetch by shutting down then closing the
+        socket (shutdown interrupts a blocked recv more reliably than close() alone; logout()
+        would itself block on a wedged connection). The 30s socket timeout is the final backstop."""
         mb = self._mb
-        if mb is not None:
-            with suppress(Exception):
-                mb.client.sock.close()
+        if mb is None:
+            return
+        sock = getattr(getattr(mb, "client", None), "sock", None)
+        if sock is None:
+            return
+        with suppress(Exception):
+            sock.shutdown(socket.SHUT_RDWR)
+        with suppress(Exception):
+            sock.close()
 
     def test(self) -> tuple[bool, str]:
         try:

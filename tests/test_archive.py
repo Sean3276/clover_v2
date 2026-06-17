@@ -49,6 +49,58 @@ class _FakeSource(MailSource):
         self._killed = False
 
 
+class _DeadSource(MailSource):
+    """Connection is dead and cannot be re-established."""
+
+    def __init__(self): super().__init__({}, "")
+    def open(self): pass
+    def close(self): pass
+    def test(self): return True, "ok"
+    def folders(self): return [{"name": "INBOX", "messages": 5}]
+    def select(self, folder): return "1"
+    def message_keys(self): return ["1", "2", "3", "4", "5"]
+    def fetch_raw(self, key): raise OSError("connection dead")
+    def force_close(self): pass
+    def reconnect(self, folder=None): raise OSError("getaddrinfo failed")
+
+
+class _SelectFailSource(MailSource):
+    """Connection dropped at a folder boundary: select() fails and cannot be recovered."""
+
+    def __init__(self): super().__init__({}, "")
+    def open(self): pass
+    def close(self): pass
+    def test(self): return True, "ok"
+    def folders(self): return [{"name": "INBOX"}]
+    def select(self, folder): raise OSError("getaddrinfo failed")
+    def message_keys(self): return []
+    def fetch_raw(self, key): return b""
+    def force_close(self): pass
+    def reconnect(self, folder=None): raise OSError("still down")
+
+
+def test_run_archive_aborts_when_select_fails_at_boundary(tmp_path, monkeypatch):
+    monkeypatch.setattr(ar.time, "sleep", lambda *a, **k: None)
+    cfg = {"auth": {"imap": {}}, "folders": ["INBOX", "Sent"], "archive_path": str(tmp_path)}
+    logs = []
+    manifest = ar.run_archive(cfg, "pw", log=logs.append, source=_SelectFailSource())
+    assert manifest["aborted"] is True                # must NOT silently report FINISHED
+    assert manifest["saved"] == 0
+    assert not any("FINISHED" in line for line in logs)
+    assert any("folder boundary" in line for line in logs)
+
+
+def test_run_archive_aborts_when_unrecoverable(tmp_path, monkeypatch):
+    monkeypatch.setattr(ar.time, "sleep", lambda *a, **k: None)   # no backoff delay in test
+    cfg = {"auth": {"imap": {}}, "folders": ["INBOX"], "archive_path": str(tmp_path)}
+    logs = []
+    manifest = ar.run_archive(cfg, "pw", log=logs.append, source=_DeadSource(), fetch_timeout=5)
+    assert manifest["aborted"] is True
+    assert manifest["saved"] == 0
+    assert manifest["errors"] == 1          # stopped after the FIRST failure — no 2000-error cascade
+    assert any("connection lost" in line for line in logs)
+
+
 def test_run_archive_skips_hung_fetch(tmp_path):
     fake = _FakeSource({"1": _raw("a@x"), "2": "SLOW", "3": _raw("b@x")})
     cfg = {"auth": {"imap": {}}, "folders": ["INBOX"], "archive_path": str(tmp_path)}
