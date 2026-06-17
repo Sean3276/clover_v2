@@ -20,11 +20,15 @@ class ImapSource(MailSource):
         self._mb = None
 
     def _connect(self):
-        from imap_tools import MailBox, MailBoxTls
+        import imap_tools
         if self.security == "starttls":
-            mb = MailBoxTls(self.host, self.port or 143, timeout=_IMAP_TIMEOUT)
+            # class name varies across imap-tools versions (MailBoxStartTls in 1.x; MailBoxTls older)
+            cls = getattr(imap_tools, "MailBoxStartTls", None) or getattr(imap_tools, "MailBoxTls", None)
+            if cls is None:
+                raise RuntimeError("Installed imap-tools has no STARTTLS class — use SSL/TLS (993).")
+            mb = cls(self.host, self.port or 143, timeout=_IMAP_TIMEOUT)
         else:
-            mb = MailBox(self.host, self.port or (993 if self.security == "ssl" else 143), timeout=_IMAP_TIMEOUT)
+            mb = imap_tools.MailBox(self.host, self.port or (993 if self.security == "ssl" else 143), timeout=_IMAP_TIMEOUT)
         mb.login(self.user, self.password)
         return mb
 
