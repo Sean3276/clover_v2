@@ -80,7 +80,7 @@ class ImapSource(MailSource):
         self._require_open()
         self._mb.folder.set(folder)
         with suppress(Exception):  # 1) from the SELECT response
-            resp = self._mb.box.untagged_responses.get("UIDVALIDITY")
+            resp = self._mb.client.untagged_responses.get("UIDVALIDITY")
             if resp:
                 v = resp[0]
                 return v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
@@ -96,7 +96,7 @@ class ImapSource(MailSource):
 
     def fetch_raw(self, key: str) -> bytes | None:
         self._require_open()
-        typ, data = self._mb.box.uid("fetch", key, "(BODY.PEEK[])")
+        typ, data = self._mb.client.uid("fetch", key, "(BODY.PEEK[])")
         if typ != "OK" or not data:
             return None
         for part in data:
