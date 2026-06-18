@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Threads · Clover v2{% endblock %}
+{% block nav_threads %}active{% endblock %}
+{% block body %}
+<style>
+  .thtools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .thtools input{flex:1;min-width:220px}
+  .thtools select{width:auto}
+  .thlist{display:flex;flex-direction:column;gap:6px}
+  .throw{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:11px 13px;
+    border:1px solid var(--line);border-radius:9px;background:var(--tile-bg);text-decoration:none;color:var(--ink)}
+  .throw:hover{border-color:var(--clover);background:var(--card2)}
+  .thmain{min-width:0;flex:1}
+  .thsubj{display:block;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .thmeta{display:block;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .thside{flex:none;display:flex;flex-direction:column;gap:3px;align-items:flex-end}
+  .thn{font-size:11px;font-weight:700;color:var(--clover-d);background:rgba(52,210,123,.14);border-radius:20px;padding:2px 9px}
+</style>
+
+<div class="runhdr">
+  <div><h1>Threads</h1>
+    <p class="note">Linked, chronological conversations built from your archive · <code>{{ cfg.archive_path }}</code></p></div>
+  {% if has_index %}<button id="rebuildBtn" type="button" class="ghost" onclick="rebuild()">↻ Rebuild index</button>{% endif %}
+</div>
+
+{% if not has_index %}
+<div class="card">
+  <h2>No thread index yet</h2>
+  <p class="note">Build the thread index from your archived <code>.eml</code> files — header-only, deterministic,
+    takes a few seconds. (Re-runnable anytime; it never modifies your archive.)</p>
+  <button id="rebuildBtn" type="button" onclick="rebuild()" style="margin-top:10px">Build thread index →</button>
+  <div id="rebuildMsg" class="msg"></div>
+</div>
+{% else %}
+<div class="card">
+  <div class="thtools">
+    <input id="filter" type="text" placeholder="Filter by subject or participant…" oninput="apply()">
+    <select id="sort" onchange="apply()">
+      <option value="recent">Most recent</option>
+      <option value="size">Largest</option>
+      <option value="old">Oldest</option>
+    </select>
+    <span id="count" class="note"></span>
+  </div>
+  <div id="list" class="thlist">
+    {% for t in threads %}
+    <a class="throw" href="/threads/{{ t.thread_id }}"
+       data-n="{{ t.n }}" data-end="{{ t.end or '' }}" data-start="{{ t.start or '' }}"
+       data-q="{{ (t.subject ~ ' ' ~ (t.participants|join(' ')))|lower }}">
+      <div class="thmain">
+        <span class="thsubj">{{ t.subject }}</span>
+        <span class="thmeta note">{{ t.participants[:3]|join(', ') }}{% if t.participants|length > 3 %} +{{ t.participants|length - 3 }} more{% endif %}</span>
+      </div>
+      <div class="thside">
+        <span class="thn">{{ t.n }} msg</span>
+        <span class="note mono">{{ (t.start or '')[:10] }}{% if t.n > 1 %} → {{ (t.end or '')[:10] }}{% endif %}</span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  <div id="rebuildMsg" class="msg"></div>
+</div>
+{% endif %}
+
+<script>
+const $ = id => document.getElementById(id);
+function apply(){
+  const q = ($("filter").value || "").toLowerCase().trim();
+  const sort = $("sort").value;
+  const rows = [...document.querySelectorAll(".throw")];
+  let shown = 0;
+  rows.forEach(r => { const ok = !q || (r.dataset.q || "").includes(q); r.style.display = ok ? "" : "none"; if(ok) shown++; });
+  const vis = rows.filter(r => r.style.display !== "none");
+  vis.sort((a,b) => {
+    if(sort === "size") return (+b.dataset.n) - (+a.dataset.n);
+    if(sort === "old")  return (a.dataset.start || "").localeCompare(b.dataset.start || "");
+    return (b.dataset.end || "").localeCompare(a.dataset.end || "");
+  });
+  const list = $("list"); vis.forEach(r => list.appendChild(r));
+  if($("count")) $("count").textContent = shown + " thread(s)";
+}
+async function rebuild(){
+  const b = $("rebuildBtn"), m = $("rebuildMsg");
+  if(b) b.disabled = true;
+  if(m){ m.className = "msg ok"; m.textContent = "Rebuilding…"; }
+  try{
+    const res = await (await fetch("/threads/rebuild", {method:"POST"})).json();
+    if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }
+    if(res.ok) setTimeout(() => location.reload(), 900); else if(b) b.disabled = false;
+  }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Rebuild failed: " + e; } if(b) b.disabled = false; }
+}
+document.addEventListener("DOMContentLoaded", () => { if($("list")) apply(); });
+</script>
+{% endblock %}

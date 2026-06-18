@@ -82,9 +82,11 @@ is idempotent; no message marked seen; no credential logged.
 ---
 
 ## Phase 2 — Per-thread organization
-**`disorganized .eml  →  organized thread archive`** · automation · ⬜
+**`disorganized .eml  →  organized thread archive`** · automation · ⬜ (spec approved 2026-06-18 — see [CLOVER_V2_PHASE2_SPEC.md](CLOVER_V2_PHASE2_SPEC.md))
 
-Turn the flat `.eml` pile into linked, chronological **thread trees**. No AI.
+Turn the flat `.eml` pile into linked, chronological **thread trees**. No AI. Decided: header-only
+linking (deterministic; subject/semantic grouping deferred to P4), `threads.jsonl` index, and a thin
+"Threads" browser with an on-demand **stitched reader** (option C). Full design in the spec above.
 
 **Steps**
 1. **Correlate by Message-ID.** Parse `Message-ID`, `References`, `In-Reply-To` from every

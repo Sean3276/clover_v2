@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ thread.subject }} · Threads{% endblock %}
+{% block nav_threads %}active{% endblock %}
+{% block body %}
+<style>
+  .msgblock{padding:14px 16px}
+  .msghdr{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline}
+  .msghdr .who{font-size:14px}
+  .bodytext{white-space:pre-wrap;font-family:var(--mono);font-size:12.5px;background:var(--code-bg);
+    border:1px solid var(--line);border-radius:8px;padding:12px;margin:8px 0 0;max-height:1400px;overflow:auto}
+  .emlframe{width:100%;border:1px solid var(--line);border-radius:8px;background:#fff;margin-top:8px;min-height:80px}
+  .atts{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
+  .att{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:3px 9px;color:var(--sub)}
+</style>
+
+<p style="margin:0 0 6px"><a href="/threads" class="note">← all threads</a></p>
+<h1 style="font-size:20px;margin:0 0 4px">{{ thread.subject }}</h1>
+<p class="note">{{ thread.n }} message(s) · {{ thread.participants|join(', ') }}
+  · {{ (thread.start or '')[:10] }}{% if thread.n > 1 %} → {{ (thread.end or '')[:10] }}{% endif %}</p>
+
+{% for b in blocks %}
+<div class="card msgblock">
+  {% if b.error %}
+    <div class="msg err" style="display:block">Couldn't render this message: {{ b.error }}</div>
+  {% else %}
+  <div class="msghdr">
+    <div class="who"><strong>{{ b.from }}</strong> <span class="note">→ {{ b.to }}</span></div>
+    <div class="note mono">{{ b.date }}{% if b.folder %} · {{ b.folder }}{% endif %}</div>
+  </div>
+  {% if b.subject %}<div class="note" style="margin:3px 0 6px">{{ b.subject }}</div>{% endif %}
+  {% if b.srcdoc %}
+    <iframe class="emlframe" sandbox="allow-same-origin" srcdoc="{{ b.srcdoc }}" loading="lazy"></iframe>
+  {% elif b.body_text %}
+    <pre class="bodytext">{{ b.body_text }}</pre>
+  {% else %}
+    <p class="note dim">(no readable body)</p>
+  {% endif %}
+  {% if b.attachments %}
+  <div class="atts">
+    {% for a in b.attachments %}<span class="att">📎 {{ a.name }} <span class="dim">({{ (a.size / 1024)|round(1) }} KB)</span></span>{% endfor %}
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+{% endfor %}
+
+<script>
+function sizeFrames(){
+  document.querySelectorAll("iframe.emlframe").forEach(f => {
+    try{
+      const d = f.contentDocument || f.contentWindow.document;
+      const h = Math.max(d.documentElement.scrollHeight, d.body ? d.body.scrollHeight : 0);
+      f.style.height = Math.min(h + 24, 6000) + "px";
+    }catch(e){ f.style.height = "600px"; }
+  });
+}
+window.addEventListener("load", () => { sizeFrames(); setTimeout(sizeFrames, 350); });
+</script>
+{% endblock %}

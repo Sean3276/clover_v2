@@ -17,9 +17,13 @@ from fastapi.templating import Jinja2Templates
 
 from clover import archive
 from clover import config as cfgmod
+from clover import threads as threadmod
 from clover.errors import friendly_conn_error
-from clover.paths import ensure_runtime, runtime_dir
+from clover.paths import auto_clover_root, ensure_runtime, runtime_dir
 from clover.sources import SUITE, get_source
+
+_THREAD_CSP = ('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
+               'img-src data:; style-src \'unsafe-inline\'; font-src data:">')
 
 BASE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
@@ -226,3 +230,50 @@ def archive_status():
             "session_saved": _status["session_saved"],
             "prep": _status["prep"],
         })
+
+
+# ------------------------------------------------------------------ Threads (Phase 2)
+def _archive_dir(cfg: dict) -> Path:
+    p = Path(cfg.get("archive_path") or ".")
+    if not p.is_absolute():
+        p = auto_clover_root() / p
+    return p
+
+
+@app.get("/threads", response_class=HTMLResponse)
+def threads_page(request: Request):
+    cfg = cfgmod.load_config()
+    arch = _archive_dir(cfg)
+    return templates.TemplateResponse(request, "threads_list.html", {
+        "cfg": cfg,
+        "threads": threadmod.read_threads(arch),
+        "has_index": (arch / "threads.jsonl").exists(),
+    })
+
+
+@app.post("/threads/rebuild")
+def threads_rebuild():
+    cfg = cfgmod.load_config()
+    try:
+        s = threadmod.build_threads(_archive_dir(cfg), log=_log)
+        return JSONResponse({"ok": True, "message":
+                             f"{s['threads']} threads ({s['multi']} multi · {s['singletons']} single) "
+                             f"from {s['messages']} messages"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "message": f"{type(e).__name__}: {e}"})
+
+
+@app.get("/threads/{thread_id}", response_class=HTMLResponse)
+def thread_view(request: Request, thread_id: str):
+    cfg = cfgmod.load_config()
+    arch = _archive_dir(cfg)
+    t = threadmod.get_thread(arch, thread_id)
+    if not t:
+        return RedirectResponse("/threads", status_code=303)
+    blocks = threadmod.stitch_thread(arch, t)
+    for b in blocks:                          # wrap HTML bodies for the sandboxed iframe (block remote content)
+        if b.get("body_html"):
+            b["srcdoc"] = _THREAD_CSP + b["body_html"]
+    return templates.TemplateResponse(request, "thread_view.html", {
+        "cfg": cfg, "thread": t, "blocks": blocks,
+    })
