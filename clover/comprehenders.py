@@ -100,9 +100,11 @@ class ClaudeCliComprehender(Comprehender):
         if schema:
             p += ("\n\nReturn ONLY valid JSON (no prose, no code fence) matching this shape:\n"
                   + json.dumps(schema))
+        # prompt goes on STDIN (not argv) — thread text easily exceeds the OS command-line limit;
+        # force UTF-8 so mixed English/Chinese content round-trips
         proc = subprocess.run(
-            [exe, "-p", p, "--model", self.model, "--output-format", "json"],
-            capture_output=True, text=True, timeout=self.timeout,
+            [exe, "-p", "--model", self.model, "--output-format", "json"],
+            input=p, capture_output=True, text=True, encoding="utf-8", timeout=self.timeout,
         )
         if proc.returncode != 0:
             raise RuntimeError(f"claude CLI failed ({proc.returncode}): {proc.stderr.strip()[:200]}")

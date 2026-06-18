@@ -20,6 +20,9 @@ from .threads import read_threads, render_message
 _TAG = re.compile(r"(?s)<[^>]+>")
 _STYLE = re.compile(r"(?is)<(script|style)\b.*?</\1>")
 _WS = re.compile(r"\s+")
+_ANNOT = re.compile(r"\s+(?:[—–;(]|-\s).*$")   # trailing model annotation: " — desc", " (desc)", " - desc"
+_WEEKDAY = re.compile(r"^(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*[,.\s]+", re.I)   # leading "Wed " on a date
+_NUM = re.compile(r"\d[\d,]*\.?\d*")
 
 _DISTILL_SCHEMA = {"abstract": "str", "summary": "str", "event": "str (<=30 chars)",
                    "facts": {"project": "str", "parties": ["str"], "refs": ["str"],
@@ -139,8 +142,10 @@ def _refine_prompt(thread, running, chunk):
 def _distill_prompt(comprehension):
     return ("From this thread comprehension produce: an accurate abstract paragraph; a one-line "
             "summary; an event tag of AT MOST 30 characters; and facts grounded ONLY in the "
-            "comprehension (project name, parties, references like RFI/EOT/VO numbers, dates, "
-            "money amounts). Do not invent.\n\nCOMPREHENSION:\n" + comprehension)
+            "comprehension. For each fact give the BARE value EXACTLY as it appears in the thread "
+            "(a date like '14 March 2025', an amount like 'S$878,000', a reference like 'EOT-05', a "
+            "party or project name) — do NOT add descriptions, deadlines, or commentary to a fact "
+            "value, and do not invent.\n\nCOMPREHENSION:\n" + comprehension)
 
 
 def _classify_prompt(profile: Profile, comprehension, full: bool):
@@ -193,27 +198,47 @@ def _classify(backend: Comprehender, profile: Profile, comprehension: str, threa
             "council": "full", "consensus": consensus, "dissent": str(full.get("dissent", ""))}
 
 
+def _norm(s) -> str:
+    return _WS.sub(" ", str(s).lower()).strip()
+
+
 def _verify_facts(facts: dict, thread_text: str) -> tuple[dict, list]:
-    """Keep only facts that actually appear in the thread (deterministic). Returns (facts, dropped)."""
-    low = (thread_text or "").lower()
+    """Keep only facts grounded in the thread. The model often annotates a value ('14 Mar 2025 —
+    deadline'); verify the BARE core (annotation stripped) appears, with a digit-match fallback for
+    amounts (currency/comma formatting varies). Stores the cleaned core. Returns (facts, dropped)."""
+    src = _norm(thread_text)
+    src_digits = re.sub(r"\D", "", src)
     facts = dict(facts or {})
     dropped = []
 
-    def present(v):
-        return bool(v) and str(v).strip().lower() in low
+    def verify(value, numeric=False):
+        raw = str(value).strip()
+        core = _WEEKDAY.sub("", _ANNOT.sub("", raw)).strip() or raw
+        if core and _norm(core) in src:
+            return core
+        if numeric:
+            nums = [re.sub(r"[^\d]", "", n) for n in _NUM.findall(raw)]
+            nums = [n for n in nums if len(n) >= 3]      # a meaningful number, not a lone digit
+            if nums and all(n in src_digits for n in nums):
+                return core
+        return None
 
     for key in ("refs", "dates", "amounts", "parties"):
         keep = []
         for v in (facts.get(key) or []):
-            if present(v):
-                keep.append(v)
-            elif v:
+            r = verify(v, numeric=(key == "amounts"))
+            if r is not None and r not in keep:         # de-dup (bare + annotated collapse to one)
+                keep.append(r)
+            elif r is None and v:
                 dropped.append(f"{key}:{v}")
         facts[key] = keep
     proj = facts.get("project") or ""
-    if proj and not present(proj):
+    pr = verify(proj) if proj else None
+    if proj and pr is None:
         dropped.append(f"project:{proj}")
         facts["project"] = ""
+    elif pr:
+        facts["project"] = pr
     return facts, dropped
 
 

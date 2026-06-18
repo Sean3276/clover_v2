@@ -65,6 +65,30 @@ def test_facts_verified_against_source(tmp_path):
     assert rec["verified"]["facts_ok"] is False
 
 
+def test_facts_strip_annotations_weekday_and_dedup(tmp_path):
+    t = _one_thread(tmp_path, body_a="Tender on 14 March 2025 for S$878,000 re COB ID confirmed")
+    stub = StubComprehender(responses={"distill": {
+        "abstract": "a", "summary": "s", "event": "e",
+        "facts": {"project": "COB ID — interior fit-out", "parties": [], "refs": [],
+                  "dates": ["Fri 14 March 2025 — submission deadline", "14 March 2025"],
+                  "amounts": ["S$878,000 (excl GST)"]}}})
+    r = cp.comprehend_thread(tmp_path, t, stub, get_profile())
+    assert r["facts"]["dates"] == ["14 March 2025"]        # weekday + annotation stripped, deduped
+    assert r["facts"]["amounts"] == ["S$878,000"]          # trailing annotation stripped
+    assert r["facts"]["project"] == "COB ID"               # annotation stripped
+    assert r["verified"]["facts_ok"] is True               # all grounded -> no warning
+
+
+def test_amount_digit_fallback(tmp_path):
+    t = _one_thread(tmp_path, body_a="the contract sum is S$1,250,000 total")
+    stub = StubComprehender(responses={"distill": {
+        "abstract": "a", "summary": "s", "event": "e",
+        "facts": {"project": "", "parties": [], "refs": [], "dates": [],
+                  "amounts": ["1250000"]}}})        # reformatted (no commas/currency) -> digit match
+    r = cp.comprehend_thread(tmp_path, t, stub, get_profile())
+    assert r["facts"]["amounts"] == ["1250000"]
+
+
 def test_event_tag_truncated_to_30(tmp_path):
     t = _one_thread(tmp_path)
     stub = StubComprehender(responses={"distill": {
