@@ -3,7 +3,9 @@
 {% block nav_setup %}active{% endblock %}
 {% block body %}
 <h1>Setup</h1>
-<p class="note">IMAP password is stored in your OS keyring (never in config files or logs).</p>
+<p class="note"><strong>Step 1 — connect your mailbox.</strong> Enter your email provider's IMAP details, click
+  <strong>Test IMAP</strong> to check the connection, then <strong>Save &amp; continue</strong>. Your password is
+  stored in your OS keyring (never in config files or logs).</p>
 {% if error %}<div class="msg err" style="display:block">{{ error }}</div>{% endif %}
 
 <form id="f" method="post" action="/setup/save">

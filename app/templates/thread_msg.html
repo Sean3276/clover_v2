@@ -1,0 +1,20 @@
+{% if block.error %}
+  <div class="msg err" style="display:block">Couldn't render this message: {{ block.error }}</div>
+{% else %}
+  {% if block.subject %}<p class="msubj">{{ block.subject }}</p>{% endif %}
+  <p class="note mono" style="margin:0 0 8px">{{ block.from }} → {{ block.to }}</p>
+  {% if srcdoc %}
+    <iframe class="emlframe" sandbox="allow-same-origin" srcdoc="{{ srcdoc }}" onload="sizeFrame(this)"></iframe>
+  {% elif block.body_text %}
+    <pre class="bodytext">{{ block.body_text }}</pre>
+  {% else %}
+    <p class="note dim">(no readable body)</p>
+  {% endif %}
+  {% if block.attachments %}
+    {% set chips = block.attachments|rejectattr('img')|list %}
+    {% if chips %}<div class="atts">
+      {% for a in chips %}<span class="att">📎 {{ a.name }} <span class="dim">({{ (a.size / 1024)|round(1) }} KB)</span></span>{% endfor %}
+    </div>{% endif %}
+    {% for a in block.attachments if a.img %}<figure class="attimg"><img src="{{ a.img }}" alt="{{ a.name }}" loading="lazy"><figcaption class="dim">📎 {{ a.name }} ({{ (a.size / 1024)|round(1) }} KB)</figcaption></figure>{% endfor %}
+  {% endif %}
+{% endif %}

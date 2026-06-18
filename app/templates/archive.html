@@ -50,6 +50,7 @@
 <div class="runhdr">
   <div><h1>Archive monitor</h1>
     <p class="note">Mailbox <code>{{ cfg.auth.imap.user or "not set" }}</code> · Destination <code>{{ cfg.archive_path }}</code></p>
+    <p class="note dim" style="margin:4px 0 0"><strong>Step 2 — download your mail.</strong> Tick folders (optional date/size filters), then Archive. It's read-only — nothing on the server is moved, deleted, or marked read — and auto-resumes if the connection drops.</p>
     <p id="sessionLine" class="note dim" style="margin:4px 0 0"></p></div>
   <span id="runPill" class="pill down">● idle</span>
 </div>

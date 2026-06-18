@@ -275,19 +275,37 @@ def threads_rebuild():
         return JSONResponse({"ok": False, "message": f"{type(e).__name__}: {e}"})
 
 
+def _wrap_srcdoc(body_html: str) -> str:
+    """Clean standards-mode document for the sandboxed iframe (DOCTYPE first avoids quirks mode)."""
+    return ('<!DOCTYPE html><html><head><meta charset="utf-8">' + _THREAD_CSP + _THREAD_STYLE
+            + "</head><body>" + body_html + "</body></html>")
+
+
 @app.get("/threads/{thread_id}", response_class=HTMLResponse)
 def thread_view(request: Request, thread_id: str):
     cfg = cfgmod.load_config()
-    arch = _archive_dir(cfg)
-    t = threadmod.get_thread(arch, thread_id)
+    t = threadmod.get_thread(_archive_dir(cfg), thread_id)
     if not t:
         return RedirectResponse("/threads", status_code=303)
-    blocks = threadmod.stitch_thread(arch, t)
-    for b in blocks:                          # wrap each HTML body in a clean standards-mode document
-        if b.get("body_html"):                # (DOCTYPE first -> no quirks mode; CSP/style live in <head>)
-            b["srcdoc"] = ('<!DOCTYPE html><html><head><meta charset="utf-8">'
-                           + _THREAD_CSP + _THREAD_STYLE + "</head><body>" + b["body_html"]
-                           + "</body></html>")
-    return templates.TemplateResponse(request, "thread_view.html", {
-        "cfg": cfg, "thread": t, "blocks": blocks,
-    })
+    # render only the lightweight header list from threads.jsonl; bodies load on demand below
+    return templates.TemplateResponse(request, "thread_view.html", {"cfg": cfg, "thread": t})
+
+
+@app.get("/threads/{thread_id}/msg/{idx}", response_class=HTMLResponse)
+def thread_message(request: Request, thread_id: str, idx: int):
+    """Render a single thread message on demand (so long threads stay light)."""
+    cfg = cfgmod.load_config()
+    arch = _archive_dir(cfg)
+    t = threadmod.get_thread(arch, thread_id)
+    members = (t or {}).get("members", [])
+    if not t or idx < 0 or idx >= len(members):
+        return HTMLResponse('<p class="msg err" style="display:block">Message not found.</p>', status_code=404)
+    locs = members[idx].get("locations") or []
+    if not locs:
+        return HTMLResponse('<p class="note dim">(no file for this message)</p>')
+    try:
+        block = threadmod.render_message(arch, locs[0])
+    except Exception as e:
+        return HTMLResponse(f'<p class="msg err" style="display:block">Couldn\'t render: {type(e).__name__}</p>')
+    srcdoc = _wrap_srcdoc(block["body_html"]) if block.get("body_html") else None
+    return templates.TemplateResponse(request, "thread_msg.html", {"block": block, "srcdoc": srcdoc})

@@ -3,20 +3,31 @@
 {% block nav_threads %}active{% endblock %}
 {% block body %}
 <style>
-  .msgblock{padding:14px 16px}
-  .msghdr{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline}
-  .msghdr .who{font-size:14px}
+  .msgs{display:flex;flex-direction:column;gap:8px}
+  .tmsg{padding:0;overflow:hidden}
+  .mhead{display:flex;align-items:center;gap:10px;padding:12px 15px;cursor:pointer}
+  .mhead:hover{background:var(--card2)}
+  .mhead .caret{color:var(--clover);flex:none;font-size:12px;transition:transform .15s ease}
+  .tmsg.open .mhead .caret{transform:rotate(90deg)}
+  .mhead .who{flex:1;min-width:0;overflow:hidden}
+  .mhead .who strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mhead .who strong{font-size:14px}
+  .mhead .msnip{display:block;font-size:12px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tmsg.open .mhead .msnip{display:none}
+  .mhead .when{font-size:12px;color:var(--sub);white-space:nowrap;font-family:var(--mono);flex:none}
+  .mbody{display:none;padding:0 15px 15px}
+  .tmsg.open .mbody{display:block}
+  .msubj{font-size:12px;color:var(--sub);margin:0 0 6px}
   .bodytext{white-space:pre-wrap;font-family:var(--mono);font-size:12.5px;background:var(--code-bg);
-    border:1px solid var(--line);border-radius:8px;padding:12px;margin:8px 0 0;max-height:1400px;overflow:auto}
-  .emlframe{width:100%;border:1px solid var(--line);border-radius:8px;background:#fff;margin-top:8px;min-height:80px}
+    border:1px solid var(--line);border-radius:8px;padding:12px;margin:0;overflow:auto}
+  .emlframe{width:100%;border:1px solid var(--line);border-radius:8px;background:#fff;min-height:60px}
   .atts{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
   .att{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:3px 9px;color:var(--sub)}
   .attimg{margin:10px 0 0}
   .attimg img{max-width:100%;max-height:480px;border:1px solid var(--line);border-radius:8px;display:block}
   .attimg figcaption{font-size:11px;margin-top:3px}
-  .orderbar{display:flex;justify-content:flex-end;margin:8px 0 0}
-  .orderbar button{font-size:12px;padding:5px 11px}
-  .msgs{display:flex;flex-direction:column}
+  .tbar{display:flex;justify-content:flex-end;gap:8px;margin:8px 0 0;flex-wrap:wrap}
+  .tbar button{font-size:12px;padding:5px 11px}
 </style>
 
 <p style="margin:0 0 6px"><a href="/threads" class="note">← all threads</a></p>
@@ -24,52 +35,59 @@
 <p class="note">{{ thread.n }} message(s) · {{ thread.participants|join(', ') }}
   · {{ (thread.start or '')[:10] }}{% if thread.n > 1 %} → {{ (thread.end or '')[:10] }}{% endif %}</p>
 
-{% if thread.n > 1 %}<div class="orderbar"><button id="orderBtn" type="button" class="ghost" onclick="toggleOrder()">↓ Oldest first</button></div>{% endif %}
+{% if thread.n > 1 %}
+<div class="tbar">
+  <button id="orderBtn" type="button" class="ghost" onclick="toggleOrder()">↓ Oldest first</button>
+  <button type="button" class="ghost" onclick="expandAll(true)">Expand all</button>
+  <button type="button" class="ghost" onclick="expandAll(false)">Collapse all</button>
+</div>
+{% endif %}
+
 <div id="msgs" class="msgs">
-{% for b in blocks %}
-<div class="card msgblock">
-  {% if b.error %}
-    <div class="msg err" style="display:block">Couldn't render this message: {{ b.error }}</div>
-  {% else %}
-  <div class="msghdr">
-    <div class="who"><strong>{{ b.from }}</strong> <span class="note">→ {{ b.to }}</span></div>
-    <div class="note mono">{{ b.date }}{% if b.folder %} · {{ b.folder }}{% endif %}</div>
+{% for m in thread.members %}
+<div class="card tmsg">
+  <div class="mhead" onclick="toggleMsg(this)">
+    <span class="caret">▶</span>
+    <div class="who">
+      <strong>{{ m.from or '(unknown sender)' }}</strong>
+      <span class="msnip">{{ m.subject }}</span>
+    </div>
+    <span class="when">{{ (m.date or '')[:16]|replace('T', ' ') }}{% if m.locations %} · {{ m.locations[0].folder }}{% endif %}</span>
   </div>
-  {% if b.subject %}<div class="note" style="margin:3px 0 6px">{{ b.subject }}</div>{% endif %}
-  {% if b.srcdoc %}
-    <iframe class="emlframe" sandbox="allow-same-origin" srcdoc="{{ b.srcdoc }}" loading="lazy"></iframe>
-  {% elif b.body_text %}
-    <pre class="bodytext">{{ b.body_text }}</pre>
-  {% else %}
-    <p class="note dim">(no readable body)</p>
-  {% endif %}
-  {% if b.attachments %}
-  {% set chips = b.attachments|rejectattr('img')|list %}
-  {% if chips %}<div class="atts">
-    {% for a in chips %}<span class="att">📎 {{ a.name }} <span class="dim">({{ (a.size / 1024)|round(1) }} KB)</span></span>{% endfor %}
-  </div>{% endif %}
-  {% for a in b.attachments if a.img %}<figure class="attimg"><img src="{{ a.img }}" alt="{{ a.name }}" loading="lazy"><figcaption class="dim">📎 {{ a.name }} ({{ (a.size / 1024)|round(1) }} KB)</figcaption></figure>{% endfor %}
-  {% endif %}
-  {% endif %}
+  <div class="mbody" data-url="/threads/{{ thread.thread_id }}/msg/{{ loop.index0 }}"></div>
 </div>
 {% endfor %}
 </div>
 
 <script>
 function sizeFrame(f){
-  try{
-    const d = f.contentDocument || f.contentWindow.document;
-    const h = Math.max(d.documentElement.scrollHeight, d.body ? d.body.scrollHeight : 0);
-    f.style.height = Math.min(h + 24, 6000) + "px";
+  try{ const d = f.contentDocument || f.contentWindow.document;
+    f.style.height = Math.min(Math.max(d.documentElement.scrollHeight, d.body ? d.body.scrollHeight : 0) + 24, 6000) + "px";
   }catch(e){ f.style.height = "600px"; }
 }
-function sizeFrames(){ document.querySelectorAll("iframe.emlframe").forEach(sizeFrame); }
-// re-measure each frame once its srcdoc (incl. inlined data: images) finishes loading
-document.querySelectorAll("iframe.emlframe").forEach(f => f.addEventListener("load", () => sizeFrame(f)));
+async function loadBody(msg){
+  const body = msg.querySelector(".mbody");
+  if(body.dataset.loaded) return;
+  body.dataset.loaded = "1";
+  body.innerHTML = '<p class="note dim">Loading…</p>';
+  try{
+    body.innerHTML = await (await fetch(body.dataset.url)).text();   // body (and its images) load only on open
+  }catch(e){ body.dataset.loaded = ""; body.innerHTML = '<p class="msg err" style="display:block">Failed to load message.</p>'; }
+}
+function toggleMsg(head){
+  const msg = head.closest(".tmsg");
+  msg.classList.toggle("open");
+  if(msg.classList.contains("open")) loadBody(msg);
+}
+function expandAll(open){
+  document.querySelectorAll("#msgs .tmsg").forEach(m => {
+    if(open){ m.classList.add("open"); loadBody(m); } else { m.classList.remove("open"); }
+  });
+}
 function applyOrder(){
   const newest = localStorage.getItem("clover_thread_order") === "newest";
   const msgs = document.getElementById("msgs");
-  if(msgs) msgs.style.flexDirection = newest ? "column-reverse" : "column";   // CSS-only; no iframe reload
+  if(msgs) msgs.style.flexDirection = newest ? "column-reverse" : "column";
   const btn = document.getElementById("orderBtn");
   if(btn) btn.textContent = newest ? "↑ Newest first" : "↓ Oldest first";
 }
@@ -79,6 +97,9 @@ function toggleOrder(){
   applyOrder();
 }
 applyOrder();
-window.addEventListener("load", () => { sizeFrames(); setTimeout(sizeFrames, 400); setTimeout(sizeFrames, 1200); });
+(function(){     // small threads open fully; long ones stay collapsed (just headers -> instant + scrollable)
+  const msgs = [...document.querySelectorAll("#msgs .tmsg")];
+  if(msgs.length && msgs.length <= 6) expandAll(true);
+})();
 </script>
 {% endblock %}

@@ -171,6 +171,29 @@ def test_render_message_rejects_path_escape(tmp_path):
         th.render_message(tmp_path, {"path": "../../etc/passwd"})   # containment guard
 
 
+def test_thread_routes_lazy_load(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import app.main as m
+    _write_eml(tmp_path, "INBOX", "1", mid="a@x", subject="Hi", html="<p>hello</p>")
+    _write_eml(tmp_path, "INBOX", "2", mid="b@x", irt="a@x", subject="Re: Hi", text="reply")
+    th.build_threads(tmp_path, log=lambda *_: None)
+    cfg = {"auth": {"imap": {}}, "folders": ["INBOX"], "archive_path": str(tmp_path)}
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: dict(cfg))
+    c = TestClient(m.app)
+    tid = th.read_threads(tmp_path)[0]["thread_id"]
+
+    r = c.get(f"/threads/{tid}")
+    assert r.status_code == 200
+    assert r.text.count('class="card tmsg"') == 2     # both headers rendered
+    assert "srcdoc" not in r.text                      # bodies are NOT inlined (lazy)
+
+    r0 = c.get(f"/threads/{tid}/msg/0")
+    assert r0.status_code == 200 and "emlframe" in r0.text   # html body rendered on demand
+
+    assert c.get(f"/threads/{tid}/msg/99").status_code == 404
+    assert c.get("/threads/deadbeef/msg/0").status_code == 404
+
+
 def test_render_inlines_cid_images_and_image_attachments(tmp_path):
     import base64
     png = base64.b64decode(
