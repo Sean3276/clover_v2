@@ -97,8 +97,10 @@ threads up to ~160 messages — confirming header-only threading is sound.
   (`sandbox` with no scripts; CSP blocks remote content so tracking pixels / remote calls don't
   fire). Plain-text part rendered in a mono block when there's no HTML. Attachments listed by
   name + size (already embedded in the `.eml`; extraction is a later phase).
-- **Build trigger:** a "Rebuild thread index" button; auto-build if `threads.jsonl` is missing.
-  Full rebuild (header-parsing the whole archive is seconds). No incremental complexity in v1.
+- **Build trigger:** rebuilds automatically once at the end of an archive run that saved new mail
+  (skipped when nothing changed); plus a manual "Rebuild thread index" button, and auto-build if
+  `threads.jsonl` is missing. Full rebuild (header-parsing the whole archive is seconds). No
+  incremental complexity in v1.
 - **Optional, on demand:** an "Export thread" action (save one thread as a single file) — a user
   action, not a maintained store.
 

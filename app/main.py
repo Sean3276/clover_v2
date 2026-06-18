@@ -163,6 +163,12 @@ def _run_archive_bg(folders: list[str], limit: int | None, filters: dict):
             run_once, auto_resume=True, log=_log, sleep=time.sleep,
             should_stop=lambda: _status.get("stop", False),
         )
+        if _status.get("session_saved", 0) > 0:    # new mail landed -> refresh the thread index once
+            _log("Rebuilding thread index…")
+            try:
+                threadmod.build_threads(_archive_dir(cfg), log=_log)
+            except Exception as e:
+                _log(f"Thread index rebuild failed: {type(e).__name__}: {e}")
     except Exception as e:
         _log(f"ERROR: {type(e).__name__}: {e}")
     finally:

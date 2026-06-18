@@ -11,6 +11,9 @@
   .emlframe{width:100%;border:1px solid var(--line);border-radius:8px;background:#fff;margin-top:8px;min-height:80px}
   .atts{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
   .att{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:3px 9px;color:var(--sub)}
+  .orderbar{display:flex;justify-content:flex-end;margin:8px 0 0}
+  .orderbar button{font-size:12px;padding:5px 11px}
+  .msgs{display:flex;flex-direction:column}
 </style>
 
 <p style="margin:0 0 6px"><a href="/threads" class="note">← all threads</a></p>
@@ -18,6 +21,8 @@
 <p class="note">{{ thread.n }} message(s) · {{ thread.participants|join(', ') }}
   · {{ (thread.start or '')[:10] }}{% if thread.n > 1 %} → {{ (thread.end or '')[:10] }}{% endif %}</p>
 
+{% if thread.n > 1 %}<div class="orderbar"><button id="orderBtn" type="button" class="ghost" onclick="toggleOrder()">↓ Oldest first</button></div>{% endif %}
+<div id="msgs" class="msgs">
 {% for b in blocks %}
 <div class="card msgblock">
   {% if b.error %}
@@ -43,6 +48,7 @@
   {% endif %}
 </div>
 {% endfor %}
+</div>
 
 <script>
 function sizeFrames(){
@@ -54,6 +60,19 @@ function sizeFrames(){
     }catch(e){ f.style.height = "600px"; }
   });
 }
+function applyOrder(){
+  const newest = localStorage.getItem("clover_thread_order") === "newest";
+  const msgs = document.getElementById("msgs");
+  if(msgs) msgs.style.flexDirection = newest ? "column-reverse" : "column";   // CSS-only; no iframe reload
+  const btn = document.getElementById("orderBtn");
+  if(btn) btn.textContent = newest ? "↑ Newest first" : "↓ Oldest first";
+}
+function toggleOrder(){
+  const newest = localStorage.getItem("clover_thread_order") === "newest";
+  localStorage.setItem("clover_thread_order", newest ? "oldest" : "newest");
+  applyOrder();
+}
+applyOrder();
 window.addEventListener("load", () => { sizeFrames(); setTimeout(sizeFrames, 350); });
 </script>
 {% endblock %}
