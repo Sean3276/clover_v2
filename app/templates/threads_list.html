@@ -15,6 +15,10 @@
   .thmeta{display:block;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .thside{flex:none;display:flex;flex-direction:column;gap:3px;align-items:flex-end}
   .thn{font-size:11px;font-weight:700;color:var(--clover-d);background:rgba(52,210,123,.14);border-radius:20px;padding:2px 9px}
+  .cbadges{display:inline-flex;gap:5px;flex-wrap:wrap;margin-top:3px}
+  .cbadge{font-size:10px;font-weight:700;border:1px solid var(--line);border-radius:5px;padding:1px 7px;color:var(--sub)}
+  .cbadge.dom{background:rgba(52,210,123,.14);color:var(--clover-d);border-color:rgba(52,210,123,.3)}
+  .cbadge.warn{background:rgba(240,178,74,.16);color:var(--amber);border-color:rgba(240,178,74,.34)}
 </style>
 
 <div class="runhdr">
@@ -52,7 +56,13 @@
        data-q="{{ (t.subject ~ ' ' ~ (t.participants|join(' ')))|lower }}">
       <div class="thmain">
         <span class="thsubj">{{ t.subject }}</span>
+        {% set c = comps.get(t.thread_id) %}
+        {% if c %}
+        <span class="thmeta note">{{ c.summary or (c.classification.category ~ ' — comprehended') }}</span>
+        <span class="cbadges"><span class="cbadge dom">{{ c.classification.domain }}</span><span class="cbadge">{{ c.classification.category }}</span>{% if c.classification.consensus == 'asked' %}<span class="cbadge warn">review</span>{% endif %}</span>
+        {% else %}
         <span class="thmeta note">{{ t.participants[:3]|join(', ') }}{% if t.participants|length > 3 %} +{{ t.participants|length - 3 }} more{% endif %}</span>
+        {% endif %}
       </div>
       <div class="thside">
         <span class="thn">{{ t.n }} msg</span>

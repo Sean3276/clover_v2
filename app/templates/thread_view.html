@@ -28,12 +28,51 @@
   .attimg figcaption{font-size:11px;margin-top:3px}
   .tbar{display:flex;justify-content:flex-end;gap:8px;margin:8px 0 0;flex-wrap:wrap}
   .tbar button{font-size:12px;padding:5px 11px}
+  .comp{padding:14px 16px}
+  .compbadges{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  .cbadge{font-size:11px;font-weight:700;border:1px solid var(--line);border-radius:5px;padding:2px 8px;color:var(--sub)}
+  .cbadge.dom{background:rgba(52,210,123,.14);color:var(--clover-d);border-color:rgba(52,210,123,.3)}
+  .cbadge.warn{background:rgba(240,178,74,.16);color:var(--amber);border-color:rgba(240,178,74,.34)}
+  .csum{font-size:15px;font-weight:600;margin:0 0 6px;color:var(--ink)}
+  .cfacts{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--sub)}
+  .cfacts b{color:var(--ink)}
 </style>
 
 <p style="margin:0 0 6px"><a href="/threads" class="note">← all threads</a></p>
 <h1 style="font-size:20px;margin:0 0 4px">{{ thread.subject }}</h1>
 <p class="note">{{ thread.n }} message(s) · {{ thread.participants|join(', ') }}
   · {{ (thread.start or '')[:10] }}{% if thread.n > 1 %} → {{ (thread.end or '')[:10] }}{% endif %}</p>
+
+{% if comp %}
+<div class="card comp">
+  <div class="compbadges">
+    <span class="cbadge dom">{{ comp.classification.domain }}</span>
+    <span class="cbadge">{{ comp.classification.category }}</span>
+    <span class="cbadge {% if comp.classification.consensus == 'asked' %}warn{% endif %}">{{ comp.classification.consensus }}</span>
+    <span class="note mono">conf {{ "%.0f"|format((comp.classification.confidence or 0) * 100) }}%</span>
+    <span class="note dim">· {{ comp.model }} · {{ comp.method }}</span>
+  </div>
+  {% if comp.summary %}<p class="csum">{{ comp.summary }}</p>{% endif %}
+  {% if comp.abstract %}<p class="note">{{ comp.abstract }}</p>{% endif %}
+  {% if comp.facts %}
+  <div class="cfacts">
+    {% if comp.facts.project %}<span><b>Project:</b> {{ comp.facts.project }}</span>{% endif %}
+    {% if comp.facts.refs %}<span><b>Refs:</b> {{ comp.facts.refs|join(', ') }}</span>{% endif %}
+    {% if comp.facts.amounts %}<span><b>Amounts:</b> {{ comp.facts.amounts|join(', ') }}</span>{% endif %}
+    {% if comp.facts.dates %}<span><b>Dates:</b> {{ comp.facts.dates|join(', ') }}</span>{% endif %}
+    {% if comp.facts.parties %}<span><b>Parties:</b> {{ comp.facts.parties|join(', ') }}</span>{% endif %}
+  </div>
+  {% endif %}
+  {% if comp.verified and not comp.verified.facts_ok %}<p class="note dim" style="margin-top:8px">⚠ Some extracted facts weren't found in the thread and were dropped.</p>{% endif %}
+</div>
+{% else %}
+<div class="card comp">
+  <p class="note" style="margin:0">Not yet comprehended.
+  {% if ai_ready %}<button type="button" id="compBtn" onclick="comprehend()" style="margin-left:8px">🍀 Comprehend</button>
+  {% else %}<span class="dim">— AI backend not set up; install the Claude CLI to enable.</span>{% endif %}</p>
+  <div id="compMsg" class="msg"></div>
+</div>
+{% endif %}
 
 {% if thread.n > 1 %}
 <div class="tbar">
@@ -95,6 +134,16 @@ function toggleOrder(){
   const newest = localStorage.getItem("clover_thread_order") === "newest";
   localStorage.setItem("clover_thread_order", newest ? "oldest" : "newest");
   applyOrder();
+}
+async function comprehend(){
+  const b = document.getElementById("compBtn"), m = document.getElementById("compMsg");
+  if(b) b.disabled = true;
+  if(m){ m.className = "msg ok"; m.textContent = "Comprehending… (calls the AI; may take a moment)"; }
+  try{
+    const res = await (await fetch(location.pathname + "/comprehend", {method:"POST"})).json();
+    if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }
+    if(res.ok) setTimeout(() => location.reload(), 800); else if(b) b.disabled = false;
+  }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Failed: " + e; } if(b) b.disabled = false; }
 }
 applyOrder();
 (function(){     // small threads open fully; long ones stay collapsed (just headers -> instant + scrollable)

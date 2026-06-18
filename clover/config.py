@@ -14,6 +14,10 @@ def default_config() -> dict:
         "auth": {"imap": {"host": "", "port": 993, "security": "ssl", "user": ""}},
         "archive_path": str(default_archive_path()),
         "folders": ["INBOX", "Sent"],
+        "comprehension": {
+            "backend": "claude-cli", "model": "sonnet", "profile": "construction",
+            "budget_tokens": 200000, "autorun": True,
+        },
     }
 
 

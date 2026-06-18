@@ -6,6 +6,7 @@ Run from .clover_v2_github:
 """
 from __future__ import annotations
 
+import shutil
 import threading
 import time
 from datetime import date
@@ -16,10 +17,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from clover import archive
+from clover import comprehend as compmod
 from clover import config as cfgmod
 from clover import threads as threadmod
+from clover.comprehenders import get_comprehender
 from clover.errors import friendly_conn_error
 from clover.paths import auto_clover_root, ensure_runtime, runtime_dir
+from clover.profiles import get_profile
 from clover.sources import SUITE, get_source
 
 _THREAD_CSP = ('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
@@ -175,6 +179,7 @@ def _run_archive_bg(folders: list[str], limit: int | None, filters: dict):
                 threadmod.build_threads(_archive_dir(cfg), log=_log)
             except Exception as e:
                 _log(f"Thread index rebuild failed: {type(e).__name__}: {e}")
+            _maybe_autorun_comprehension(cfg)       # comprehend the new threads (budget-capped)
     except Exception as e:
         _log(f"ERROR: {type(e).__name__}: {e}")
     finally:
@@ -252,14 +257,64 @@ def _archive_dir(cfg: dict) -> Path:
     return p
 
 
+# --- Phase 3 comprehension helpers (backend + policy gate are the future plug-in/subscription seams) ---
+def _comp_cfg(cfg: dict) -> dict:
+    c = dict(cfgmod.default_config()["comprehension"])
+    c.update(cfg.get("comprehension") or {})
+    return c
+
+
+def _backend_available(cfg: dict) -> bool:
+    if _comp_cfg(cfg)["backend"] == "claude-cli":
+        return bool(shutil.which("claude"))
+    return True
+
+
+def _comprehender(cfg: dict):
+    c = _comp_cfg(cfg)
+    if c["backend"] == "claude-cli":
+        return get_comprehender("claude-cli", model=c.get("model", "sonnet"))
+    return get_comprehender(c["backend"])
+
+
+def _comprehension_allowed(cfg: dict) -> bool:
+    return True   # policy gate seam — subscription/tier entitlement check plugs in here later
+
+
+def _maybe_autorun_comprehension(cfg: dict) -> None:
+    c = _comp_cfg(cfg)
+    if not c.get("autorun"):
+        return
+    if not _comprehension_allowed(cfg):
+        _log("Comprehension autorun skipped (policy gate).")
+        return
+    if not _backend_available(cfg):
+        _log("Comprehension autorun skipped — AI backend not set up "
+             "(install Claude CLI: npm i -g @anthropic-ai/claude-code).")
+        return
+    _log("Comprehending new threads…")
+    try:
+        out = compmod.run_comprehension(
+            _archive_dir(cfg), backend=_comprehender(cfg), profile=get_profile(c.get("profile")),
+            budget_tokens=int(c.get("budget_tokens", 200000)), log=_log,
+            should_stop=lambda: _status.get("stop", False),
+            allowed=lambda: _comprehension_allowed(cfg),
+        )
+        _log(f"Comprehension: {out['done']} done, {out['pending']} pending.")
+    except Exception as e:
+        _log(f"Comprehension autorun failed: {type(e).__name__}: {e}")
+
+
 @app.get("/threads", response_class=HTMLResponse)
 def threads_page(request: Request):
     cfg = cfgmod.load_config()
     arch = _archive_dir(cfg)
+    comps = {r["thread_id"]: r for r in compmod.read_comprehensions(arch) if r.get("thread_id")}
     return templates.TemplateResponse(request, "threads_list.html", {
         "cfg": cfg,
         "threads": threadmod.read_threads(arch),
         "has_index": (arch / "threads.jsonl").exists(),
+        "comps": comps,
     })
 
 
@@ -284,11 +339,39 @@ def _wrap_srcdoc(body_html: str) -> str:
 @app.get("/threads/{thread_id}", response_class=HTMLResponse)
 def thread_view(request: Request, thread_id: str):
     cfg = cfgmod.load_config()
-    t = threadmod.get_thread(_archive_dir(cfg), thread_id)
+    arch = _archive_dir(cfg)
+    t = threadmod.get_thread(arch, thread_id)
     if not t:
         return RedirectResponse("/threads", status_code=303)
     # render only the lightweight header list from threads.jsonl; bodies load on demand below
-    return templates.TemplateResponse(request, "thread_view.html", {"cfg": cfg, "thread": t})
+    return templates.TemplateResponse(request, "thread_view.html", {
+        "cfg": cfg, "thread": t,
+        "comp": compmod.get_comprehension(arch, thread_id),
+        "ai_ready": _backend_available(cfg),
+    })
+
+
+@app.post("/threads/{thread_id}/comprehend")
+def thread_comprehend(thread_id: str):
+    cfg = cfgmod.load_config()
+    arch = _archive_dir(cfg)
+    if not _comprehension_allowed(cfg):
+        return JSONResponse({"ok": False, "message": "Comprehension isn't enabled for your plan."})
+    if not _backend_available(cfg):
+        return JSONResponse({"ok": False, "message":
+                             "AI backend not set up — install the Claude CLI "
+                             "(npm i -g @anthropic-ai/claude-code) and log in."})
+    t = threadmod.get_thread(arch, thread_id)
+    if not t:
+        return JSONResponse({"ok": False, "message": "Thread not found."})
+    c = _comp_cfg(cfg)
+    try:
+        rec = compmod.comprehend_thread(arch, t, _comprehender(cfg), get_profile(c.get("profile")),
+                                        model=c.get("model", "?"))
+        compmod.save_comprehension(arch, rec)
+        return JSONResponse({"ok": True, "message": "Comprehended.", "classification": rec["classification"]})
+    except Exception as e:
+        return JSONResponse({"ok": False, "message": f"{type(e).__name__}: {e}"})
 
 
 @app.get("/threads/{thread_id}/msg/{idx}", response_class=HTMLResponse)
