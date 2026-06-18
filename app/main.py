@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -16,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 
 from clover import archive
 from clover import config as cfgmod
+from clover.errors import friendly_conn_error
 from clover.paths import ensure_runtime, runtime_dir
 from clover.sources import SUITE, get_source
 
@@ -26,7 +28,7 @@ app = FastAPI(title="Clover v2 — Phase 1")
 _lock = threading.Lock()
 # live run state — per-folder progress drives the dashboard
 _status = {"running": False, "started_at": None, "folders": {}, "log": [], "manifest": None,
-           "stop": False, "attempt": 0, "session_saved": 0}
+           "stop": False, "attempt": 0, "session_saved": 0, "prep": None}
 
 
 def _log(line: str) -> None:
@@ -41,8 +43,28 @@ def _progress(p: dict) -> None:
         _status["folders"][p["folder"]] = p
 
 
+def _prep(p: dict | None) -> None:
+    with _lock:
+        _status["prep"] = p
+
+
 def _imap_conn(cfg: dict) -> dict:
     return cfg["auth"].get("imap", {})
+
+
+def _list_folders(cfg: dict, pw: str, attempts: int = 3):
+    """List folders, retrying a few times so a transient DNS/connection blip doesn't dump the
+    user to an error screen. Returns (folders, error_string_or_None)."""
+    last = None
+    for i in range(attempts):
+        try:
+            with get_source("imap", _imap_conn(cfg), pw) as src:
+                return src.folders(), None
+        except Exception as e:
+            last = e
+            if i < attempts - 1:
+                time.sleep(1.2)
+    return [], friendly_conn_error(last)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -98,11 +120,7 @@ def archive_page(request: Request):
     folders, folder_err = [], None
     pw = cfgmod.get_secret(cfgmod.SECRET_IMAP_PASSWORD)
     if pw and _imap_conn(cfg).get("host"):
-        try:
-            with get_source("imap", _imap_conn(cfg), pw) as src:
-                folders = src.folders()
-        except Exception as e:
-            folder_err = f"{type(e).__name__}: {e}"
+        folders, folder_err = _list_folders(cfg, pw)
     try:
         summary = archive.index_summary(Path(cfg.get("archive_path") or "."))
     except Exception:
@@ -116,7 +134,7 @@ def archive_page(request: Request):
     })
 
 
-def _run_archive_bg(folders: list[str], limit: int | None, auto_resume: bool):
+def _run_archive_bg(folders: list[str], limit: int | None, filters: dict):
     try:
         cfg = cfgmod.load_config()
         cfg["folders"] = folders
@@ -130,14 +148,15 @@ def _run_archive_bg(folders: list[str], limit: int | None, auto_resume: bool):
             with _lock:
                 _status["attempt"] += 1
             m = archive.run_archive(cfg, pw, log=_log, limit_per_folder=limit, progress=_progress,
-                                    should_stop=lambda: _status.get("stop", False))
+                                    should_stop=lambda: _status.get("stop", False),
+                                    filters=filters, prep=_prep)
             with _lock:
                 _status["manifest"] = m
                 _status["session_saved"] += m.get("saved", 0)
             return m
 
-        archive.run_until_complete(
-            run_once, auto_resume=auto_resume, log=_log, sleep=time.sleep,
+        archive.run_until_complete(            # auto-resume is always on (rides out flaky links)
+            run_once, auto_resume=True, log=_log, sleep=time.sleep,
             should_stop=lambda: _status.get("stop", False),
         )
     except Exception as e:
@@ -145,22 +164,46 @@ def _run_archive_bg(folders: list[str], limit: int | None, auto_resume: bool):
     finally:
         with _lock:
             _status["running"] = False
+            _status["prep"] = None
+
+
+def _parse_date(s: str):
+    s = (s or "").strip()
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        return None
 
 
 @app.post("/archive/run")
 def archive_run(folders: list[str] = Form(default=[]), limit: int = Form(0),
-                auto_resume: str = Form("off")):
-    ar = str(auto_resume).lower() in ("on", "true", "1", "yes")
+                date_from: str = Form(""), date_to: str = Form(""),
+                size_mode: str = Form("all"), size_mb: float = Form(0.0), top_n: int = Form(0)):
+    df, dt = _parse_date(date_from), _parse_date(date_to)
+    size_min = int(size_mb * 1024 * 1024) if (size_mode == "min" and size_mb and size_mb > 0) else None
+    topn = top_n if (size_mode == "top" and top_n and top_n > 0) else None
+    if df and dt and df > dt:
+        return JSONResponse({"ok": False, "message": "‘From’ date is after ‘To’ date."})
+    filters = {"date_from": df, "date_to": dt, "size_min": size_min, "top_n": topn}
     with _lock:
         if _status["running"]:
             return JSONResponse({"ok": False, "message": "An archive run is already in progress."})
         if not folders:
             return JSONResponse({"ok": False, "message": "Select at least one folder."})
         _status.update(running=True, started_at=time.time(), folders={}, log=[], manifest=None,
-                       stop=False, attempt=0, session_saved=0)
-    threading.Thread(target=_run_archive_bg, args=(folders, limit or None, ar), daemon=True).start()
-    return JSONResponse({"ok": True,
-                         "message": f"Archiving {len(folders)} folder(s)" + (" · auto-resume on" if ar else "")})
+                       stop=False, attempt=0, session_saved=0, prep=None)
+    threading.Thread(target=_run_archive_bg, args=(folders, limit or None, filters), daemon=True).start()
+    bits = []
+    if df or dt:
+        bits.append(f"{df or '…'}→{dt or '…'}")
+    if size_min:
+        bits.append(f"≥{size_mb:g} MB")
+    if topn:
+        bits.append(f"largest {topn}")
+    suffix = (" · " + ", ".join(bits)) if bits else ""
+    return JSONResponse({"ok": True, "message": f"Archiving {len(folders)} folder(s){suffix}"})
 
 
 @app.post("/archive/stop")
@@ -181,4 +224,5 @@ def archive_status():
             "manifest": _status["manifest"],
             "attempt": _status["attempt"],
             "session_saved": _status["session_saved"],
+            "prep": _status["prep"],
         })

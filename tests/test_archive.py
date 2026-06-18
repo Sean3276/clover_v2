@@ -1,9 +1,13 @@
 import json
+import socket
 import time
+from datetime import date, datetime, timezone
 from email.message import EmailMessage
 
 from clover import archive as ar
+from clover.errors import friendly_conn_error
 from clover.sources.base import MailSource
+from clover.sources.imap_source import _parse_fetch_meta
 
 
 def _raw(mid: str) -> bytes:
@@ -223,3 +227,195 @@ def test_existing_keys_and_summary(tmp_path):
     assert s["total"] == 4
     assert s["unique_ids"] == 2          # <a@x> once; uid_3 excluded
     assert s["per_folder"] == {"INBOX": 3, "Sent": 1}
+
+
+# ---------------------------------------------------------------- friendly errors
+def test_friendly_error_dns_is_no_internet():
+    msg = friendly_conn_error(socket.gaierror(11001, "getaddrinfo failed"))
+    assert "No internet" in msg and "11001" in msg
+
+
+def test_friendly_error_timeout():
+    assert "in time" in friendly_conn_error(TimeoutError("timed out")).lower()
+
+
+def test_friendly_error_refused():
+    assert "refused" in friendly_conn_error(ConnectionRefusedError(10061, "refused")).lower()
+
+
+def test_friendly_error_auth():
+    msg = friendly_conn_error(Exception("b'[AUTHENTICATIONFAILED] Authentication failed.'"))
+    assert "Login failed" in msg
+
+
+def test_friendly_error_fallback_keeps_type():
+    assert "Couldn't reach" in friendly_conn_error(ValueError("weird"))
+
+
+# ---------------------------------------------------------------- selection filters
+def test_parse_fetch_meta_typical():
+    uid, dt, size = _parse_fetch_meta(b'7 (UID 42 INTERNALDATE "11-Jun-2026 01:22:12 +0000" RFC822.SIZE 4096)')
+    assert uid == "42" and size == 4096
+    assert (dt.year, dt.month, dt.day) == (2026, 6, 11)
+
+
+def test_parse_fetch_meta_space_padded_day():
+    uid, dt, size = _parse_fetch_meta(b'1 (UID 5 RFC822.SIZE 10 INTERNALDATE " 1-Jul-2026 00:00:00 +0000")')
+    assert uid == "5" and size == 10 and dt.day == 1
+
+
+def test_parse_fetch_meta_garbage():
+    assert _parse_fetch_meta(b"garbage") == (None, None, 0)
+    assert _parse_fetch_meta(12345) == (None, None, 0)        # non-bytes input
+
+
+def _meta(y, mo, d, size=100):
+    return {"date": datetime(y, mo, d, tzinfo=timezone.utc), "size": size}
+
+
+def test_meta_matches_date_range():
+    m = _meta(2026, 6, 15)
+    assert ar._meta_matches(m, date(2026, 6, 1), date(2026, 6, 30), None)
+    assert not ar._meta_matches(m, date(2026, 7, 1), None, None)        # before range
+    assert not ar._meta_matches(m, None, date(2026, 6, 1), None)        # after range
+
+
+def test_meta_matches_size_threshold():
+    assert ar._meta_matches(_meta(2026, 6, 15, size=2000), None, None, 1000)
+    assert not ar._meta_matches(_meta(2026, 6, 15, size=500), None, None, 1000)
+
+
+def test_meta_matches_missing_date():
+    assert not ar._meta_matches({"date": None, "size": 100}, date(2026, 1, 1), None, None)  # excluded
+    assert ar._meta_matches({"date": None, "size": 100}, None, None, 50)                    # no date filter -> ok
+
+
+class _FilterSource(MailSource):
+    """Fake source for filter tests. server: None=unsupported, 'raise'=errors, or a callable."""
+
+    def __init__(self, meta, server=None, drop_meta=()):
+        super().__init__({}, "")
+        self.meta = meta
+        self.server = server
+        self.drop_meta = set(drop_meta)        # keys present in the folder but with unreadable metadata
+        self.meta_calls = 0
+
+    def open(self): pass
+    def close(self): pass
+    def test(self): return True, "ok"
+    def folders(self): return [{"name": "INBOX"}]
+    def select(self, folder): return "1"
+    def message_keys(self): return list(self.meta.keys())
+    def fetch_raw(self, key): return b""
+
+    def search(self, *, date_from=None, date_to=None, size_min=None):
+        if self.server == "raise":
+            raise OSError("server search unavailable")
+        if self.server is None:
+            return None
+        return self.server(date_from, date_to, size_min)
+
+    def message_meta(self, keys, progress=None):
+        self.meta_calls += 1
+        if progress:
+            progress(len(keys), len(keys))
+        return {k: self.meta[k] for k in keys if k in self.meta and k not in self.drop_meta}
+
+
+def _noop_prep(stage, done=0, total=0): pass
+
+
+def test_select_keys_no_filters_returns_all():
+    src = _FilterSource({"1": _meta(2026, 1, 1), "2": _meta(2026, 2, 2)})
+    keys = ar._select_keys(src, "INBOX", {}, lambda *_: None, _noop_prep)
+    assert set(keys) == {"1", "2"}
+    assert src.meta_calls == 0                       # no metadata fetch when nothing is filtered
+
+
+def test_select_keys_uses_server_search():
+    meta = {"1": _meta(2026, 1, 1), "2": _meta(2026, 6, 6), "3": _meta(2026, 12, 12)}
+    src = _FilterSource(meta, server=lambda df, dt, sm: ["2"])
+    f = {"date_from": date(2026, 5, 1), "date_to": date(2026, 7, 1)}
+    keys = ar._select_keys(src, "INBOX", f, lambda *_: None, _noop_prep)
+    assert keys == ["2"]
+    assert src.meta_calls == 0                       # server did the filtering
+
+
+def test_select_keys_client_fallback_when_server_fails():
+    meta = {"1": _meta(2026, 1, 1), "2": _meta(2026, 6, 6), "3": _meta(2026, 12, 12)}
+    src = _FilterSource(meta, server="raise")
+    f = {"date_from": date(2026, 5, 1), "date_to": date(2026, 7, 1)}
+    prog = []
+    keys = ar._select_keys(src, "INBOX", f, lambda *_: None,
+                           lambda stage, done=0, total=0: prog.append(stage))
+    assert keys == ["2"]
+    assert src.meta_calls == 1                        # fell back to client-side metadata filter
+    assert "meta" in prog
+
+
+def test_select_keys_top_n_ranks_by_size():
+    meta = {"1": _meta(2026, 1, 1, size=100), "2": _meta(2026, 1, 2, size=900),
+            "3": _meta(2026, 1, 3, size=500)}
+    src = _FilterSource(meta)                          # server None -> size everything client-side
+    keys = ar._select_keys(src, "INBOX", {"top_n": 2}, lambda *_: None, _noop_prep)
+    assert keys == ["2", "3"]                          # two largest, in descending size order
+    assert src.meta_calls == 1
+
+
+def test_select_keys_top_n_within_date_window():
+    meta = {"1": _meta(2026, 1, 1, size=900), "2": _meta(2026, 6, 6, size=500),
+            "3": _meta(2026, 6, 7, size=800)}
+    src = _FilterSource(meta, server=lambda df, dt, sm: ["2", "3"])   # server narrows by date
+    f = {"date_from": date(2026, 5, 1), "date_to": date(2026, 7, 1), "top_n": 1}
+    keys = ar._select_keys(src, "INBOX", f, lambda *_: None, _noop_prep)
+    assert keys == ["3"]                               # largest within the date-narrowed set
+
+
+def test_select_keys_stop_before_scan_raises():
+    import pytest
+    src = _FilterSource({"1": _meta(2026, 1, 1)}, server="raise")
+    f = {"date_from": date(2026, 1, 1)}
+    with pytest.raises(ar._PrepStopped):
+        ar._select_keys(src, "INBOX", f, lambda *_: None, _noop_prep, should_stop=lambda: True)
+
+
+def test_select_keys_stop_between_metadata_batches():
+    import pytest
+    calls = {"n": 0}
+
+    def stop():
+        calls["n"] += 1
+        return calls["n"] > 2          # False at the two pre-checks; True once a batch reports
+
+    src = _FilterSource({"1": _meta(2026, 1, 1)}, server="raise")   # forces client-meta path
+    f = {"date_from": date(2026, 1, 1)}
+    with pytest.raises(ar._PrepStopped):
+        ar._select_keys(src, "INBOX", f, lambda *_: None, _noop_prep, should_stop=stop)
+
+
+def test_select_keys_excludes_and_warns_unreadable_meta():
+    meta = {"1": _meta(2026, 6, 1, size=100), "2": _meta(2026, 6, 2, size=100)}
+    src = _FilterSource(meta, server="raise", drop_meta={"2"})   # client path; key 2 unreadable
+    logs = []
+    keys = ar._select_keys(src, "INBOX", {"date_from": date(2026, 6, 1)}, logs.append, _noop_prep)
+    assert keys == ["1"]                                          # unmeasurable key excluded, not silently kept
+    assert any("unreadable metadata" in ln for ln in logs)
+
+
+def test_select_keys_topn_excludes_unreadable_meta():
+    meta = {"1": _meta(2026, 1, 1, size=900), "2": _meta(2026, 1, 2, size=800)}
+    src = _FilterSource(meta, drop_meta={"2"})                    # top-N sizes client-side
+    keys = ar._select_keys(src, "INBOX", {"top_n": 5}, lambda *_: None, _noop_prep)
+    assert keys == ["1"]                                          # unsizable key not ranked into top-N
+
+
+def test_run_archive_stops_during_prep(tmp_path):
+    # Stop requested while filtering -> clean user-stop, nothing fetched, no abort.
+    meta = {str(i): _meta(2026, 1, i % 28 + 1) for i in range(5)}
+    src = _FilterSource(meta, server="raise")
+    cfg = {"auth": {"imap": {}}, "folders": ["INBOX"], "archive_path": str(tmp_path)}
+    m = ar.run_archive(cfg, "pw", log=lambda *_: None, source=src,
+                       filters={"date_from": date(2026, 1, 1)}, should_stop=lambda: True)
+    assert m["stopped"] is True
+    assert m["aborted"] is False
+    assert m["saved"] == 0

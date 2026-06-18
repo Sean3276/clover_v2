@@ -1,7 +1,7 @@
 # 🍀 Clover v2 — Development Roadmap
 
 > The authoritative phase plan for Clover v2. Supersedes the phase structure in
-> `history/CLOVER_V2_SPEC.md` (archived for reference). Last updated: 2026-06-17.
+> `history/CLOVER_V2_SPEC.md` (archived for reference). Last updated: 2026-06-18.
 
 ## How many phases?
 
@@ -59,6 +59,13 @@ Pull every email from selected mailbox locations into a faithful local `.eml` ar
      coverage, not send.
    - **Inputs:** source (provider creds + folders: INBOX / Sent / Trash / named folders),
      destination (local archive path, user-defined, changeable). ✅
+   - **Selection filters (✅).** Beyond whole-folder, the user can narrow what's archived by
+     **date range** (received-from/to, inclusive; quick presets) and by **size** — either a
+     `≥ N MB` threshold or the **largest N per folder**. Server-side IMAP `UID SEARCH`
+     (`SINCE`/`BEFORE`/`LARGER`) is the primary path with a client-side metadata fallback
+     (`message_meta` via `FETCH INTERNALDATE RFC822.SIZE`); a prep-phase progress bar shows the
+     scan. Filtering only changes the *selected set* — resume/dedup `(folder, validity, key)` is
+     unaffected. Auto-resume on disconnect is now always-on (no toggle).
 2. **Keep the Message-ID key.** Every saved email is keyed by **Message-ID**, recorded with
    its folder + UID + UIDVALIDITY in `_index.jsonl`, across INBOX / Sent / Trash / etc. so
    the same email in multiple folders is linkable. ✅
@@ -234,9 +241,11 @@ Each phase is independently **re-runnable** over the previous phase's on-disk ou
 can re-organize (P2), re-comprehend (P3), or re-cluster issues (P4) without re-fetching mail.
 
 ## Current status snapshot
-- **P1:** IMAP prototype **built, reviewed (17 findings fixed), self-verified** — pending a
-  a live trial + the full-suite/verify completion work.
-- **P2–P5:** not started (P4, P5 conceptual; approaches proposed above).
+- **P1:** IMAP prototype **built, reviewed, live-run & byte-certified** on a real mailbox
+  (Trash + Sent archived, reconciled). **Date/size selection filters added** (2026-06-18).
+  Pending: the full provider suite + a built-in reconcile/verify panel.
+- **P2–P5:** not started (P4, P5 conceptual; approaches proposed above). P2 (per-thread
+  organization, option C: data + thin Threads browser) is approved and queued next.
 
 ## Open decisions (summary)
 1. ✅ **Decided.** Phase 1: IMAP first; full provider suite (table above) developed one by one;

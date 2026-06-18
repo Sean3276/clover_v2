@@ -22,6 +22,29 @@
   .runhdr{display:flex;align-items:center;gap:12px;justify-content:space-between}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
   .pill.up{animation:pulse 1.6s ease-in-out infinite}
+  .prep{display:none;align-items:center;gap:13px;background:var(--tile-bg);border:1px solid var(--line);
+    border-radius:10px;padding:12px 15px;margin-bottom:16px}
+  .prep .leaf{font-size:24px;line-height:1}
+  .prep .body{flex:1;min-width:0}
+  .prep .ttl{font-size:13px;color:var(--ink)}
+  .prep .ptrack{height:7px;background:var(--track-bg);border:1px solid var(--line);border-radius:5px;
+    overflow:hidden;margin-top:7px}
+  .prep .pfill{height:100%;background:linear-gradient(90deg,var(--clover),var(--cyan));border-radius:5px;
+    width:0;transition:width .3s ease}
+  .prep .pfill.indet{width:35%;animation:slide 1.1s ease-in-out infinite}
+  @keyframes slide{0%{margin-left:-35%}100%{margin-left:100%}}
+  .selrow{display:flex;justify-content:space-between;align-items:baseline}
+  .filterbox{margin-top:16px;border:1px solid var(--line);border-radius:10px;background:var(--tile-bg);padding:0 14px}
+  .filterbox summary{cursor:pointer;padding:12px 2px;font-size:14px;color:var(--ink);list-style:none;display:flex;align-items:center;gap:8px}
+  .filterbox summary::-webkit-details-marker{display:none}
+  .filterbox summary::marker{content:""}
+  .filterbox .caret{color:var(--clover);transition:transform .15s ease;display:inline-block;font-size:12px}
+  .filterbox[open] .caret{transform:rotate(90deg)}
+  .filtergrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:10px 18px;padding:2px 0 16px}
+  .filtergrid label{margin-top:0}
+  .actions{display:flex;align-items:center;gap:12px;margin-top:18px;flex-wrap:wrap}
+  .linkbtn{background:none;border:0;color:var(--clover);font-size:12px;font-weight:600;padding:0;cursor:pointer;letter-spacing:0}
+  .linkbtn:hover{text-decoration:underline;filter:none}
 </style>
 
 <div class="runhdr">
@@ -32,6 +55,13 @@
 </div>
 
 <div class="card" id="monitor">
+  <div id="prepBox" class="prep">
+    <span class="leaf clover-spin">🍀</span>
+    <div class="body">
+      <div id="prepTtl" class="ttl">Preparing…</div>
+      <div class="ptrack"><div id="prepFill" class="pfill indet"></div></div>
+    </div>
+  </div>
   <div class="top">
     <div class="ringwrap">
       <svg viewBox="0 0 120 120" width="150" height="150">
@@ -59,24 +89,74 @@
 <div class="card">
   <h2>Folders to archive</h2>
   {% if folder_err %}
-    <div class="msg err" style="display:block">Could not list folders: {{ folder_err }} — check Setup.</div>
+    <div class="msg err" style="display:block">{{ folder_err }}
+      <button type="button" class="linkbtn" style="font-size:13px;margin-left:4px" onclick="location.reload()">↻ Retry</button>
+      — once you're back online, or check your details on <a href="/setup">Setup</a>.</div>
   {% elif not folders %}
     <p class="note">No folders loaded. Save IMAP credentials on the <a href="/setup">Setup</a> page first.</p>
   {% else %}
   <form id="runForm">
+    <div class="selrow">
+      <span class="note">Folders to scan</span>
+      <span><button type="button" class="linkbtn" onclick="selectAllFolders(true)">Select all</button>
+        · <button type="button" class="linkbtn" onclick="selectAllFolders(false)">Clear all</button></span>
+    </div>
     <div class="folders">
       {% for f in folders %}
         <label><input type="checkbox" name="folders" value="{{ f.name }}" {% if f.name in selected %}checked{% endif %}>
           {{ f.name }}{% if f.messages is not none %} <span class="note">({{ f.messages }})</span>{% endif %}</label>
       {% endfor %}
     </div>
-    <label style="display:flex;gap:9px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink);margin-top:14px">
-      <input type="checkbox" name="auto_resume" value="on" checked style="width:auto;accent-color:var(--clover)">
-      Auto-resume on disconnect (keep retrying until the whole archive completes)</label>
-    <div class="row3" style="margin-top:12px;max-width:540px">
-      <div><label>Limit per folder (0 = all)</label><input type="number" name="limit" value="0"></div>
-      <div style="display:flex;align-items:flex-end"><button id="runBtn" type="button" onclick="run()">Archive selected →</button></div>
-      <div style="display:flex;align-items:flex-end"><button id="stopBtn" type="button" class="ghost" onclick="stop()" disabled>Stop</button></div>
+
+    <details class="filterbox">
+      <summary><span class="caret">▶</span> Add date / size filters
+        <span class="note" style="text-transform:none;letter-spacing:0;font-weight:400">— optional; default archives everything</span></summary>
+      <div class="filtergrid">
+        <div>
+          <label>Date</label>
+          <select id="dateSel" onchange="onDate()">
+            <option value="all">All time</option>
+            <option value="7">Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="year">This year</option>
+            <option value="custom">Custom range…</option>
+          </select>
+        </div>
+        <div class="custom-date" style="display:none">
+          <label>From</label><input type="date" name="date_from" id="dFrom">
+        </div>
+        <div class="custom-date" style="display:none">
+          <label>To (inclusive)</label><input type="date" name="date_to" id="dTo">
+        </div>
+        <div>
+          <label>Size</label>
+          <select id="sizeSel" onchange="onSize()">
+            <option value="all">Any size</option>
+            <option value="min">At least… (MB)</option>
+            <option value="top">Largest per folder…</option>
+          </select>
+        </div>
+        <div id="sizeMinWrap" style="display:none">
+          <label>Minimum size (MB)</label>
+          <input type="number" name="size_mb" id="sizeMb" value="5" min="0" step="0.5">
+        </div>
+        <div id="topNWrap" style="display:none">
+          <label>How many (per folder)</label>
+          <input type="number" name="top_n" id="topN" value="50" min="1" step="1">
+        </div>
+        <div>
+          <label>Limit per folder <span class="note" style="text-transform:none;letter-spacing:0">(0 = all · advanced)</span></label>
+          <input type="number" name="limit" value="0" min="0">
+        </div>
+      </div>
+    </details>
+    <input type="hidden" name="size_mode" id="sizeMode" value="all">
+
+    <div class="actions">
+      <button id="runBtn" type="button" onclick="run()">Archive selected →</button>
+      <button id="stopBtn" type="button" class="ghost" onclick="stop()" disabled>Stop</button>
+      <span class="note dim">Auto-resume is always on — dropped connections retry until the selection completes.</span>
     </div>
   </form>
   {% endif %}
@@ -102,6 +182,25 @@ function fmtETA(s){ if(s==null||!isFinite(s)||s<0) return "—"; s=Math.round(s)
   const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), ss=s%60;
   return h? `${h}h ${m}m` : (m? `${m}m ${ss}s` : `${ss}s`); }
 
+// --- filter controls ---
+const ymd = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+function selectAllFolders(on){ document.querySelectorAll('input[name=folders]').forEach(c=>c.checked=on); }
+function onDate(){
+  const v=$("dateSel").value, f=$("dFrom"), t=$("dTo");
+  document.querySelectorAll(".custom-date").forEach(el => el.style.display = (v==="custom") ? "" : "none");
+  if(v==="custom") return;                       // user types the range
+  if(v==="all"){ f.value=""; t.value=""; return; }
+  const now=new Date(); t.value=ymd(now);
+  if(v==="year"){ f.value = now.getFullYear()+"-01-01"; }
+  else { const from=new Date(); from.setDate(now.getDate()-(parseInt(v,10)-1)); f.value=ymd(from); }
+}
+function onSize(){
+  const v=$("sizeSel").value;
+  $("sizeMode").value = v;
+  $("sizeMinWrap").style.display = (v==="min") ? "" : "none";
+  $("topNWrap").style.display = (v==="top") ? "" : "none";
+}
+
 function render(s){
   // CUMULATIVE across attempts: done = already-archived (skipped) + this attempt's saved; total = folder size
   let doneAll=0, totalAll=0, errs=0, savedAttempt=0;
@@ -122,6 +221,20 @@ function render(s){
   const rate = elapsed>1 ? sessionProgress/elapsed : 0;
   $("cRate").textContent = rate>0 ? rate.toFixed(2) : "—";
   $("cEta").textContent = (rate>0 && remaining>0) ? fmtETA(remaining/rate) : (s.running? "…" : "—");
+
+  const pb = $("prepBox");
+  if(s.prep){
+    const pr = s.prep, fill = $("prepFill");
+    pb.style.display = "flex";
+    if(pr.total > 0){
+      fill.classList.remove("indet");
+      fill.style.width = Math.min(100, pr.done/pr.total*100) + "%";
+      $("prepTtl").textContent = `Scanning ${esc(pr.folder)} — sizing ${pr.done.toLocaleString()} / ${pr.total.toLocaleString()} message(s)…`;
+    } else {
+      fill.classList.add("indet"); fill.style.width = "";
+      $("prepTtl").textContent = `Scanning ${esc(pr.folder)} — ${pr.stage==="search" ? "searching the server" : "preparing"}…`;
+    }
+  } else { pb.style.display = "none"; }
 
   const pill = $("runPill");
   if(s.running){ pill.className="pill up"; pill.textContent="● running"; }
@@ -171,6 +284,6 @@ async function stop(){
   await fetch("/archive/stop",{method:"POST"});
   const m=$("runMsg"); m.className="msg ok"; m.textContent="Stopping after the current attempt…";
 }
-document.addEventListener("DOMContentLoaded", poll);
+document.addEventListener("DOMContentLoaded", () => { onDate(); onSize(); poll(); });
 </script>
 {% endblock %}

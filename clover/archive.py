@@ -33,6 +33,11 @@ _AUTO_MAX_IDLE = 30         # auto-resume: pause after this many consecutive att
 _AUTO_BASE_WAIT = 20        # auto-resume: base seconds to wait between retry attempts
 
 
+class _PrepStopped(Exception):
+    """Raised inside the prep/scan phase when the user requests Stop, so a long metadata
+    fetch can abort promptly instead of running to completion before the next stop check."""
+
+
 def _fetch_guarded(src, key, timeout):
     """Fetch one message with a hard timeout.
 
@@ -139,10 +144,111 @@ def index_summary(archive_path: Path) -> dict:
     return {"total": len(rows), "unique_ids": len(ids), "per_folder": per_folder}
 
 
+# ---------------------------------------------------------------- selection filters
+def _warn_unmeasured(base, meta, log) -> None:
+    """A filtered archive can only keep messages whose date/size we could read. Surface any whose
+    metadata the server didn't return (e.g. a garbled FETCH line) instead of dropping them silently."""
+    missing = sum(1 for k in base if k not in meta)
+    if missing:
+        log(f"  filter: {missing} message(s) had unreadable metadata — excluded from the filter")
+
+
+def _meta_matches(meta: dict, date_from, date_to, size_min) -> bool:
+    """True if a message's metadata passes the date/size-threshold filters (client-side).
+
+    A message with no parseable date is EXCLUDED whenever a date bound is set (it can't be
+    placed in the range). Dates compare by calendar day; size_min is a >= byte threshold."""
+    d = meta.get("date")
+    if (date_from or date_to):
+        if d is None:
+            return False
+        day = d.date()
+        if date_from and day < date_from:
+            return False
+        if date_to and day > date_to:
+            return False
+    if size_min and meta.get("size", 0) < size_min:
+        return False
+    return True
+
+
+def _select_keys(src, folder, filters, log, on_prep, should_stop=lambda: False) -> list[str]:
+    """Keys to archive for the SELECTED folder after applying date/size filters.
+
+    Strategy: no filters -> all keys. top-N -> size every (date-narrowed) message client-side and
+    rank. Otherwise -> try server-side UID SEARCH (date + size threshold); on failure/unsupported,
+    fall back to client-side metadata filtering. on_prep(stage, done, total) drives the prep UI.
+
+    should_stop() is polled before each network round-trip and between metadata batches; if it
+    fires, _PrepStopped is raised so a long scan aborts promptly (the caller treats it as a
+    user-stop, not a connection failure).
+    """
+    filters = filters or {}
+    date_from = filters.get("date_from")
+    date_to = filters.get("date_to")
+    size_min = filters.get("size_min")
+    top_n = filters.get("top_n")
+
+    if not (date_from or date_to or size_min or top_n):
+        return src.message_keys()
+
+    def _meta_progress(d, t):                 # cancellation point between metadata batches
+        if should_stop():
+            raise _PrepStopped()
+        on_prep("meta", d, t)
+
+    # --- top-N by size: the server can't rank, so size every candidate client-side ---
+    if top_n:
+        if should_stop():
+            raise _PrepStopped()
+        base, server_dated = None, False
+        if date_from or date_to:                       # narrow by date on the server if we can
+            try:
+                base = src.search(date_from=date_from, date_to=date_to, size_min=None)
+                server_dated = base is not None        # server already applied the date window
+            except Exception:
+                base = None
+        if base is None:
+            base = src.message_keys()
+        meta = src.message_meta(base, progress=_meta_progress) if base else {}
+        _warn_unmeasured(base, meta, log)
+        # keep only sizable messages; trust the server's date filter when it ran, else apply it here
+        kept = [k for k in base
+                if k in meta and (server_dated or _meta_matches(meta[k], date_from, date_to, None))]
+        kept.sort(key=lambda k: meta[k].get("size", 0), reverse=True)
+        log(f"  filter: largest {min(top_n, len(kept))} of {len(base)} message(s) selected")
+        return kept[:top_n]
+
+    # --- date and/or size threshold: server search first, client fallback ---
+    keys = None
+    try:
+        if should_stop():
+            raise _PrepStopped()
+        on_prep("search", 0, 0)
+        keys = src.search(date_from=date_from, date_to=date_to, size_min=size_min)
+    except _PrepStopped:
+        raise                                          # a user-stop must not be swallowed below
+    except Exception as e:
+        log(f"  filter: server search errored ({type(e).__name__}) — using client-side filter")
+        keys = None
+    if keys is not None:
+        log(f"  filter: server-side search matched {len(keys)} message(s)")
+        return keys
+
+    if should_stop():
+        raise _PrepStopped()
+    base = src.message_keys()
+    meta = src.message_meta(base, progress=_meta_progress) if base else {}
+    _warn_unmeasured(base, meta, log)
+    kept = [k for k in base if k in meta and _meta_matches(meta[k], date_from, date_to, size_min)]
+    log(f"  filter: client-side matched {len(kept)} of {len(base)} message(s)")
+    return kept
+
+
 # ---------------------------------------------------------------- orchestrator
 def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | None = None,
                 source=None, fetch_timeout: int = _FETCH_TIMEOUT, progress=None,
-                should_stop=lambda: False) -> dict:
+                should_stop=lambda: False, filters: dict | None = None, prep=None) -> dict:
     kind = cfg.get("source_kind", "imap")
     conn = cfg["auth"].get(kind) or cfg["auth"].get("imap", {})
     folders = cfg.get("folders") or ["INBOX"]
@@ -167,18 +273,31 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
                 stopped = False
                 fol_dir = dest / folder_subpath(fol)
 
+                def on_prep(stage, done=0, total=0):
+                    if prep:
+                        prep({"folder": fol, "stage": stage, "done": done, "total": total})
+
                 # --- establish the folder; recover ONCE if the connection dropped at the boundary ---
                 validity = keys = None
                 for attempt in range(2):
                     try:
                         validity = str(src.select(fol))
-                        keys = src.message_keys()
+                        keys = _select_keys(src, fol, filters, log, on_prep, should_stop)
+                        break
+                    except _PrepStopped:                 # user hit Stop during the scan/prep phase
+                        stopped = True
                         break
                     except Exception as e:
                         log(f"  ! [{fol}] open failed: {type(e).__name__}: {e}")
                         if attempt == 0 and _recover(src, fol, log):
                             continue
                         break
+                if prep:
+                    prep(None)                       # selection/prep phase done — clear the prep UI
+                if stopped:
+                    manifest["stopped"] = True
+                    log("Stopped by user.")
+                    break
                 if keys is None:
                     log("  ! connection lost at a folder boundary — stopping; re-run to resume")
                     manifest["aborted"] = True
