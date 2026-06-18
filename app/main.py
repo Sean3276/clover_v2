@@ -24,6 +24,12 @@ from clover.sources import SUITE, get_source
 
 _THREAD_CSP = ('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
                'img-src data:; style-src \'unsafe-inline\'; font-src data:">')
+# fit oversized inline images/tables to the reader width (emails embed full-resolution screenshots in
+# fixed-width tables, so use !important to beat inline width= and cap the table/image to the container)
+_THREAD_STYLE = ("<style>html{overflow-x:hidden}body{margin:0;padding:10px;background:#fff;color:#111;"
+                 "font:14px/1.5 -apple-system,'Segoe UI',Roboto,Arial,sans-serif;overflow-wrap:break-word}"
+                 "img{max-width:100%!important;height:auto!important}"
+                 "table{max-width:100%!important}td,th{max-width:100%}pre{white-space:pre-wrap}</style>")
 
 BASE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
@@ -277,9 +283,11 @@ def thread_view(request: Request, thread_id: str):
     if not t:
         return RedirectResponse("/threads", status_code=303)
     blocks = threadmod.stitch_thread(arch, t)
-    for b in blocks:                          # wrap HTML bodies for the sandboxed iframe (block remote content)
-        if b.get("body_html"):
-            b["srcdoc"] = _THREAD_CSP + b["body_html"]
+    for b in blocks:                          # wrap each HTML body in a clean standards-mode document
+        if b.get("body_html"):                # (DOCTYPE first -> no quirks mode; CSP/style live in <head>)
+            b["srcdoc"] = ('<!DOCTYPE html><html><head><meta charset="utf-8">'
+                           + _THREAD_CSP + _THREAD_STYLE + "</head><body>" + b["body_html"]
+                           + "</body></html>")
     return templates.TemplateResponse(request, "thread_view.html", {
         "cfg": cfg, "thread": t, "blocks": blocks,
     })

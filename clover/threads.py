@@ -8,6 +8,7 @@ yields the same result. Thread *content* is never materialized — the reader st
 """
 from __future__ import annotations
 
+import base64
 import email
 import hashlib
 import json
@@ -22,7 +23,33 @@ from .archive import read_index
 
 _ID_RE = re.compile(r"<[^>]+>")
 _SUBJ_PREFIX = re.compile(r"^(?:\s*(?:re|fwd|fw|aw|sv|antw)\s*:\s*)+", re.I)
+_CID_RE = re.compile(r'(?i)cid:([^\s"\'>)]+)')
+_MAX_INLINE_IMG = 12 * 1024 * 1024          # per-image cap for base64 inlining (bytes)
 _HEADER_PARSER = BytesHeaderParser(policy=policy.default)
+
+
+def _img_data_uri(payload: bytes, ctype: str) -> str | None:
+    """base64 data: URI for an image payload, or None if not an inlineable image."""
+    ctype = (ctype or "").lower()
+    if payload and ctype.startswith("image/") and len(payload) <= _MAX_INLINE_IMG:
+        return f"data:{ctype};base64," + base64.b64encode(payload).decode("ascii")
+    return None
+
+
+def _inline_cid_images(msg, html: str) -> str:
+    """Rewrite <img src="cid:..."> to data: URIs from the message's embedded image parts, so inline
+    screenshots / photos / logos render in the sandboxed iframe (whose CSP allows only img-src data:)."""
+    cmap: dict[str, str] = {}
+    for part in msg.walk():
+        cid = part.get("Content-ID")
+        if not cid:
+            continue
+        uri = _img_data_uri(part.get_payload(decode=True) or b"", part.get_content_type())
+        if uri:
+            cmap[cid.strip().strip("<>").strip()] = uri
+    if not cmap:
+        return html
+    return _CID_RE.sub(lambda m: cmap.get(m.group(1).strip().strip("<>"), m.group(0)), html)
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -211,11 +238,17 @@ def render_message(archive_path, location: dict) -> dict:
                 body_text = part.get_content()
         except Exception:
             body_text = None
+    if body_html:
+        body_html = _inline_cid_images(msg, body_html)     # show inline screenshots/photos/logos
     atts = []
     try:
         for part in msg.iter_attachments():
             payload = part.get_payload(decode=True) or b""
-            atts.append({"name": part.get_filename() or "(unnamed)", "size": len(payload)})
+            a = {"name": part.get_filename() or "(unnamed)", "size": len(payload)}
+            uri = _img_data_uri(payload, part.get_content_type())   # show image attachments inline
+            if uri:
+                a["img"] = uri
+            atts.append(a)
     except Exception:
         pass
     return {

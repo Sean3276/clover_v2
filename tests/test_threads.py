@@ -169,3 +169,28 @@ def test_render_message_rejects_path_escape(tmp_path):
     import pytest
     with pytest.raises(ValueError):
         th.render_message(tmp_path, {"path": "../../etc/passwd"})   # containment guard
+
+
+def test_render_inlines_cid_images_and_image_attachments(tmp_path):
+    import base64
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    m = EmailMessage()
+    m["Message-ID"] = "<imgmsg@x>"
+    m["From"] = "a@x.com"; m["To"] = "b@x.com"; m["Subject"] = "pic"
+    m["Date"] = "Thu, 01 Jan 2026 00:00:00 +0000"
+    m.set_content("see image")
+    m.add_alternative('<p>see <img src="cid:logo123"></p>', subtype="html")
+    m.get_payload()[1].add_related(png, maintype="image", subtype="png", cid="<logo123>")
+    m.add_attachment(png, maintype="image", subtype="png", filename="photo.png")
+    rel = "INBOX/1.eml"
+    (tmp_path / "INBOX").mkdir(parents=True, exist_ok=True)
+    (tmp_path / rel).write_bytes(m.as_bytes())
+    with (tmp_path / "_index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"id": "imgmsg@x", "folder": "INBOX", "key": "1", "path": rel,
+                            "date": m["Date"], "from": m["From"], "subject": m["Subject"], "size": 1}) + "\n")
+    th.build_threads(tmp_path, log=lambda *_: None)
+    b = th.stitch_thread(tmp_path, th.read_threads(tmp_path)[0])[0]
+    assert "data:image/png;base64," in b["body_html"]      # cid rewritten to inline data URI
+    assert "cid:logo123" not in b["body_html"]
+    assert any(a.get("img", "").startswith("data:image/png;base64,") for a in b["attachments"])
