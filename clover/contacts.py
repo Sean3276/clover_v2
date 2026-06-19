@@ -36,12 +36,21 @@ def consolidate(archive_path) -> list[dict]:
             merge(k.get("email"), k.get("name", ""), k.get("position", ""),
                   k.get("company", ""), k.get("phone", ""))
 
-    # 2) deterministic: every sender in the index (name + email), counts = times they sent
+    # 2) deterministic: the sender of each message (name + email). Dedup cross-folder copies by id,
+    #    and take only the first From address so a message counts once.
+    seen = set()
     for row in read_index(archive_path):
-        for name, addr in getaddresses([row.get("from", "") or ""]):
-            p = merge(addr, name)
-            if p is not None:
-                p["count"] += 1
+        rid = row.get("id")
+        if rid and rid in seen:
+            continue
+        if rid:
+            seen.add(rid)
+        addrs = getaddresses([row.get("from", "") or ""])
+        if not addrs:
+            continue
+        p = merge(addrs[0][1], addrs[0][0])
+        if p is not None:
+            p["count"] += 1
 
     out = list(people.values())
     out.sort(key=lambda p: (-p["count"], (p["name"] or p["email"]).casefold()))

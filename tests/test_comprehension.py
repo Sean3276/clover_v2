@@ -169,6 +169,22 @@ def test_qaqc_fails_when_a_fact_is_ungrounded(tmp_path):
     assert rec["verified"]["facts_ok"] is False and rec["qaqc"]["needs_review"] is True
 
 
+# ---------------------------------------------------------------- fact verification hardening
+def test_verify_rejects_fabricated_amount_spanning_two_numbers():
+    out, dropped = cp._verify_facts({"amounts": ["1002"]}, "Call me at 6512 3456 then ref 100200300")
+    assert out["amounts"] == [] and any(d.startswith("amounts:1002") for d in dropped)
+
+
+def test_verify_accepts_real_amount_despite_comma_formatting():
+    out, _ = cp._verify_facts({"amounts": ["878000"]}, "the sum of S$878,000 is now due")
+    assert out["amounts"] == ["878000"]            # digits equal the real source number 878,000
+
+
+def test_verify_party_uses_word_boundary():
+    out, _ = cp._verify_facts({"parties": ["Sun"]}, "the sunshine project team met")
+    assert out["parties"] == []                    # 'Sun' is not a whole word inside 'sunshine'
+
+
 # ---------------------------------------------------------------- learned rules + resolve
 def test_rule_classifies_directly_without_council(tmp_path):
     from clover import rules

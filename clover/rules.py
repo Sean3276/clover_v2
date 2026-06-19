@@ -5,9 +5,16 @@ one rule per line. See CLOVER_V2_RULES_SPEC.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 _TYPES = ("keyword", "sender", "project")
+_WS = re.compile(r"\s+")
+
+
+def _pnorm(name: str) -> str:
+    """Same canonical key as clover.projects.project_key (kept in sync; not imported to avoid a cycle)."""
+    return _WS.sub(" ", (name or "").strip()).strip(" .,-_").casefold()
 
 
 def rules_path(archive_path) -> Path:
@@ -61,15 +68,15 @@ def match(archive_path, *, text: str = "", senders=(), project: str = "") -> dic
     """First matching rule (newest first → last-match-wins), or None. `senders` = raw From strings."""
     text_l = (text or "").lower()
     senders_l = [str(s).lower() for s in (senders or []) if s]
-    proj_l = (project or "").strip().lower()
+    proj_n = _pnorm(project)
     for r in reversed(read_rules(archive_path)):
         t, m = r.get("type"), (r.get("match") or "").strip().lower()
         if not m:
             continue
-        if t == "keyword" and m in text_l:
+        if t == "keyword" and re.search(r"\b" + re.escape(m) + r"\b", text_l):   # whole word/phrase
             return r
         if t == "sender" and any(m in s for s in senders_l):
             return r
-        if t == "project" and proj_l and m == proj_l:
+        if t == "project" and proj_n and _pnorm(m) == proj_n:                    # same canonical key both sides
             return r
     return None

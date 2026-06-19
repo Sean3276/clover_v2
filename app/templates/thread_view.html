@@ -109,8 +109,10 @@
   </details>
   <script>
     var _tax = {{ taxonomy|tojson }};
-    function rCats(){ var d=document.getElementById('rDomain').value, sel=document.getElementById('rCat'), cur="{{ comp.classification.category }}"; sel.innerHTML="";
-      (_tax[d]||[]).forEach(function(c){ var o=document.createElement('option'); o.textContent=c; if(c===cur) o.selected=true; sel.appendChild(o); }); }
+    var _curCat = {{ comp.classification.category|tojson }};
+    function rCats(){ var d=document.getElementById('rDomain').value, sel=document.getElementById('rCat'); sel.innerHTML="";
+      var cats=(_tax[d]||[]).slice(); if(_curCat && cats.indexOf(_curCat)<0) cats.unshift(_curCat);   // keep the stored value visible/selected
+      cats.forEach(function(c){ var o=document.createElement('option'); o.textContent=c; if(c===_curCat) o.selected=true; sel.appendChild(o); }); }
     async function resolveThread(){
       var fd=new URLSearchParams({domain:document.getElementById('rDomain').value, category:document.getElementById('rCat').value});
       if(document.getElementById('rMakeRule').checked){ fd.set('rule_type',document.getElementById('rRuleType').value); fd.set('rule_match',document.getElementById('rRuleMatch').value); }

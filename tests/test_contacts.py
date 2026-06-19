@@ -25,3 +25,14 @@ def test_consolidate_merges_ai_and_headers_dedup_by_email(tmp_path):
     assert a["phone"] == "+65 1234" and a["count"] == 2           # AI fields + header count merged
     assert by["bob@x.com"]["count"] == 1
     assert out[0]["email"] == "alice@acme.com"                    # busiest sender first
+
+
+def test_count_dedups_cross_folder_copies_and_one_sender_per_msg(tmp_path):
+    import json as _json
+    _index_row(tmp_path, "INBOX", "m1", "Alice <alice@x.com>")
+    with (tmp_path / "_index.jsonl").open("a", encoding="utf-8") as f:   # SAME id in another folder
+        f.write(_json.dumps({"id": "m1", "folder": "Sent", "key": "9",
+                             "path": "Sent/9.eml", "from": "Alice <alice@x.com>"}) + "\n")
+    _index_row(tmp_path, "INBOX", "m2", "alice@x.com")                   # a second, distinct message
+    out = contacts.consolidate(tmp_path)
+    assert {c["email"] for c in out} == {"alice@x.com"} and out[0]["count"] == 2   # dup counted once

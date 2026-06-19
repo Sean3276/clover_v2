@@ -244,19 +244,21 @@ def _verify_facts(facts: dict, thread_text: str) -> tuple[dict, list]:
     deadline'); verify the BARE core (annotation stripped) appears, with a digit-match fallback for
     amounts (currency/comma formatting varies). Stores the cleaned core. Returns (facts, dropped)."""
     src = _norm(thread_text)
-    src_digits = re.sub(r"\D", "", src)
+    src_nums = {re.sub(r"\D", "", n) for n in _NUM.findall(src)}   # source numbers, digits-only, per token
+    src_nums.discard("")
     facts = dict(facts or {})
     dropped = []
 
     def verify(value, numeric=False):
         raw = str(value).strip()
         core = _WEEKDAY.sub("", _ANNOT.sub("", raw)).strip() or raw
-        if core and _norm(core) in src:
+        c = _norm(core)
+        if c and re.search(r"\b" + re.escape(c) + r"\b", src):    # whole word/phrase, not any substring
             return core
         if numeric:
-            nums = [re.sub(r"[^\d]", "", n) for n in _NUM.findall(raw)]
+            nums = [re.sub(r"\D", "", n) for n in _NUM.findall(raw)]
             nums = [n for n in nums if len(n) >= 3]      # a meaningful number, not a lone digit
-            if nums and all(n in src_digits for n in nums):
+            if nums and all(n in src_nums for n in nums):  # each must EQUAL a real source number (not span two)
                 return core
         return None
 
@@ -363,13 +365,20 @@ def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Pro
     for attempt in (1, 2):
         qa = backend.generate("qa", _qa_prompt(rec["comprehension"], full), schema=_QA_SCHEMA) or {}
         passed = bool(qa.get("passed")) and rec["verified"]["facts_ok"]
+        issues = [str(i) for i in (qa.get("issues") or [])][:6]
         if passed or attempt == 2:
             rec["qaqc"] = {"passed": passed, "faithfulness": _f(qa.get("faithfulness")),
                            "completeness": _f(qa.get("completeness")),
-                           "issues": [str(i) for i in (qa.get("issues") or [])][:6],
-                           "attempts": attempt, "needs_review": not passed}
+                           "issues": issues, "attempts": attempt, "needs_review": not passed}
             return rec
-        rec, full = _build_once(archive, thread, backend, profile, max_chars, model)   # one retry
+        try:
+            rec, full = _build_once(archive, thread, backend, profile, max_chars, model)   # one retry
+        except Exception as e:                 # retry failed -> keep the first attempt, flag for review
+            rec["qaqc"] = {"passed": False, "faithfulness": _f(qa.get("faithfulness")),
+                           "completeness": _f(qa.get("completeness")),
+                           "issues": issues + [f"retry failed: {type(e).__name__}"],
+                           "attempts": attempt, "needs_review": True}
+            return rec
     return rec
 
 

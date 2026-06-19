@@ -323,6 +323,8 @@ def test_resolve_ui_and_route_for_flagged_thread(tmp_path, monkeypatch):
     assert r.json()["ok"]
     assert cp.get_comprehension(tmp_path, t["thread_id"])["classification"]["consensus"] == "resolved"
     assert any(rl["match"] == "foo" for rl in rules.read_rules(tmp_path))   # learned rule saved
+    bad = c.post(f"/threads/{t['thread_id']}/resolve", data={"domain": "Project", "category": "Not A Category"})
+    assert bad.status_code == 400                                           # taxonomy validated server-side
 
 
 def test_link_status_endpoint_resolves_before_thread_id(tmp_path, monkeypatch):

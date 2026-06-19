@@ -404,9 +404,14 @@ def resolve_thread(thread_id: str, domain: str = Form(...), category: str = Form
                    rule_type: str = Form(""), rule_match: str = Form("")):
     """Operator override of a flagged classification, optionally saving a learned rule."""
     from datetime import datetime, timezone
-    arch = _archive_dir(cfgmod.load_config())
+    cfg = cfgmod.load_config()
+    arch = _archive_dir(cfg)
+    domain, category = domain.strip(), category.strip()
+    prof = get_profile(_comp_cfg(cfg).get("profile"))     # reject anything outside the active taxonomy
+    if domain not in prof.domain_names() or category not in prof.categories(domain):
+        return JSONResponse({"ok": False, "message": f"Invalid domain/category for this profile."}, status_code=400)
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    if not compmod.resolve_comprehension(arch, thread_id, domain.strip(), category.strip(), ts):
+    if not compmod.resolve_comprehension(arch, thread_id, domain, category, ts):
         return JSONResponse({"ok": False, "message": "This thread isn't comprehended yet."}, status_code=404)
     msg = f"Classification set to {domain.strip()} / {category.strip()}."
     if rule_type.strip() and rule_match.strip():
@@ -426,8 +431,9 @@ def rules_page(request: Request):
 
 @app.post("/rules/delete")
 def rules_delete(index: int = Form(...)):
-    rulesmod.delete_rule(_archive_dir(cfgmod.load_config()), index)
-    return JSONResponse({"ok": True, "message": "Rule deleted."})
+    ok = rulesmod.delete_rule(_archive_dir(cfgmod.load_config()), index)
+    return JSONResponse({"ok": ok, "message": "Rule deleted." if ok else
+                         "Rule not found — the list may have changed; reload."})
 
 
 @app.post("/threads/rebuild")

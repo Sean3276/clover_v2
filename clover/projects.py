@@ -39,7 +39,7 @@ def list_projects(archive_path) -> list[dict]:
 
     out = []
     for k, g in groups.items():
-        name = max(spellings[k].items(), key=lambda kv: kv[1])[0]
+        name = max(spellings[k].items(), key=lambda kv: (kv[1], -len(kv[0]), kv[0]))[0]   # common, then short, stable
         out.append({"key": k, "name": name, "count": g["count"],
                     "categories": sorted(g["categories"], key=lambda c: -g["categories"][c]),
                     "threads": g["threads"]})
