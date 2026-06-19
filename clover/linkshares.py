@@ -60,19 +60,25 @@ def link_shares_path(archive_path) -> Path:
     return Path(archive_path) / "link_shares.jsonl"
 
 
-_shares_cache: dict = {}     # path -> (mtime_ns, rows); avoids re-parsing the whole catalogue per request
+_shares_cache: dict = {}     # path -> (sig, rows); avoids re-parsing the whole catalogue per request
+
+
+def _invalidate_shares_cache(p) -> None:
+    _shares_cache.pop(str(p), None)
 
 
 def read_link_shares(archive_path) -> list[dict]:
-    """Parsed link_shares.jsonl, cached by file mtime. Callers treat the result as read-only
-    (the only mutator, _update_records, copies first)."""
+    """Parsed link_shares.jsonl, cached by (mtime, size). Callers treat the result as read-only
+    (the only mutator, _update_records, copies first). Our own writers invalidate explicitly, so the
+    cache is correct even when two writes land within the filesystem's mtime granularity."""
     p = link_shares_path(archive_path)
     if not p.exists():
         return []
     key = str(p)
-    mtime = p.stat().st_mtime_ns
+    st = p.stat()
+    sig = (st.st_mtime_ns, st.st_size)
     hit = _shares_cache.get(key)
-    if hit and hit[0] == mtime:
+    if hit and hit[0] == sig:
         return hit[1]
     out = []
     with p.open(encoding="utf-8") as fh:
@@ -86,7 +92,7 @@ def read_link_shares(archive_path) -> list[dict]:
                 continue
             if isinstance(o, dict):
                 out.append(o)
-    _shares_cache[key] = (mtime, out)
+    _shares_cache[key] = (sig, out)
     return out
 
 
@@ -135,6 +141,7 @@ def harvest(archive_path, log=print) -> dict:
                 }, ensure_ascii=False) + "\n")
                 added += 1
                 by_provider[provider] = by_provider.get(provider, 0) + 1
+    _invalidate_shares_cache(link_shares_path(dest))     # we just appended — drop the stale cache
     log(f"link harvest: {added} new link(s) across {len(msgs)} message(s)")
     return {"added": added, "messages": len(msgs), "by_provider": by_provider,
             "total": len(read_link_shares(dest))}
@@ -154,6 +161,7 @@ def _update_records(archive_path, updates: dict) -> None:
         for r in recs:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
     tmp.replace(p)
+    _invalidate_shares_cache(p)                           # we just rewrote — drop the stale cache
 
 
 def _dest_dir(archive_path, message_id) -> Path:

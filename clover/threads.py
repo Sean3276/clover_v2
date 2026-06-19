@@ -208,6 +208,11 @@ def build_threads(archive_path, log=print) -> dict:
     with out.open("w", encoding="utf-8") as fh:
         for t in threads:
             fh.write(json.dumps(t, ensure_ascii=False) + "\n")
+    _invalidate_threads_cache(out)               # we just rewrote — drop the stale cache
+    return _finish_build(threads, out, log)
+
+
+def _finish_build(threads, out, log):
     summary = {
         "threads": len(threads),
         "multi": sum(1 for t in threads if t["n"] > 1),
@@ -221,18 +226,24 @@ def build_threads(archive_path, log=print) -> dict:
 
 
 # ---------------------------------------------------------------- readers (for the browser)
-_threads_cache: dict[str, tuple] = {}    # path -> (mtime_ns, rows); avoids re-parsing on every /msg/ open
+_threads_cache: dict[str, tuple] = {}    # path -> (sig, rows); avoids re-parsing on every /msg/ open
+
+
+def _invalidate_threads_cache(p) -> None:
+    _threads_cache.pop(str(p), None)
 
 
 def read_threads(archive_path) -> list[dict]:
-    """Parsed threads.jsonl, cached by file mtime (callers treat the result as read-only)."""
+    """Parsed threads.jsonl, cached by (mtime, size); build_threads invalidates explicitly on write,
+    so it stays correct even when writes land within the filesystem's mtime granularity. Read-only."""
     p = Path(archive_path) / "threads.jsonl"
     if not p.exists():
         return []
     key = str(p)
-    mtime = p.stat().st_mtime_ns
+    st = p.stat()
+    sig = (st.st_mtime_ns, st.st_size)
     hit = _threads_cache.get(key)
-    if hit and hit[0] == mtime:
+    if hit and hit[0] == sig:
         return hit[1]
     out: list[dict] = []
     with p.open(encoding="utf-8") as fh:
@@ -246,7 +257,7 @@ def read_threads(archive_path) -> list[dict]:
                 continue
             if isinstance(o, dict):
                 out.append(o)
-    _threads_cache[key] = (mtime, out)
+    _threads_cache[key] = (sig, out)
     return out
 
 

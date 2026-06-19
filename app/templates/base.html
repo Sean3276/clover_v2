@@ -98,6 +98,8 @@
   @keyframes cloverspin{to{transform:rotate(360deg)}}
   .clover-spin{display:inline-block;animation:cloverspin 1.1s linear infinite;transform-origin:50% 50%}
   .mono{font-family:ui-monospace,Consolas,monospace}   /* global so Mail pages get it too */
+  .linkbtn{background:none;border:0;color:var(--clover);font:inherit;font-weight:600;padding:0;cursor:pointer}
+  .linkbtn:hover{text-decoration:underline;filter:none;background:none}
   /* visible keyboard focus for every interactive element */
   a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,
   [tabindex]:focus-visible,.help:focus-visible{outline:2px solid var(--clover);outline-offset:2px}
@@ -108,16 +110,23 @@
   code,.note,td{overflow-wrap:anywhere}
   .tablewrap{overflow-x:auto}
   /* mobile */
+  .skip{position:absolute;left:8px;top:-48px;z-index:200;background:var(--clover);color:var(--btn-ink);
+    padding:8px 14px;border-radius:8px;font-size:13px;font-weight:700;transition:top .12s}
+  .skip:focus{top:8px}
   @media (max-width:640px){
     header{flex-wrap:wrap;gap:10px 14px;padding:11px 15px}
     header .right{display:none}
     main{padding:18px 14px 60px}
     .row,.row3,.folders{grid-template-columns:1fr}
     table{display:block;overflow-x:auto;white-space:nowrap}
+    button,.btn{min-height:42px}            /* comfortable touch targets */
+    .help{width:20px;height:20px}
+    .scrollnav button{width:44px;height:44px}
   }
 </style>
 </head>
 <body>
+<a href="#main" class="skip">Skip to content</a>
 <header>
   <span class="logo">🍀 Clover<span class="v"> v2</span></span>
   <a href="/setup" class="{% block nav_setup %}{% endblock %}">Setup</a>
@@ -126,12 +135,16 @@
   <span class="right">control room</span>
   <button id="themeBtn" class="themetoggle" type="button" onclick="toggleTheme()" aria-label="Toggle light/dark theme" title="Toggle light / dark">☀️</button>
 </header>
-<main>{% block body %}{% endblock %}</main>
+<main id="main">{% block body %}{% endblock %}</main>
 <script>
   function setThemeIcon(){
-    var t = document.documentElement.getAttribute("data-theme");
+    var light = document.documentElement.getAttribute("data-theme") === "light";
     var b = document.getElementById("themeBtn");
-    if (b) b.textContent = (t === "light") ? "🌙" : "☀️";   // icon = the mode you'll switch TO
+    if (b){
+      b.textContent = light ? "🌙" : "☀️";                 // icon = the mode you'll switch TO
+      b.setAttribute("aria-pressed", light ? "true" : "false");
+      b.setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
+    }
   }
   function toggleTheme(){
     var next = (document.documentElement.getAttribute("data-theme") === "light") ? "dark" : "light";

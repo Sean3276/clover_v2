@@ -65,8 +65,8 @@
 {% else %}
 <div class="card">
   <div class="thtools">
-    <input id="filter" type="text" placeholder="Filter by subject or participant…" oninput="apply()">
-    <select id="sort" onchange="apply()">
+    <input id="filter" type="text" placeholder="Filter by subject or participant…" aria-label="Filter conversations by subject or participant" oninput="apply()">
+    <select id="sort" onchange="apply()" aria-label="Sort conversations">
       <option value="recent">Most recent</option>
       <option value="size">Largest</option>
       <option value="old">Oldest</option>
@@ -95,7 +95,7 @@
     </a>
     {% endfor %}
   </div>
-  <p id="empty" class="note dim" style="display:none;margin:6px 2px 0">No conversations match your filter. <a href="#" onclick="clearFilter();return false">Clear filter</a></p>
+  <p id="empty" class="note dim" style="display:none;margin:6px 2px 0">No conversations match your filter. <button type="button" class="linkbtn" onclick="clearFilter()">Clear filter</button></p>
 </div>
 {% endif %}
 {% endif %}
