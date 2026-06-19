@@ -174,19 +174,23 @@ def _run_archive_bg(folders: list[str], limit: int | None, filters: dict, auto_l
             run_once, auto_resume=True, log=_log, sleep=time.sleep,
             should_stop=lambda: _status.get("stop", False),
         )
-        if _status.get("session_saved", 0) > 0:    # new mail landed -> refresh the thread index once
+        saved_new = _status.get("session_saved", 0) > 0
+        if saved_new:                               # new mail landed -> refresh the thread index once
             _log("Rebuilding thread index…")
             try:
                 threadmod.build_threads(_archive_dir(cfg), log=_log)
             except Exception as e:
                 _log(f"Thread index rebuild failed: {type(e).__name__}: {e}")
             _maybe_autorun_comprehension(cfg)       # comprehend the new threads (budget-capped)
-        if auto_links and not _status.get("stop"):  # opt-in: catalogue + download share links after archiving
-            if _start_link_task(lambda: _auto_link_task(_archive_dir(cfg))):
-                _log("Auto share-links: cataloguing + downloading in the background "
-                     "(oversize files wait for confirmation in Threads; 'Stop links' halts it).")
+        # Cataloguing share links always runs after new mail; the tickbox adds downloading on top.
+        do_fetch = auto_links and not _status.get("stop")
+        if saved_new or do_fetch:
+            if _start_link_task(lambda: _auto_link_task(_archive_dir(cfg), saved_new, do_fetch)):
+                _log("Share links: cataloguing + downloading in the background "
+                     "(oversize files wait for confirmation in Threads; 'Stop links' halts it)."
+                     if do_fetch else "Share links: cataloguing new mail's links in the background.")
             else:
-                _log("Auto share-links skipped — a link task is already running.")
+                _log("Share-link task skipped — a link task is already running.")
     except Exception as e:
         _log(f"ERROR: {type(e).__name__}: {e}")
     finally:
@@ -451,15 +455,18 @@ def _start_link_task(target) -> bool:
     return True
 
 
-def _auto_link_task(arch):
-    """Post-archive automation: catalogue links, then download all pending in batches of 50 — each
-    batch persists (crash-safe) and is stoppable; oversize links pause as needs-confirm."""
-    lsmod.harvest(arch, log=_log)
-    while not _linktask.get("stop"):
-        r = lsmod.fetch_links(arch, limit=50, headless=True, log=_log,
-                              should_stop=lambda: _linktask.get("stop", False))
-        if r.get("remaining", 0) <= 0:
-            break
+def _auto_link_task(arch, do_harvest=True, do_fetch=False):
+    """Post-archive link automation. Cataloguing (harvest) always runs after new mail — it's cheap,
+    offline and idempotent; downloading (fetch) is opt-in. Fetch runs in batches of 50 — each batch
+    persists (crash-safe) and is stoppable; oversize links pause as needs-confirm."""
+    if do_harvest:
+        lsmod.harvest(arch, log=_log)
+    if do_fetch:
+        while not _linktask.get("stop"):
+            r = lsmod.fetch_links(arch, limit=50, headless=True, log=_log,
+                                  should_stop=lambda: _linktask.get("stop", False))
+            if r.get("remaining", 0) <= 0:
+                break
 
 
 @app.post("/threads/harvest-links")

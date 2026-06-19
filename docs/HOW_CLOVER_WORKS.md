@@ -61,10 +61,10 @@ IMAP mailbox ──(Phase 1)──► local .eml archive ──(Phase 2)──�
   4. Writes each message as `<archive>/<folder>/<name>.eml` (collision-safe — a genuinely different message with the same derived name gets a `_<uid>` suffix) and appends a row to `_index.jsonl`:
      `{id, folder, key (UID), validity (UIDVALIDITY), from, subject, date, path, size, sha256}`.
   5. When new mail was saved, **auto-rebuilds the thread index** (Phase 2).
-  6. *(Optional, if you tick **"also catalogue & download share links"**)* — after archiving, runs the
-     link **harvest + fetch** in the background (batched, stoppable, oversize links pause for
-     confirmation). See *Fetch files* below for the mechanics.
-- **Considerations:** read-only & non-destructive (never deletes/sends/flags); **resumable & idempotent**; survives flaky links (retries + plain-language errors); filters only change the *selected set* — they never change the dedup key, so narrowing then widening later still backfills cleanly. The auto-links option is **off by default** (downloading can be slow/large), and never runs if you Stopped the archive.
+  6. **Catalogues share links** found in the new mail — runs Harvest in the background (always; cheap & offline).
+  7. *(Optional, if you tick **"also download the share links"**)* — also **downloads** them in the
+     background (batched, stoppable; oversize links pause for confirmation). See *Fetch files* below.
+- **Considerations:** read-only & non-destructive (never deletes/sends/flags); **resumable & idempotent**; survives flaky links (retries + plain-language errors); filters only change the *selected set* — they never change the dedup key, so narrowing then widening later still backfills cleanly. Cataloguing links always runs after new mail; **downloading is off by default** (slow/large) and never runs if you Stopped the archive.
 - **Output:** `.eml` files + `_index.jsonl` (+ refreshed `threads.jsonl`).
 
 #### Date / size filters (optional)
