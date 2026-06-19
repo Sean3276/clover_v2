@@ -102,7 +102,7 @@ def test_classification_unanimous_when_confident(tmp_path):
     stub = StubComprehender(responses={"classify": {
         "domain": "Project", "category": "Quality", "confidence": 0.95, "dispute": False}})
     c = cp.comprehend_thread(tmp_path, t, stub, get_profile())["classification"]
-    assert c["council"] == "small" and c["consensus"] == "unanimous" and c["category"] == "Quality"
+    assert c["council"] == "small" and c["members"] == 5 and c["consensus"] == "unanimous" and c["category"] == "Quality"
 
 
 def test_classification_dispute_escalates_and_precedence_referees(tmp_path):
@@ -112,7 +112,7 @@ def test_classification_dispute_escalates_and_precedence_referees(tmp_path):
         "classify_full": {"domain": "Project", "category": "Operation", "confidence": 0.75,
                           "dissent": "could be commercial"}})
     c = cp.comprehend_thread(tmp_path, t, stub, get_profile())["classification"]
-    assert c["council"] == "full"
+    assert c["council"] == "full" and c["members"] == 10
     assert c["category"] == "Commercial"               # EOT/payment -> precedence referee
     assert c["consensus"] == "split-resolved"
 

@@ -30,7 +30,8 @@ _DISTILL_SCHEMA = {"abstract": "str", "summary": "str", "event": "str (<=30 char
                    "contacts": [{"name": "str", "position": "str", "company": "str",
                                  "phone": "str", "email": "str"}]}
 _CLASSIFY_SCHEMA = {"domain": "str", "category": "str", "confidence": "number 0..1",
-                    "dispute": "bool", "dissent": "str"}
+                    "dispute": "bool", "dissent": "str", "votes": "str"}
+_SMALL_COUNCIL, _FULL_COUNCIL = 5, 10
 
 
 # ---------------------------------------------------------------- helpers
@@ -152,14 +153,17 @@ def _distill_prompt(comprehension):
             "empty if unknown, and don't invent.\n\nCOMPREHENSION:\n" + comprehension)
 
 
-def _classify_prompt(profile: Profile, comprehension, full: bool):
+def _classify_prompt(profile: Profile, comprehension, full: bool, members: int):
     taxonomy = "; ".join(f"{d}: {', '.join(profile.categories(d))}" for d in profile.domain_names())
     extra = ("\nThis is a DISPUTED case — weigh the costliest-if-wrong reading; a commercial / "
              "contractual matter must never be filed as routine info." if full else "")
-    return ("Classify this email thread by MEANING (not keywords). Choose a DOMAIN, then a "
-            f"CATEGORY within that domain.\nTaxonomy — {taxonomy}\n"
+    return (f"Convene a panel of {members} independent classifiers. Each member INDEPENDENTLY reads the "
+            "thread and assigns a DOMAIN, then a CATEGORY within it, by MEANING (not keywords).\n"
+            f"Taxonomy — {taxonomy}\n"
             f"High-stakes safety-net category: {profile.safety_net}.{extra}\n"
-            "Give confidence 0..1 and set dispute=true if genuinely ambiguous.\n\n"
+            f"Then report the PANEL result across the {members} members: the majority domain + category, "
+            "a one-line `votes` summary of the split, confidence 0..1, dispute=true if the panel is "
+            "genuinely split, and a one-line dissent for any strong minority view.\n\n"
             "COMPREHENSION:\n" + comprehension)
 
 
@@ -177,7 +181,7 @@ def _precedence(profile: Profile, text: str) -> str | None:
 
 
 def _classify(backend: Comprehender, profile: Profile, comprehension: str, thread_text: str) -> dict:
-    small = backend.generate("classify", _classify_prompt(profile, comprehension, False),
+    small = backend.generate("classify", _classify_prompt(profile, comprehension, False, _SMALL_COUNCIL),
                              schema=_CLASSIFY_SCHEMA) or {}
     domain = small.get("domain") or profile.domain_names()[0]
     category = small.get("category") or ""
@@ -185,9 +189,10 @@ def _classify(backend: Comprehender, profile: Profile, comprehension: str, threa
     dispute = bool(small.get("dispute")) or conf < 0.6 or category not in profile.categories(domain)
     if not dispute:
         return {"domain": domain, "category": category, "confidence": conf,
-                "council": "small", "consensus": "unanimous", "dissent": ""}
-    # escalate to full council
-    full = backend.generate("classify_full", _classify_prompt(profile, comprehension, True),
+                "council": "small", "members": _SMALL_COUNCIL, "consensus": "unanimous",
+                "dissent": "", "votes": str(small.get("votes", ""))}
+    # escalate to the full (larger) council
+    full = backend.generate("classify_full", _classify_prompt(profile, comprehension, True, _FULL_COUNCIL),
                             schema=_CLASSIFY_SCHEMA) or {}
     domain = full.get("domain") or domain
     category = full.get("category") or category
@@ -199,7 +204,8 @@ def _classify(backend: Comprehender, profile: Profile, comprehension: str, threa
     if conf < 0.5 or category not in profile.categories(domain):
         consensus = "asked"                          # genuine doubt / invalid pair -> surface to operator
     return {"domain": domain, "category": category, "confidence": conf,
-            "council": "full", "consensus": consensus, "dissent": str(full.get("dissent", ""))}
+            "council": "full", "members": _FULL_COUNCIL, "consensus": consensus,
+            "dissent": str(full.get("dissent", "")), "votes": str(full.get("votes", ""))}
 
 
 def _norm(s) -> str:

@@ -72,7 +72,7 @@
     <span class="leaf" title="Comprehended by {{ comp.model }} · read {{ comp.method }} thread">🍀</span>
     <span class="cbadge dom">{{ comp.classification.domain }}</span>
     <span class="cbadge">{{ comp.classification.category }}</span>
-    <span class="cbadge {% if comp.classification.consensus == 'asked' %}warn{% endif %}" title="council consensus">{{ comp.classification.consensus }}</span>
+    <span class="cbadge {% if comp.classification.consensus == 'asked' %}warn{% endif %}" title="{{ comp.classification.council }} council ({{ comp.classification.members or '' }} members){% if comp.classification.votes %} · {{ comp.classification.votes }}{% endif %}">{{ comp.classification.consensus }}{% if comp.classification.members %} · {{ comp.classification.members }}-member{% endif %}</span>
     <span class="note mono" title="council confidence">conf {{ "%.0f"|format((comp.classification.confidence or 0) * 100) }}%</span>
   </div>
   {% if comp.summary %}<p class="csum">{{ comp.summary }}</p>{% endif %}
