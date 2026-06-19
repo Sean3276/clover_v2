@@ -74,13 +74,18 @@
     <span class="cbadge">{{ comp.classification.category }}</span>
     <span class="cbadge {% if comp.classification.consensus == 'asked' %}warn{% endif %}" title="{{ comp.classification.council }} council ({{ comp.classification.members or '' }} members){% if comp.classification.votes %} · {{ comp.classification.votes }}{% endif %}">{{ comp.classification.consensus }}{% if comp.classification.members %} · {{ comp.classification.members }}-member{% endif %}</span>
     <span class="note mono" title="council confidence">conf {{ "%.0f"|format((comp.classification.confidence or 0) * 100) }}%</span>
+    {% if comp.event %}<span class="cbadge" title="event tag (≤30 chars)">🏷 {{ comp.event }}</span>{% endif %}
     {% if comp.qaqc and comp.qaqc.needs_review %}<span class="cbadge warn" title="QAQC gate flagged this — review against the source">⚠ needs review</span>{% endif %}
   </div>
   {% if comp.qaqc and comp.qaqc.needs_review and comp.qaqc.issues %}
   <p class="note dim" style="margin:6px 0 0"><strong>QAQC:</strong> {{ comp.qaqc.issues|join('; ') }}</p>
   {% endif %}
-  {% if comp.summary %}<p class="csum">{{ comp.summary }}</p>{% endif %}
-  {% if comp.abstract %}<p class="note">{{ comp.abstract }}</p>{% endif %}
+  {% if comp.summary %}<p class="csum" title="one-line summary">{{ comp.summary }}</p>{% endif %}
+  {% if comp.abstract %}<p class="note" title="abstract"><strong>Abstract.</strong> {{ comp.abstract }}</p>{% endif %}
+  {% if comp.comprehension %}
+  <details style="margin:6px 0 0"><summary class="note" style="cursor:pointer">📖 Full comprehension</summary>
+    <p class="note" style="white-space:pre-wrap;margin:6px 0 0;color:var(--ink)">{{ comp.comprehension }}</p></details>
+  {% endif %}
   {% if comp.facts %}
   <div class="cfacts">
     {% if comp.facts.project %}<span><b>Project:</b> {{ comp.facts.project }}</span>{% endif %}

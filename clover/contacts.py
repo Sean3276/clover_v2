@@ -53,5 +53,7 @@ def consolidate(archive_path) -> list[dict]:
             p["count"] += 1
 
     out = list(people.values())
-    out.sort(key=lambda p: (-p["count"], (p["name"] or p["email"]).casefold()))
+    # sort by company (named companies A–Z first, unknown last), then by name
+    out.sort(key=lambda p: (p["company"] == "", p["company"].casefold(),
+                            (p["name"] or p["email"]).casefold()))
     return out
