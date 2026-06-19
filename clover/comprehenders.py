@@ -76,6 +76,8 @@ class StubComprehender(Comprehender):
         if task in ("classify", "classify_full"):
             return {"domain": "Project", "category": "Commercial", "confidence": 0.9,
                     "dispute": False, "dissent": ""}
+        if task == "qa":
+            return {"passed": True, "faithfulness": 1.0, "completeness": 1.0, "issues": []}
         return {} if schema else ""
 
 

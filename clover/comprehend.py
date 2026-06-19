@@ -31,6 +31,8 @@ _DISTILL_SCHEMA = {"abstract": "str", "summary": "str", "event": "str (<=30 char
                                  "phone": "str", "email": "str"}]}
 _CLASSIFY_SCHEMA = {"domain": "str", "category": "str", "confidence": "number 0..1",
                     "dispute": "bool", "dissent": "str", "votes": "str"}
+_QA_SCHEMA = {"passed": "bool", "faithfulness": "number 0..1", "completeness": "number 0..1",
+              "issues": ["str"]}
 _SMALL_COUNCIL, _FULL_COUNCIL = 5, 10
 
 
@@ -278,8 +280,16 @@ def _clean_contacts(raw) -> list[dict]:
 
 
 # ---------------------------------------------------------------- pipeline
-def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Profile,
-                      *, max_chars: int = 120_000, model: str = "?") -> dict:
+def _qa_prompt(comprehension, thread_text):
+    return ("You are a strict QA reviewer. Compare the COMPREHENSION against the SOURCE thread. "
+            "Check FAITHFULNESS (every statement is supported by the source — nothing fabricated, "
+            "misattributed or distorted) and COMPLETENESS (no MATERIAL point omitted — a decision, "
+            "request, commitment, deadline, amount or change). Set passed=true ONLY if both hold; give "
+            "faithfulness and completeness each 0..1; list specific issues if any.\n\n"
+            "COMPREHENSION:\n" + comprehension + "\n\nSOURCE:\n" + thread_text)
+
+
+def _build_once(archive, thread, backend, profile, max_chars, model):
     msgs = _thread_messages(archive, thread)
     full = "\n\n----\n\n".join(msgs)
     if len(msgs) <= 1 or len(full) <= max_chars:
@@ -293,8 +303,7 @@ def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Pro
     distilled = backend.generate("distill", _distill_prompt(comprehension), schema=_DISTILL_SCHEMA) or {}
     facts, dropped = _verify_facts(distilled.get("facts") or {}, full)
     classification = _classify(backend, profile, comprehension, full)
-
-    return {
+    rec = {
         "thread_id": thread.get("thread_id"), "root_id": thread.get("root_id"),
         "subject": thread.get("subject"),
         "comprehension": comprehension,
@@ -308,6 +317,28 @@ def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Pro
         "verified": {"facts_ok": not dropped, "dropped_facts": dropped,
                      "grounded": bool(comprehension)},
     }
+    return rec, full
+
+
+def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Profile,
+                      *, max_chars: int = 120_000, model: str = "?", qaqc: bool = True) -> dict:
+    """Build the comprehension record, then run the QAQC gate: an AI reviewer scores faithfulness +
+    completeness against the source (and the deterministic fact-check must pass). On failure it
+    re-comprehends ONCE; if it still fails the record is marked `needs_review` (never silently shipped)."""
+    rec, full = _build_once(archive, thread, backend, profile, max_chars, model)
+    if not qaqc:
+        return rec
+    for attempt in (1, 2):
+        qa = backend.generate("qa", _qa_prompt(rec["comprehension"], full), schema=_QA_SCHEMA) or {}
+        passed = bool(qa.get("passed")) and rec["verified"]["facts_ok"]
+        if passed or attempt == 2:
+            rec["qaqc"] = {"passed": passed, "faithfulness": _f(qa.get("faithfulness")),
+                           "completeness": _f(qa.get("completeness")),
+                           "issues": [str(i) for i in (qa.get("issues") or [])][:6],
+                           "attempts": attempt, "needs_review": not passed}
+            return rec
+        rec, full = _build_once(archive, thread, backend, profile, max_chars, model)   # one retry
+    return rec
 
 
 def run_comprehension(archive, *, backend: Comprehender, profile: Profile | None = None,
@@ -336,7 +367,8 @@ def run_comprehension(archive, *, backend: Comprehender, profile: Profile | None
             spent += est
             done += 1
             c = rec["classification"]
-            log(f"  ✓ {t.get('thread_id')} [{t.get('n')} msgs] -> {c['domain']}/{c['category']} ({c['consensus']})")
+            flag = " ⚠ NEEDS-REVIEW" if rec.get("qaqc", {}).get("needs_review") else ""
+            log(f"  ✓ {t.get('thread_id')} [{t.get('n')} msgs] -> {c['domain']}/{c['category']} ({c['consensus']}){flag}")
         except Exception as e:
             log(f"  ! {t.get('thread_id')}: {type(e).__name__}: {e}")
     return {"done": done, "pending": len(todo) - done, "spent": spent, "blocked": False}

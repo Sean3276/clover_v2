@@ -69,7 +69,7 @@
         <span class="thsubj">{% if c %}<span class="leaf" title="Comprehended">🍀</span> {% endif %}{{ t.subject }}</span>
         {% if c %}
         <span class="thmeta note">{{ c.summary or (c.classification.category ~ ' — comprehended') }}</span>
-        <span class="cbadges">{% if c.facts and c.facts.project %}<span class="cbadge proj">🏗 {{ c.facts.project }}</span>{% endif %}<span class="cbadge dom">{{ c.classification.domain }}</span><span class="cbadge">{{ c.classification.category }}</span>{% if c.classification.consensus == 'asked' %}<span class="cbadge warn">review</span>{% endif %}</span>
+        <span class="cbadges">{% if c.facts and c.facts.project %}<span class="cbadge proj">🏗 {{ c.facts.project }}</span>{% endif %}<span class="cbadge dom">{{ c.classification.domain }}</span><span class="cbadge">{{ c.classification.category }}</span>{% if c.classification.consensus == 'asked' or (c.qaqc and c.qaqc.needs_review) %}<span class="cbadge warn">review</span>{% endif %}</span>
         {% else %}
         <span class="thmeta note">{{ t.participants[:3]|join(', ') }}{% if t.participants|length > 3 %} +{{ t.participants|length - 3 }} more{% endif %}</span>
         {% endif %}

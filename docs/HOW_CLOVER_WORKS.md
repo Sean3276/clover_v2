@@ -141,7 +141,8 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 
 ### Action: **Comprehend** · `POST /threads/{id}/comprehend` (Phase 3 entry point)
 - **Trigger:** *Comprehend* on a thread.
-- **Does:** runs the AI comprehension pipeline for that thread and stores the result in `comprehension.jsonl`; the thread then shows the 🍀 stamp. *(Behaviour detailed in `CLOVER_V2_PHASE3_SPEC.md`.)*
+- **Does:** runs the AI comprehension pipeline (4-tier cascade + facts + a 5/10-member classification council) and stores the result in `comprehension.jsonl`; the thread then shows the 🍀 stamp.
+- **QAQC gate:** after building, an **AI reviewer** scores the comprehension against the source (faithfulness + completeness) and the deterministic fact-check must pass; on failure it **re-comprehends once**, and if it still fails the thread is marked **"needs review"** (badge on Mail + the thread, audit-logged) — never silently shipped. *(Detail: `CLOVER_V2_PHASE3_SPEC.md`.)*
 
 ### Action: **Projects** · `GET /projects` → `GET /projects/{key}`
 - **Does:** groups **comprehended** conversations by their extracted project name (`facts.project`),

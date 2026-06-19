@@ -146,6 +146,29 @@ def test_low_confidence_dispute_asks_operator(tmp_path):
     assert c["consensus"] == "asked"                   # genuine doubt surfaced
 
 
+# ---------------------------------------------------------------- QAQC gate
+def test_qaqc_passes_clean_single_attempt(tmp_path):
+    rec = cp.comprehend_thread(tmp_path, _one_thread(tmp_path), StubComprehender(), get_profile())
+    assert rec["qaqc"]["passed"] is True and rec["qaqc"]["needs_review"] is False and rec["qaqc"]["attempts"] == 1
+
+
+def test_qaqc_failure_retries_once_then_flags(tmp_path):
+    stub = StubComprehender(responses={"qa": {"passed": False, "faithfulness": 0.4,
+                                              "completeness": 0.5, "issues": ["omitted the deadline"]}})
+    rec = cp.comprehend_thread(tmp_path, _one_thread(tmp_path), stub, get_profile())
+    assert rec["qaqc"]["needs_review"] is True and rec["qaqc"]["attempts"] == 2
+    assert rec["qaqc"]["issues"] == ["omitted the deadline"]
+    assert stub.calls.count("comprehend") == 2         # re-comprehended once on failure
+
+
+def test_qaqc_fails_when_a_fact_is_ungrounded(tmp_path):
+    t = _one_thread(tmp_path, body_a="a note with no references at all")
+    stub = StubComprehender(responses={"distill": {"abstract": "a", "summary": "s", "event": "e",
+        "facts": {"project": "", "parties": [], "refs": ["EOT-99"], "dates": [], "amounts": []}}})
+    rec = cp.comprehend_thread(tmp_path, t, stub, get_profile())   # EOT-99 not in source -> dropped
+    assert rec["verified"]["facts_ok"] is False and rec["qaqc"]["needs_review"] is True
+
+
 # ---------------------------------------------------------------- runner
 def test_run_idempotent(tmp_path):
     _one_thread(tmp_path)
