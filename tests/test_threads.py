@@ -1,3 +1,5 @@
+import email
+import email.policy
 import json
 from email.message import EmailMessage
 from pathlib import Path
@@ -149,7 +151,7 @@ def test_get_thread_and_render_message(tmp_path):
     assert len(blocks) == 1
     b = blocks[0]
     assert "hello" in (b["body_html"] or "")
-    assert b["attachments"] == [{"name": "report.pdf", "size": len(b"PDFDATA")}]
+    assert b["attachments"] == [{"i": 0, "name": "report.pdf", "size": len(b"PDFDATA")}]
 
 
 def test_render_message_plain_text_fallback(tmp_path):
@@ -169,6 +171,16 @@ def test_render_message_rejects_path_escape(tmp_path):
     import pytest
     with pytest.raises(ValueError):
         th.render_message(tmp_path, {"path": "../../etc/passwd"})   # containment guard
+
+
+def test_get_attachment(tmp_path):
+    import pytest
+    rel = _write_eml(tmp_path, "INBOX", "1", mid="g@x", subject="Hi", atts=[("report.pdf", b"PDFDATA")])
+    name, ctype, data = th.get_attachment(tmp_path, {"path": rel}, 0)
+    assert name == "report.pdf" and data == b"PDFDATA"
+    assert th.get_attachment(tmp_path, {"path": rel}, 9) is None         # out of range
+    with pytest.raises(ValueError):
+        th.get_attachment(tmp_path, {"path": "../../etc/passwd"}, 0)     # containment guard
 
 
 def test_thread_routes_lazy_load(tmp_path, monkeypatch):
@@ -194,6 +206,32 @@ def test_thread_routes_lazy_load(tmp_path, monkeypatch):
     assert c.get("/threads/deadbeef/msg/0").status_code == 404
 
 
+def test_confirm_link_route_and_needs_confirm_render(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import app.main as m
+    from clover import linkshares as ls
+    _write_eml(tmp_path, "INBOX", "1", mid="a@x", subject="Big",
+               html='<p>file https://www.dropbox.com/s/x/big.zip here</p>')
+    th.build_threads(tmp_path, log=lambda *_: None)
+    ls.harvest(tmp_path, log=lambda *_: None)
+    ls.fetch_links(tmp_path, fetcher=lambda u, p, lb: ("oversize", None, 3_000_000_000),
+                   confirm_over_mb=1024, log=lambda *_: None)               # -> needs-confirm
+    cfg = {"auth": {"imap": {}}, "folders": ["INBOX"], "archive_path": str(tmp_path)}
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: dict(cfg))
+    c = TestClient(m.app)
+    tid = th.read_threads(tmp_path)[0]["thread_id"]
+
+    r = c.get(f"/threads/{tid}/msg/0")
+    assert r.status_code == 200
+    assert "Download anyway" in r.text and "needs-confirm" in r.text and "GB" in r.text
+
+    rec = ls.read_link_shares(tmp_path)[0]
+    resp = c.post("/threads/confirm-link", data={"message_id": rec["message_id"], "url": rec["url"]})
+    assert resp.status_code == 200 and resp.json()["ok"] is True
+    rec2 = ls.read_link_shares(tmp_path)[0]
+    assert rec2["status"] == "pending" and rec2["confirmed"] is True       # re-queued past the gate
+
+
 def test_render_inlines_cid_images_and_image_attachments(tmp_path):
     import base64
     png = base64.b64decode(
@@ -216,4 +254,59 @@ def test_render_inlines_cid_images_and_image_attachments(tmp_path):
     b = th.stitch_thread(tmp_path, th.read_threads(tmp_path)[0])[0]
     assert "data:image/png;base64," in b["body_html"]      # cid rewritten to inline data URI
     assert "cid:logo123" not in b["body_html"]
-    assert any(a.get("img", "").startswith("data:image/png;base64,") for a in b["attachments"])
+    assert len(b["attachments"]) == 1                       # only the real attachment (cid image excluded)
+    assert b["attachments"][0]["name"] == "photo.png"
+    assert b["attachments"][0]["img"].startswith("data:image/png;base64,")
+
+
+def test_image_attachment_with_stray_cid_not_in_body_is_kept(tmp_path):
+    # Older Outlook/Apple Mail sometimes give a genuine image ATTACHMENT a stray Content-ID and no
+    # Content-Disposition. It must NOT be hidden unless its cid is actually referenced by an
+    # <img src="cid:..."> in the body. Here only `shown` is referenced; `stray` is a real attachment.
+    import base64
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    m = EmailMessage()
+    m["Message-ID"] = "<strayimg@x>"
+    m["From"] = "a@x.com"; m["To"] = "b@x.com"; m["Subject"] = "pics"
+    m["Date"] = "Thu, 01 Jan 2026 00:00:00 +0000"
+    m.set_content("see image")
+    m.add_alternative('<p>see <img src="cid:shown"></p>', subtype="html")
+    m.add_attachment(png, maintype="image", subtype="png", filename="shown.png")
+    m.add_attachment(png, maintype="image", subtype="png", filename="stray.png")
+    for img, cid, fn in ((m.get_payload()[1], "<shown>", "shown.png"),
+                         (m.get_payload()[2], "<stray>", "stray.png")):
+        img["Content-ID"] = cid
+        del img["Content-Disposition"]                    # no disposition (legacy clients)
+        img.set_param("name", fn, header="Content-Type")  # filename lives in Content-Type name=
+
+    msg = email.message_from_bytes(m.as_bytes(), policy=email.policy.default)
+    names = [p.get_filename() for p in th._real_attachments(msg)]
+    assert names == ["stray.png"]            # referenced cid hidden; stray-cid image kept
+
+    rel = "INBOX/1.eml"
+    (tmp_path / "INBOX").mkdir(parents=True, exist_ok=True)
+    (tmp_path / rel).write_bytes(m.as_bytes())
+    with (tmp_path / "_index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"id": "strayimg@x", "folder": "INBOX", "key": "1", "path": rel,
+                            "date": m["Date"], "from": m["From"], "subject": m["Subject"], "size": 1}) + "\n")
+    th.build_threads(tmp_path, log=lambda *_: None)
+    b = th.stitch_thread(tmp_path, th.read_threads(tmp_path)[0])[0]
+    assert "data:image/png;base64," in b["body_html"]      # referenced cid inlined into the body
+    assert "cid:shown" not in b["body_html"]
+    assert [a["name"] for a in b["attachments"]] == ["stray.png"]   # only the genuine attachment
+
+
+def test_inline_nonimage_attachment_kept_inline_image_dropped():
+    # senders often mark a real file (PDF/doc) as Content-Disposition: inline; it must stay visible,
+    # while an inline IMAGE (embedded preview/signature) is still excluded from the attachment list.
+    m = EmailMessage()
+    m["From"] = "a@x.com"; m["To"] = "b@x.com"; m["Subject"] = "s"
+    m.set_content("body")
+    m.add_attachment(b"PDFDATA", maintype="application", subtype="pdf", filename="invoice.pdf")
+    m.add_attachment(b"PNGDATA", maintype="image", subtype="png", filename="sig.png")
+    parts = m.get_payload()
+    parts[1].replace_header("Content-Disposition", 'inline; filename="invoice.pdf"')
+    parts[2].replace_header("Content-Disposition", 'inline; filename="sig.png"')
+    names = [p.get_filename() for p in th._real_attachments(m)]
+    assert names == ["invoice.pdf"]                          # inline PDF kept, inline image dropped

@@ -13,12 +13,13 @@ from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from clover import archive
 from clover import comprehend as compmod
 from clover import config as cfgmod
+from clover import linkshares as lsmod
 from clover import threads as threadmod
 from clover.comprehenders import get_comprehender
 from clover.errors import friendly_conn_error
@@ -227,6 +228,24 @@ def archive_run(folders: list[str] = Form(default=[]), limit: int = Form(0),
     return JSONResponse({"ok": True, "message": f"Archiving {len(folders)} folder(s){suffix}"})
 
 
+@app.post("/archive/reconcile")
+def archive_reconcile():
+    cfg = cfgmod.load_config()
+    rep = archive.reconcile(_archive_dir(cfg))
+    server = {}                                   # best-effort: server message count per folder
+    pw = cfgmod.get_secret(cfgmod.SECRET_IMAP_PASSWORD)
+    if pw and _imap_conn(cfg).get("host"):
+        try:
+            with get_source("imap", _imap_conn(cfg), pw) as src:
+                for f in src.folders():
+                    if f.get("messages") is not None:
+                        server[f["name"]] = f["messages"]
+        except Exception:
+            server = {}
+    rep["server"] = server
+    return JSONResponse(rep)
+
+
 @app.post("/archive/stop")
 def archive_stop():
     with _lock:
@@ -310,11 +329,17 @@ def threads_page(request: Request):
     cfg = cfgmod.load_config()
     arch = _archive_dir(cfg)
     comps = {r["thread_id"]: r for r in compmod.read_comprehensions(arch) if r.get("thread_id")}
+    link_stats = {}
+    for r in lsmod.read_link_shares(arch):
+        s = r.get("status", "pending")
+        link_stats[s] = link_stats.get(s, 0) + 1
     return templates.TemplateResponse(request, "threads_list.html", {
         "cfg": cfg,
         "threads": threadmod.read_threads(arch),
         "has_index": (arch / "threads.jsonl").exists(),
         "comps": comps,
+        "link_stats": link_stats,
+        "link_total": sum(link_stats.values()),
     })
 
 
@@ -391,4 +416,96 @@ def thread_message(request: Request, thread_id: str, idx: int):
     except Exception as e:
         return HTMLResponse(f'<p class="msg err" style="display:block">Couldn\'t render: {type(e).__name__}</p>')
     srcdoc = _wrap_srcdoc(block["body_html"]) if block.get("body_html") else None
-    return templates.TemplateResponse(request, "thread_msg.html", {"block": block, "srcdoc": srcdoc})
+    return templates.TemplateResponse(request, "thread_msg.html",
+                                      {"block": block, "srcdoc": srcdoc, "tid": thread_id, "idx": idx,
+                                       "links": lsmod.links_for_member(arch, members[idx].get("message_id"), locs)})
+
+
+_linktask = {"running": False, "stop": False}   # ONE link task (harvest OR fetch) at a time
+
+
+def _start_link_task(target) -> bool:
+    with _lock:                  # atomic check-and-set (mirrors archive_run's discipline)
+        if _linktask["running"]:
+            return False
+        _linktask["running"] = True
+        _linktask["stop"] = False
+
+    def runner():
+        try:
+            target()
+        except Exception as e:
+            _log(f"link task error: {type(e).__name__}: {e}")
+        finally:
+            with _lock:
+                _linktask["running"] = False
+    threading.Thread(target=runner, daemon=True).start()
+    return True
+
+
+@app.post("/threads/harvest-links")
+def harvest_links():
+    cfg = cfgmod.load_config()                   # background so it never blocks the request
+    if not _start_link_task(lambda: lsmod.harvest(_archive_dir(cfg), log=_log)):
+        return JSONResponse({"ok": False, "message": "A link task (harvest or fetch) is already running."})
+    return JSONResponse({"ok": True, "message":
+                         "Harvesting share links in the background — reopen Threads shortly to see the catalogue."})
+
+
+@app.post("/threads/fetch-links")
+def fetch_links_route(limit: int = Form(100)):
+    cfg = cfgmod.load_config()
+    if not _start_link_task(lambda: lsmod.fetch_links(
+            _archive_dir(cfg), limit=limit, headless=True, log=_log,
+            should_stop=lambda: _linktask.get("stop", False))):
+        return JSONResponse({"ok": False, "message": "A link task (harvest or fetch) is already running."})
+    return JSONResponse({"ok": True, "message":
+                         "Fetching link files in the background (headless browser). "
+                         "Reopen a thread to see statuses update."})
+
+
+@app.post("/threads/stop-links")
+def stop_links():
+    _linktask["stop"] = True     # honored between links in fetch_links; finishes the in-flight one
+    return JSONResponse({"ok": True, "message": "Stopping after the current link…"})
+
+
+@app.post("/threads/confirm-link")
+def confirm_link(message_id: str = Form(...), url: str = Form(...)):
+    """User OK'd a large (multi-GB) link in the viewer — re-queue it past the size gate."""
+    lsmod.mark_confirmed(_archive_dir(cfgmod.load_config()), message_id, url)
+    return JSONResponse({"ok": True, "message": "Marked for download — click 'Fetch files' to fetch it."})
+
+
+@app.get("/linkfile/{rel:path}")
+def linkfile(rel: str):
+    base = _archive_dir(cfgmod.load_config()).resolve()
+    target = (base / rel).resolve()
+    if not target.is_relative_to(base) or "_linkfiles" not in target.parts or not target.is_file():
+        return Response("Not found", status_code=404)
+    from urllib.parse import quote
+    return Response(content=target.read_bytes(), media_type="application/octet-stream",
+                    headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(target.name)}"})
+
+
+@app.get("/threads/{thread_id}/msg/{idx}/att/{n}")
+def thread_attachment(thread_id: str, idx: int, n: int):
+    """Serve one attachment extracted from a member .eml (inline so images/PDFs open; saveable)."""
+    cfg = cfgmod.load_config()
+    t = threadmod.get_thread(_archive_dir(cfg), thread_id)
+    members = (t or {}).get("members", [])
+    if not t or not (0 <= idx < len(members)):
+        return Response("Not found", status_code=404)
+    locs = members[idx].get("locations") or []
+    if not locs:
+        return Response("Not found", status_code=404)
+    try:
+        got = threadmod.get_attachment(_archive_dir(cfg), locs[0], n)
+    except Exception:
+        got = None
+    if not got:
+        return Response("Not found", status_code=404)
+    from urllib.parse import quote
+    name, ctype, data = got
+    return Response(content=data, media_type=ctype,
+                    headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(name)}"})

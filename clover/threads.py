@@ -36,6 +36,37 @@ def _img_data_uri(payload: bytes, ctype: str) -> str | None:
     return None
 
 
+def _referenced_cids(msg) -> set[str]:
+    """Normalized cids referenced by <img src="cid:..."> in the message's HTML body — the same body→cid
+    set that _inline_cid_images() rewrites. An image part whose cid is NOT in here is a real attachment."""
+    try:
+        part = msg.get_body(preferencelist=("html",))
+        html = part.get_content() if part is not None else ""
+    except Exception:
+        html = ""
+    return {c.strip().strip("<>") for c in _CID_RE.findall(html or "")}
+
+
+def _is_real_attachment(part, referenced_cids=frozenset()) -> bool:
+    """A genuine file attachment — not an inline/cid image (signature logo, embedded screenshot)."""
+    disp = (part.get_content_disposition() or "").lower()
+    if disp == "attachment":
+        return True
+    if disp == "inline":
+        return part.get_content_maintype() != "image"  # inline PDFs/docs are real; inline images aren't
+    cid = part.get("Content-ID")
+    if cid and part.get_content_maintype() == "image":
+        # hide it only when the body actually references this cid; an image attachment carrying a stray
+        # Content-ID with no disposition (older Outlook/Apple Mail) is a real attachment, not inline.
+        return cid.strip().strip("<>") not in referenced_cids
+    return bool(part.get_filename())
+
+
+def _real_attachments(msg) -> list:
+    referenced = _referenced_cids(msg)
+    return [p for p in msg.iter_attachments() if _is_real_attachment(p, referenced)]
+
+
 def _inline_cid_images(msg, html: str) -> str:
     """Rewrite <img src="cid:..."> to data: URIs from the message's embedded image parts, so inline
     screenshots / photos / logos render in the sandboxed iframe (whose CSP allows only img-src data:)."""
@@ -242,9 +273,9 @@ def render_message(archive_path, location: dict) -> dict:
         body_html = _inline_cid_images(msg, body_html)     # show inline screenshots/photos/logos
     atts = []
     try:
-        for part in msg.iter_attachments():
+        for i, part in enumerate(_real_attachments(msg)):     # exclude inline/cid images
             payload = part.get_payload(decode=True) or b""
-            a = {"name": part.get_filename() or "(unnamed)", "size": len(payload)}
+            a = {"i": i, "name": part.get_filename() or "(unnamed)", "size": len(payload)}
             uri = _img_data_uri(payload, part.get_content_type())   # show image attachments inline
             if uri:
                 a["img"] = uri
@@ -257,6 +288,24 @@ def render_message(archive_path, location: dict) -> dict:
         "body_html": body_html, "body_text": body_text, "attachments": atts,
         "folder": location.get("folder"),
     }
+
+
+def get_attachment(archive_path, location: dict, index: int):
+    """Return (filename, content_type, bytes) for the nth attachment of a member .eml, or None.
+    Same path-containment guard as render_message (never read outside the archive)."""
+    base = Path(archive_path).resolve()
+    target = (base / location["path"]).resolve()
+    if not target.is_relative_to(base):
+        raise ValueError("message path escapes the archive")
+    with target.open("rb") as fh:
+        msg = email.message_from_binary_file(fh, policy=policy.default)
+    parts = _real_attachments(msg)                            # same filter as render_message -> aligned indices
+    if 0 <= index < len(parts):
+        part = parts[index]
+        payload = part.get_payload(decode=True) or b""
+        return (part.get_filename() or f"attachment_{index}",
+                part.get_content_type() or "application/octet-stream", payload)
+    return None
 
 
 def stitch_thread(archive_path, thread: dict) -> list[dict]:

@@ -3,8 +3,21 @@
 A mail-archive → comprehension → intelligence pipeline. **📍 Full plan:
 [docs/CLOVER_V2_ROADMAP.md](docs/CLOVER_V2_ROADMAP.md)** (5 phases + 2 cross-cutting tracks).
 
-**Status:** Phase 1 (archiving) implemented; Phases 2–5 planned. Pluggable mail sources
+**Status:** Phase 1 (archiving), Phase 2 (per-thread organization), and Phase 3
+(comprehension) implemented; Phases 4–5 planned. Pluggable mail sources
 (`clover/sources/`) — IMAP available, the rest of the suite added one by one.
+
+---
+
+## Quick start (one click)
+
+**Windows:** double-click **`run_clover.bat`**. The first run installs everything
+Clover needs (Python packages + a small browser engine) and then opens Clover in your
+web browser; later runs start straight away. The only prerequisite is
+[Python 3.11+](https://www.python.org/downloads/) — if it isn't installed, the launcher
+points you to it (tick *"Add python.exe to PATH"* during install).
+
+Prefer to set it up by hand? See **Manual install / run** below.
 
 ---
 
@@ -20,14 +33,13 @@ is linked by Message-ID via `_index.jsonl`.
 mail client. (Link-shared files — SharePoint/Dropbox/Drive download links — are *not*
 inside the `.eml`; capturing those is a later phase.)
 
-## Install
+## Manual install / run
 ```
 cd .clover_v2_github
 python bootstrap.py
 pip install -r requirements.txt
+python -m playwright install chromium      # browser engine for fetching shared files
 ```
-
-## Run
 ```
 python -m uvicorn app.main:app --port 8765      # → http://127.0.0.1:8765
 ```

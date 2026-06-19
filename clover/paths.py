@@ -26,7 +26,10 @@ def runtime_dir() -> Path:
     env = os.environ.get(ENV_HOME)
     if env:
         return Path(env).expanduser().resolve()
-    return auto_clover_root() / ".clover_v2"
+    sibling = auto_clover_root() / ".clover_v2"      # legacy/dev layout (repo nested under auto_clover)
+    if sibling.exists():
+        return sibling
+    return template_dir() / ".clover_v2"             # default: inside the project — portable for clones
 
 
 def config_path() -> Path:

@@ -12,8 +12,11 @@ clover_config.json
 .clover_v2/
 eml_archive/
 _index.jsonl
+link_shares.jsonl
+threads.jsonl
 *.eml
 logs/
+.setup_done
 
 # OS / editor
 .DS_Store

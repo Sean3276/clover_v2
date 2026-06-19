@@ -22,7 +22,25 @@
     border:1px solid var(--line);border-radius:8px;padding:12px;margin:0;overflow:auto}
   .emlframe{width:100%;border:1px solid var(--line);border-radius:8px;background:#fff;min-height:60px}
   .atts{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
-  .att{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:3px 9px;color:var(--sub)}
+  .att{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:3px 9px;color:var(--sub);text-decoration:none}
+  .att:hover{border-color:var(--clover);color:var(--ink)}
+  .attimg a{display:inline-block}
+  .leaf{font-size:15px;line-height:1}
+  .lshares{margin-top:10px}
+  .lrow{display:flex;gap:8px;align-items:center;font-size:12px;padding:3px 0;min-width:0}
+  .lrow a{color:var(--clover-d);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+  .lprov{font-weight:700;color:var(--sub);flex:none;min-width:120px}
+  .lstat{flex:none;font-size:10px;font-weight:700;border-radius:5px;padding:1px 7px;border:1px solid var(--line);color:var(--sub)}
+  .lstat.downloaded{color:var(--clover-d);background:rgba(52,210,123,.14);border-color:rgba(52,210,123,.3)}
+  .lstat.dead{color:var(--red);background:rgba(255,107,94,.1);border-color:rgba(255,107,94,.3)}
+  .lstat.needs-auth{color:var(--amber);background:rgba(240,178,74,.14);border-color:rgba(240,178,74,.34)}
+  .lstat.pending{color:var(--sub)}
+  .lstat.error{color:var(--red);background:rgba(255,107,94,.1);border-color:rgba(255,107,94,.3)}
+  .lstat.needs-confirm{color:var(--amber);background:rgba(240,178,74,.14);border-color:rgba(240,178,74,.34)}
+  .lsize{flex:none;font-size:11px;font-weight:700;color:var(--amber)}
+  .lconfirm{flex:none;font-size:11px;font-weight:700;cursor:pointer;border:1px solid var(--clover-d);
+    border-radius:5px;padding:1px 8px;background:var(--clover-d);color:#04140b}
+  .lconfirm:disabled{opacity:.6;cursor:default}
   .attimg{margin:10px 0 0}
   .attimg img{max-width:100%;max-height:480px;border:1px solid var(--line);border-radius:8px;display:block}
   .attimg figcaption{font-size:11px;margin-top:3px}
@@ -46,11 +64,11 @@
 {% if comp %}
 <div class="card comp">
   <div class="compbadges">
+    <span class="leaf" title="Comprehended by {{ comp.model }} · read {{ comp.method }} thread">🍀</span>
     <span class="cbadge dom">{{ comp.classification.domain }}</span>
     <span class="cbadge">{{ comp.classification.category }}</span>
-    <span class="cbadge {% if comp.classification.consensus == 'asked' %}warn{% endif %}">{{ comp.classification.consensus }}</span>
-    <span class="note mono">conf {{ "%.0f"|format((comp.classification.confidence or 0) * 100) }}%</span>
-    <span class="note dim">· {{ comp.model }} · {{ comp.method }}</span>
+    <span class="cbadge {% if comp.classification.consensus == 'asked' %}warn{% endif %}" title="council consensus">{{ comp.classification.consensus }}</span>
+    <span class="note mono" title="council confidence">conf {{ "%.0f"|format((comp.classification.confidence or 0) * 100) }}%</span>
   </div>
   {% if comp.summary %}<p class="csum">{{ comp.summary }}</p>{% endif %}
   {% if comp.abstract %}<p class="note">{{ comp.abstract }}</p>{% endif %}
@@ -145,6 +163,18 @@ async function comprehend(){
     if(res.ok) setTimeout(() => location.reload(), 800); else if(b) b.disabled = false;
   }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Failed: " + e; } if(b) b.disabled = false; }
 }
+document.addEventListener("click", async (e) => {   // "Download anyway" on an oversize link (delegated: rows load via AJAX)
+  const btn = e.target.closest(".lconfirm");
+  if(!btn) return;
+  btn.disabled = true;
+  const body = new URLSearchParams({message_id: btn.dataset.mid, url: btn.dataset.url});
+  try{
+    const res = await (await fetch("/threads/confirm-link", {method:"POST",
+      headers:{"Content-Type":"application/x-www-form-urlencoded"}, body})).json();
+    btn.textContent = res.ok ? "✓ queued — run Fetch files" : "failed";
+    if(!res.ok) btn.disabled = false;
+  }catch(err){ btn.textContent = "failed"; btn.disabled = false; }
+});
 applyOrder();
 (function(){     // small threads open fully; long ones stay collapsed (just headers -> instant + scrollable)
   const msgs = [...document.querySelectorAll("#msgs .tmsg")];

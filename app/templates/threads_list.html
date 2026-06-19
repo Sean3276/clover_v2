@@ -19,6 +19,7 @@
   .cbadge{font-size:10px;font-weight:700;border:1px solid var(--line);border-radius:5px;padding:1px 7px;color:var(--sub)}
   .cbadge.dom{background:rgba(52,210,123,.14);color:var(--clover-d);border-color:rgba(52,210,123,.3)}
   .cbadge.warn{background:rgba(240,178,74,.16);color:var(--amber);border-color:rgba(240,178,74,.34)}
+  .leaf{font-size:13px;line-height:1}
 </style>
 
 <div class="runhdr">
@@ -27,8 +28,22 @@
       chronological thread <strong>across folders</strong> — your Sent copy, the inbound reply, and a filed or
       deleted copy in Trash all stitch into a single timeline. Click a thread to read it; the index rebuilds
       automatically after you archive new mail (or hit Rebuild).</p></div>
-  {% if has_index %}<button id="rebuildBtn" type="button" class="ghost" onclick="rebuild()">↻ Rebuild index</button>{% endif %}
+  {% if has_index %}<span style="display:flex;gap:8px">
+    <button id="rebuildBtn" type="button" class="ghost" onclick="rebuild()">↻ Rebuild index</button>
+    <button id="harvestBtn" type="button" class="ghost" onclick="harvestLinks()" title="Detect & catalogue share links in your archive">🔗 Harvest links</button>
+    <button id="fetchBtn" type="button" class="ghost" onclick="fetchLinks()" title="Download catalogued link files (headless browser)">⬇ Fetch files</button>
+  </span>{% endif %}
 </div>
+
+{% if link_total %}
+<p class="note linkstats">🔗 Share links: {{ link_total }} catalogued —
+  <strong>{{ link_stats.get('downloaded', 0) }}</strong> downloaded,
+  {{ link_stats.get('pending', 0) }} pending,
+  {{ link_stats.get('needs-auth', 0) }} need sign-in,
+  {{ link_stats.get('dead', 0) }} dead{% if link_stats.get('needs-confirm', 0) %},
+  <strong style="color:var(--amber)">{{ link_stats['needs-confirm'] }} large — open the thread to confirm download</strong>{% endif %}.
+</p>
+{% endif %}
 
 {% if not has_index %}
 <div class="card">
@@ -55,8 +70,8 @@
        data-n="{{ t.n }}" data-end="{{ t.end or '' }}" data-start="{{ t.start or '' }}"
        data-q="{{ (t.subject ~ ' ' ~ (t.participants|join(' ')))|lower }}">
       <div class="thmain">
-        <span class="thsubj">{{ t.subject }}</span>
         {% set c = comps.get(t.thread_id) %}
+        <span class="thsubj">{% if c %}<span class="leaf" title="Comprehended">🍀</span> {% endif %}{{ t.subject }}</span>
         {% if c %}
         <span class="thmeta note">{{ c.summary or (c.classification.category ~ ' — comprehended') }}</span>
         <span class="cbadges"><span class="cbadge dom">{{ c.classification.domain }}</span><span class="cbadge">{{ c.classification.category }}</span>{% if c.classification.consensus == 'asked' %}<span class="cbadge warn">review</span>{% endif %}</span>
@@ -101,6 +116,24 @@ async function rebuild(){
     if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }
     if(res.ok) setTimeout(() => location.reload(), 900); else if(b) b.disabled = false;
   }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Rebuild failed: " + e; } if(b) b.disabled = false; }
+}
+async function harvestLinks(){
+  const b = $("harvestBtn"), m = $("rebuildMsg");
+  if(b) b.disabled = true;
+  if(m){ m.className = "msg ok"; m.textContent = "Scanning your archive for share links… (may take a minute)"; }
+  try{
+    const res = await (await fetch("/threads/harvest-links", {method:"POST"})).json();
+    if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }
+  }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Harvest failed: " + e; } }
+  if(b) b.disabled = false;
+}
+async function fetchLinks(){
+  const m = $("rebuildMsg");
+  if(m){ m.className = "msg ok"; m.textContent = "Starting link download…"; }
+  try{
+    const res = await (await fetch("/threads/fetch-links", {method:"POST"})).json();
+    if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }
+  }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Fetch failed: " + e; } }
 }
 document.addEventListener("DOMContentLoaded", () => { if($("list")) apply(); });
 </script>

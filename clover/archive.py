@@ -144,6 +144,40 @@ def index_summary(archive_path: Path) -> dict:
     return {"total": len(rows), "unique_ids": len(ids), "per_folder": per_folder}
 
 
+def reconcile(archive_path) -> dict:
+    """Local integrity check: every indexed message has its .eml on disk, and no .eml on disk is
+    missing from the index. Returns per-folder counts + the missing/orphan lists (capped)."""
+    dest = Path(archive_path)
+    indexed: dict[str, str] = {}                  # relative path -> folder
+    per_folder: dict[str, dict] = {}
+    for r in read_index(dest):
+        p = (r.get("path") or "").replace("\\", "/")
+        if not p:
+            continue
+        fol = r.get("folder", "?")
+        indexed[p] = fol
+        per_folder.setdefault(fol, {"indexed": 0, "on_disk": 0})["indexed"] += 1
+    disk: set[str] = set()
+    if dest.exists():
+        for f in dest.rglob("*.eml"):
+            if "_linkfiles" in f.parts:               # downloaded link files aren't archive messages
+                continue
+            disk.add(str(f.relative_to(dest)).replace("\\", "/"))
+    idx_paths = set(indexed)
+    missing = sorted(idx_paths - disk)            # indexed but the file is gone
+    orphans = sorted(disk - idx_paths)            # file on disk but not in the index
+    for rel in disk:
+        fol = indexed.get(rel) or rel.split("/")[0]
+        per_folder.setdefault(fol, {"indexed": 0, "on_disk": 0})["on_disk"] += 1
+    return {
+        "per_folder": per_folder,
+        "total_indexed": len(idx_paths), "total_on_disk": len(disk),
+        "missing": missing[:50], "missing_count": len(missing),
+        "orphans": orphans[:50], "orphans_count": len(orphans),
+        "ok": not missing and not orphans,
+    }
+
+
 # ---------------------------------------------------------------- selection filters
 def _warn_unmeasured(base, meta, log) -> None:
     """A filtered archive can only keep messages whose date/size we could read. Surface any whose

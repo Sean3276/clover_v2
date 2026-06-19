@@ -252,6 +252,40 @@ def test_friendly_error_fallback_keeps_type():
     assert "Couldn't reach" in friendly_conn_error(ValueError("weird"))
 
 
+def test_reconcile_detects_missing_and_orphans(tmp_path):
+    (tmp_path / "INBOX").mkdir(parents=True)
+    (tmp_path / "INBOX/a.eml").write_bytes(b"x")          # indexed + present
+    (tmp_path / "INBOX/orphan.eml").write_bytes(b"y")     # present, not indexed
+    with (tmp_path / "_index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"id": "<a>", "folder": "INBOX", "key": "1", "path": "INBOX/a.eml"}) + "\n")
+        f.write(json.dumps({"id": "<b>", "folder": "INBOX", "key": "2", "path": "INBOX/b.eml"}) + "\n")  # b missing
+    rep = ar.reconcile(tmp_path)
+    assert rep["total_indexed"] == 2 and rep["total_on_disk"] == 2
+    assert rep["missing"] == ["INBOX/b.eml"] and rep["orphans"] == ["INBOX/orphan.eml"]
+    assert rep["ok"] is False
+    assert rep["per_folder"]["INBOX"] == {"indexed": 2, "on_disk": 2}
+
+
+def test_reconcile_ignores_linkfiles(tmp_path):
+    (tmp_path / "INBOX").mkdir(parents=True)
+    (tmp_path / "INBOX/a.eml").write_bytes(b"x")
+    (tmp_path / "_linkfiles" / "mid").mkdir(parents=True)
+    (tmp_path / "_linkfiles/mid/shared.eml").write_bytes(b"y")     # a downloaded .eml link file
+    with (tmp_path / "_index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"id": "<a>", "folder": "INBOX", "key": "1", "path": "INBOX/a.eml"}) + "\n")
+    rep = ar.reconcile(tmp_path)
+    assert rep["ok"] is True and rep["orphans"] == [] and rep["total_on_disk"] == 1   # _linkfiles ignored
+
+
+def test_reconcile_ok_when_consistent(tmp_path):
+    (tmp_path / "INBOX").mkdir(parents=True)
+    (tmp_path / "INBOX/a.eml").write_bytes(b"x")
+    with (tmp_path / "_index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"id": "<a>", "folder": "INBOX", "key": "1", "path": "INBOX/a.eml"}) + "\n")
+    rep = ar.reconcile(tmp_path)
+    assert rep["ok"] is True and not rep["missing"] and not rep["orphans"]
+
+
 # ---------------------------------------------------------------- selection filters
 def test_parse_fetch_meta_typical():
     uid, dt, size = _parse_fetch_meta(b'7 (UID 42 INTERNALDATE "11-Jun-2026 01:22:12 +0000" RFC822.SIZE 4096)')

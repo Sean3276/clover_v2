@@ -174,6 +174,14 @@
   {% endif %}
 </div>
 
+<div class="card">
+  <div class="runhdr"><h2 style="margin:0">Archive integrity</h2>
+    <button id="reconBtn" type="button" class="ghost" onclick="reconcile()">Verify archive</button></div>
+  <p class="note">Checks every indexed email has its <code>.eml</code> on disk, no stray files, and (if connected) how much of each folder is archived vs the server.</p>
+  <div id="reconMsg" class="msg"></div>
+  <div id="reconOut"></div>
+</div>
+
 <script>
 const C = 2 * Math.PI * 52;
 let timer = null, wasRunning = false;
@@ -284,6 +292,28 @@ async function stop(){
   const b=$("stopBtn"); b.disabled=true;
   await fetch("/archive/stop",{method:"POST"});
   const m=$("runMsg"); m.className="msg ok"; m.textContent="Stopping after the current attempt…";
+}
+async function reconcile(){
+  const b=$("reconBtn"), m=$("reconMsg"), out=$("reconOut");
+  if(b) b.disabled=true;
+  m.className="msg ok"; m.textContent="Verifying…"; out.innerHTML="";
+  try{
+    const r = await (await fetch("/archive/reconcile",{method:"POST"})).json();
+    m.className="msg "+(r.ok?"ok":"err");
+    m.textContent = r.ok
+      ? `✓ Sound — ${r.total_indexed} indexed, all on disk, no stray files.`
+      : `⚠ ${r.missing_count} indexed file(s) missing, ${r.orphans_count} stray file(s) — see below.`;
+    const fols = Object.keys(r.per_folder||{}).sort();
+    let html = '<table style="margin-top:10px"><tr><th>Folder</th><th>Server</th><th>Archived</th><th>On disk</th></tr>';
+    for(const f of fols){
+      const pf=r.per_folder[f], sv=(r.server&&r.server[f]!=null)?r.server[f]:"—";
+      html += `<tr><td>${esc(f)}</td><td class="mono">${sv}</td><td class="mono">${pf.indexed}</td><td class="mono">${pf.on_disk}</td></tr>`;
+    }
+    out.innerHTML = html + '</table>'
+      + (r.missing_count?`<p class="note" style="color:var(--amber);margin-top:8px">Indexed but missing on disk (${r.missing_count}): <span class="mono">${r.missing.map(esc).join(', ')}${r.missing_count>r.missing.length?' …':''}</span></p>`:'')
+      + (r.orphans_count?`<p class="note" style="color:var(--amber);margin-top:6px">On disk but not indexed (${r.orphans_count}): <span class="mono">${r.orphans.map(esc).join(', ')}${r.orphans_count>r.orphans.length?' …':''}</span></p>`:'');
+  }catch(e){ m.className="msg err"; m.textContent="Verify failed: "+e; }
+  if(b) b.disabled=false;
 }
 document.addEventListener("DOMContentLoaded", () => { onDate(); onSize(); poll(); });
 </script>
