@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ thread.subject }} · Threads{% endblock %}
+{% block title %}{{ thread.subject }} · Mail{% endblock %}
 {% block nav_threads %}active{% endblock %}
 {% block body %}
 <style>
@@ -54,9 +54,13 @@
   .csum{font-size:15px;font-weight:600;margin:0 0 6px;color:var(--ink)}
   .cfacts{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--sub)}
   .cfacts b{color:var(--ink)}
+  .scrollnav{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:6px;z-index:60}
+  .scrollnav button{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--card2);
+    color:var(--ink);font-size:17px;line-height:1;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.25)}
+  .scrollnav button:hover{background:var(--clover-d);color:#fff;border-color:var(--clover)}
 </style>
 
-<p style="margin:0 0 6px"><a href="/threads" class="note">← all threads</a></p>
+<p style="margin:0 0 6px"><a href="/threads" class="note">← all mail</a></p>
 <h1 style="font-size:20px;margin:0 0 4px">{{ thread.subject }}</h1>
 <p class="note">{{ thread.n }} message(s) · {{ thread.participants|join(', ') }}
   · {{ (thread.start or '')[:10] }}{% if thread.n > 1 %} → {{ (thread.end or '')[:10] }}{% endif %}</p>
@@ -92,6 +96,13 @@
 </div>
 {% endif %}
 
+{% if has_links %}
+<div class="tbar" style="margin-bottom:8px">
+  <button id="threadFetchBtn" type="button" class="ghost" onclick="fetchThreadLinks()" title="Download the files shared via links in this conversation">⬇ Download linked files</button>
+  <span id="threadFetchMsg" class="note dim"></span>
+</div>
+{% endif %}
+
 {% if thread.n > 1 %}
 <div class="tbar">
   <button id="orderBtn" type="button" class="ghost" onclick="toggleOrder()">↓ Oldest first</button>
@@ -114,6 +125,11 @@
   <div class="mbody" data-url="/threads/{{ thread.thread_id }}/msg/{{ loop.index0 }}"></div>
 </div>
 {% endfor %}
+</div>
+
+<div class="scrollnav">
+  <button type="button" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Back to top">↑</button>
+  <button type="button" onclick="jumpEnd()" title="Jump to end (latest)">↓</button>
 </div>
 
 <script>
@@ -175,6 +191,17 @@ document.addEventListener("click", async (e) => {   // "Download anyway" on an o
     if(!res.ok) btn.disabled = false;
   }catch(err){ btn.textContent = "failed"; btn.disabled = false; }
 });
+function jumpEnd(){ window.scrollTo({top: document.body.scrollHeight, behavior: "smooth"}); }
+async function fetchThreadLinks(){
+  const b = document.getElementById("threadFetchBtn"), m = document.getElementById("threadFetchMsg");
+  if(b) b.disabled = true;
+  if(m) m.textContent = "Starting download…";
+  try{
+    const res = await (await fetch(location.pathname + "/fetch-links", {method:"POST"})).json();
+    if(m) m.textContent = res.message;
+    if(!res.ok && b) b.disabled = false;
+  }catch(e){ if(m) m.textContent = "Failed: " + e; if(b) b.disabled = false; }
+}
 applyOrder();
 (function(){     // small threads open fully; long ones stay collapsed (just headers -> instant + scrollable)
   const msgs = [...document.querySelectorAll("#msgs .tmsg")];

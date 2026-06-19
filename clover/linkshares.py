@@ -318,7 +318,7 @@ def mark_confirmed(archive_path, message_id: str, url: str) -> None:
 
 
 def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=60,
-                confirm_over_mb=1024, log=print, should_stop=lambda: False) -> dict:
+                confirm_over_mb=1024, only_message_ids=None, log=print, should_stop=lambda: False) -> dict:
     """Download up to `limit` pending links into _linkfiles/<message-id>/, updating each record's
     status (downloaded | needs-confirm | dead | needs-auth | error). Re-runnable (only touches 'pending').
 
@@ -346,7 +346,8 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
                 for r in recs if r.get("status") == "needs-confirm"}
     dead_urls = {r.get("url") for r in recs if r.get("status") == "dead"}        # don't re-try a known-dead link
     auth_urls = {r.get("url") for r in recs if r.get("status") == "needs-auth"}  # ...or a known-gated one
-    pending = [r for r in recs if r.get("status") == "pending"]
+    pending = [r for r in recs if r.get("status") == "pending"
+               and (only_message_ids is None or r.get("message_id") in only_message_ids)]
     updates = {}
     done = reused = confirm = dead = auth = 0
     for r in pending[:limit]:

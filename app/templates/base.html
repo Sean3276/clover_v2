@@ -53,6 +53,16 @@
   main{max-width:1000px;margin:0 auto;padding:26px 24px 70px}
   h1{font-size:22px;margin:0 0 4px;letter-spacing:.01em}
   h2{font-size:13px;margin:0 0 12px;text-transform:uppercase;letter-spacing:.12em;color:var(--sub)}
+  /* reusable hover-help: <span class="help" data-tip="...">?</span> */
+  .help{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;
+    border:1px solid var(--line);color:var(--sub);font-size:10px;font-weight:700;cursor:help;position:relative;vertical-align:middle}
+  .help:hover{color:var(--ink);border-color:var(--clover)}
+  .help::after{content:attr(data-tip);position:absolute;left:50%;bottom:150%;transform:translateX(-50%);
+    width:max-content;max-width:280px;white-space:normal;text-align:left;background:var(--card2);color:var(--ink);
+    border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:12px;font-weight:400;
+    text-transform:none;letter-spacing:0;line-height:1.45;box-shadow:0 6px 20px rgba(0,0,0,.32);
+    opacity:0;visibility:hidden;transition:opacity .12s;z-index:90}
+  .help:hover::after{opacity:1;visibility:visible}
   .card{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--line);
     border-radius:14px;padding:20px 22px;margin-top:16px;box-shadow:0 8px 30px var(--shadow)}
   label{display:block;font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.08em;margin:12px 0 4px}
@@ -94,7 +104,7 @@
   <span class="logo">🍀 Clover<span class="v"> v2</span></span>
   <a href="/setup" class="{% block nav_setup %}{% endblock %}">Setup</a>
   <a href="/archive" class="{% block nav_archive %}{% endblock %}">Archive</a>
-  <a href="/threads" class="{% block nav_threads %}{% endblock %}">Threads</a>
+  <a href="/threads" class="{% block nav_threads %}{% endblock %}">Mail</a>
   <span class="right">control room</span>
   <button id="themeBtn" class="themetoggle" type="button" onclick="toggleTheme()" title="Toggle light / dark">☀️</button>
 </header>

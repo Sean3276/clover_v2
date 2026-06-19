@@ -221,6 +221,9 @@ def test_confirm_link_route_and_needs_confirm_render(tmp_path, monkeypatch):
     c = TestClient(m.app)
     tid = th.read_threads(tmp_path)[0]["thread_id"]
 
+    tv = c.get(f"/threads/{tid}")
+    assert tv.status_code == 200 and "Download linked files" in tv.text   # per-thread fetch button (thread has links)
+
     r = c.get(f"/threads/{tid}/msg/0")
     assert r.status_code == 200
     assert "Download anyway" in r.text and "needs-confirm" in r.text and "GB" in r.text

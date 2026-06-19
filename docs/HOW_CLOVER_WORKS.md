@@ -62,9 +62,9 @@ IMAP mailbox ──(Phase 1)──► local .eml archive ──(Phase 2)──�
      `{id, folder, key (UID), validity (UIDVALIDITY), from, subject, date, path, size, sha256}`.
   5. When new mail was saved, **auto-rebuilds the thread index** (Phase 2).
   6. **Catalogues share links** found in the new mail — runs Harvest in the background (always; cheap & offline).
-  7. *(Optional, if you tick **"also download the share links"**)* — also **downloads** them in the
-     background (batched, stoppable; oversize links pause for confirmation). See *Fetch files* below.
-- **Considerations:** read-only & non-destructive (never deletes/sends/flags); **resumable & idempotent**; survives flaky links (retries + plain-language errors); filters only change the *selected set* — they never change the dedup key, so narrowing then widening later still backfills cleanly. Cataloguing links always runs after new mail; **downloading is off by default** (slow/large) and never runs if you Stopped the archive.
+  7. **Downloads the share links** (the *"also download share links"* tick is **on by default** — untick to skip)
+     in the background (batched, stoppable; oversize links pause for confirmation). See *Fetch files* below.
+- **Considerations:** read-only & non-destructive (never deletes/sends/flags); **resumable & idempotent**; survives flaky links (retries + plain-language errors); filters only change the *selected set* — they never change the dedup key, so narrowing then widening later still backfills cleanly. Cataloguing links always runs after new mail; **downloading is on by default** (untick if storage/bandwidth is a concern) and never runs if you Stopped the archive.
 - **Output:** `.eml` files + `_index.jsonl` (+ refreshed `threads.jsonl`).
 
 #### Date / size filters (optional)
@@ -88,26 +88,26 @@ IMAP mailbox ──(Phase 1)──► local .eml archive ──(Phase 2)──�
 Many emails reference files behind share links (SharePoint/OneDrive, Google Drive, Dropbox, WeTransfer, Box) instead of attaching them. These actions catalogue and fetch those files so nothing is silently lost.
 
 ### Action: **Harvest links** · `POST /threads/harvest-links`
-- **Trigger:** *🔗 Harvest links* on the Threads page.
+- **Trigger:** *🔗 Harvest links* on the Mail page.
 - **Does:** scans every archived `.eml` body for share links, appends new ones to `link_shares.jsonl` (idempotent on `(message_id, url)`), each `status: "pending"`. Detection only — no downloads. Runs in the background.
 - **Output:** `link_shares.jsonl` rows `{message_id, folder, eml, provider, url, status, file, size, confirmed}`.
 
 ### Action: **Fetch files** · `POST /threads/fetch-links`
-- **Trigger:** *⬇ Fetch files* on the Threads page.
+- **Trigger:** *⬇ Fetch files* on the Mail page.
 - **Does:** downloads `pending` links in the background:
   1. **URL-dedup (all outcomes):** each unique link is resolved **once** — a download is reused, and a `dead` / `needs-auth` / oversize result is reused too — so duplicate links never re-fetch. (On the real corpus ~85% of records are repeats, so this avoids almost all the work.)
   2. **Direct fast-path** (httpx) for Dropbox/Drive direct links, streamed; otherwise a **headless browser** (Playwright/Chromium) that dismisses cookie banners and clicks the provider's Download control.
   3. **Size gate:** a download over the threshold (default ~1 GB) is **not kept** — the record becomes `needs-confirm` with its size, so you can decide (see below). Direct links stop mid-stream; browser links are detected after they stream to a temp file (their size isn't known up front).
   4. Saved files go to `_linkfiles/<message-id>/<filename>` — **collision-safe** (`name (2).ext`) and **Unicode/CJK names preserved**. HTML login/interstitial pages are rejected, not saved as "files".
 - **Status outcomes:** `downloaded · needs-confirm · needs-auth (gated/expired — open it yourself) · dead (404/410) · error`.
-- **Considerations:** background, **one link task at a time** (no concurrent writes); re-runnable (only touches `pending`); cancellable via *Stop* (`POST /threads/stop-links`). The Threads list shows a live status summary.
+- **Considerations:** background, **one link task at a time** (no concurrent writes); re-runnable (only touches `pending`); cancellable via *Stop* (`POST /threads/stop-links`). The Mail list shows a live status summary. URL-dedup also covers `dead`/`needs-auth`, so a known-bad link is never re-tried per duplicate email.
 
 ### Action: **Download anyway** (confirm a large link) · `POST /threads/confirm-link`
 - **Trigger:** for a `needs-confirm` link, click *Download anyway* in the thread (the row names the link, its email, and its size).
 - **Does:** clears the size gate for that link and re-queues it (`confirmed`); the next *Fetch files* downloads it in full.
 
 ### Action: **Stop links** · `POST /threads/stop-links`
-- **Trigger:** *⏹ Stop links* on the Threads page.
+- **Trigger:** *⏹ Stop links* on the Mail page.
 - **Does:** halts the running link task (manual fetch *or* the Archive auto-download) — the in-flight link finishes, then it stops; progress so far is saved. Re-run *Fetch files* to continue.
 
 ### Action: **Open a saved / linked file** · `GET /linkfile/{path}`
@@ -116,10 +116,12 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 
 ---
 
-## Phase 2 — Threads
+## Phase 2 — Mail (the archived-mail viewer)
 
-### Action: **Open the Threads page** · `GET /threads`
-- **Does:** lists threads from `threads.jsonl` (subject · participants · message count · date range), shows which are comprehended (🍀), and a **share-link status summary**. The index auto-builds after archiving new mail and auto-builds if missing.
+> The nav tab is **"Mail"** — your archived mailbox, auto-threaded into conversations. (Routes are still `/threads/…`.)
+
+### Action: **Open the Mail page** · `GET /threads`
+- **Does:** lists conversations from `threads.jsonl` (subject · participants · message count · date range), shows which are comprehended (🍀), and a **share-link status summary**. The index auto-builds after archiving new mail and auto-builds if missing.
 
 ### Action: **Rebuild index** · `POST /threads/rebuild`
 - **Does:** re-links every `.eml` into threads by `Message-ID` / `In-Reply-To` / `References` (union-find; header-only; no AI, no network). **Cross-folder duplicates** (same Message-ID in Sent *and* Trash) become one thread member with multiple locations. Pure transform — identical result every run. Writes `threads.jsonl`.
@@ -130,6 +132,10 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 
 ### Action: **Open / download an attachment** · `GET /threads/{id}/msg/{idx}/att/{n}`
 - **Does:** extracts a genuine attachment from the `.eml` and serves it inline (so PDFs/images open, and you can save them). Inline *images* (signature logos, embedded screenshots referenced by the body) are shown in the body, not listed as attachments; inline PDFs/docs *are* listed.
+
+### Action: **Download linked files** (one conversation) · `POST /threads/{id}/fetch-links`
+- **Trigger:** *⬇ Download linked files* in an open conversation (shown only when it has share links).
+- **Does:** runs the link download scoped to **just this conversation's** messages (background, dedup + size-confirm, stoppable). Useful for grabbing one thread's files on demand without a full fetch.
 
 ### Action: **Comprehend** · `POST /threads/{id}/comprehend` (Phase 3 entry point)
 - **Trigger:** *Comprehend* on a thread.

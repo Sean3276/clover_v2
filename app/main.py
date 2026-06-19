@@ -380,11 +380,14 @@ def thread_view(request: Request, thread_id: str):
     t = threadmod.get_thread(arch, thread_id)
     if not t:
         return RedirectResponse("/threads", status_code=303)
+    link_ids = {r.get("message_id") for r in lsmod.read_link_shares(arch)}
+    has_links = any(m.get("message_id") in link_ids for m in t.get("members", []))
     # render only the lightweight header list from threads.jsonl; bodies load on demand below
     return templates.TemplateResponse(request, "thread_view.html", {
         "cfg": cfg, "thread": t,
         "comp": compmod.get_comprehension(arch, thread_id),
         "ai_ready": _backend_available(cfg),
+        "has_links": has_links,
     })
 
 
@@ -501,6 +504,23 @@ def confirm_link(message_id: str = Form(...), url: str = Form(...)):
     """User OK'd a large (multi-GB) link in the viewer — re-queue it past the size gate."""
     lsmod.mark_confirmed(_archive_dir(cfgmod.load_config()), message_id, url)
     return JSONResponse({"ok": True, "message": "Marked for download — click 'Fetch files' to fetch it."})
+
+
+@app.post("/threads/{thread_id}/fetch-links")
+def fetch_thread_links(thread_id: str):
+    """Download just this conversation's link files (background, one link task at a time)."""
+    cfg = cfgmod.load_config()
+    arch = _archive_dir(cfg)
+    t = threadmod.get_thread(arch, thread_id)
+    if not t:
+        return JSONResponse({"ok": False, "message": "Conversation not found."})
+    ids = {m.get("message_id") for m in t.get("members", []) if m.get("message_id")}
+    if not _start_link_task(lambda: lsmod.fetch_links(
+            arch, only_message_ids=ids, limit=None, headless=True, log=_log,
+            should_stop=lambda: _linktask.get("stop", False))):
+        return JSONResponse({"ok": False, "message": "A link task (harvest or fetch) is already running."})
+    return JSONResponse({"ok": True, "message":
+                         "Downloading this conversation's linked files in the background — reopen shortly."})
 
 
 @app.get("/linkfile/{rel:path}")
