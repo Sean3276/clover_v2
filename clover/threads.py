@@ -276,9 +276,8 @@ def render_message(archive_path, location: dict) -> dict:
         for i, part in enumerate(_real_attachments(msg)):     # exclude inline/cid images
             payload = part.get_payload(decode=True) or b""
             a = {"i": i, "name": part.get_filename() or "(unnamed)", "size": len(payload)}
-            uri = _img_data_uri(payload, part.get_content_type())   # show image attachments inline
-            if uri:
-                a["img"] = uri
+            if part.get_content_maintype() == "image" and 0 < len(payload) <= _MAX_INLINE_IMG:
+                a["img"] = True            # flag only — the template serves it via the /att/ URL (no base64 in the page)
             atts.append(a)
     except Exception:
         pass

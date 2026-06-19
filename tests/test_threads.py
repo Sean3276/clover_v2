@@ -294,7 +294,7 @@ def test_render_inlines_cid_images_and_image_attachments(tmp_path):
     assert "cid:logo123" not in b["body_html"]
     assert len(b["attachments"]) == 1                       # only the real attachment (cid image excluded)
     assert b["attachments"][0]["name"] == "photo.png"
-    assert b["attachments"][0]["img"].startswith("data:image/png;base64,")
+    assert b["attachments"][0]["img"] is True            # flagged as image; served via /att/ URL, not base64
 
 
 def test_image_attachment_with_stray_cid_not_in_body_is_kept(tmp_path):

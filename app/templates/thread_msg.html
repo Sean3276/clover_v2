@@ -15,7 +15,7 @@
     {% if chips %}<div class="atts">
       {% for a in chips %}<a class="att" href="/threads/{{ tid }}/msg/{{ idx }}/att/{{ a.i }}" target="_blank" rel="noopener">📎 {{ a.name }} <span class="dim">({{ ((a.size or 0) / 1024)|round(1) }} KB)</span></a>{% endfor %}
     </div>{% endif %}
-    {% for a in block.attachments if a.img %}<figure class="attimg"><a href="/threads/{{ tid }}/msg/{{ idx }}/att/{{ a.i }}" target="_blank" rel="noopener"><img src="{{ a.img }}" alt="{{ a.name }}" loading="lazy"></a><figcaption class="dim">📎 {{ a.name }} ({{ ((a.size or 0) / 1024)|round(1) }} KB)</figcaption></figure>{% endfor %}
+    {% for a in block.attachments if a.img %}<figure class="attimg"><a href="/threads/{{ tid }}/msg/{{ idx }}/att/{{ a.i }}" target="_blank" rel="noopener"><img src="/threads/{{ tid }}/msg/{{ idx }}/att/{{ a.i }}" alt="{{ a.name }}" loading="lazy"></a><figcaption class="dim">📎 {{ a.name }} ({{ ((a.size or 0) / 1024)|round(1) }} KB)</figcaption></figure>{% endfor %}
   {% endif %}
   {% if links %}
   <div class="lshares">
