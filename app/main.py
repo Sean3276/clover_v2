@@ -17,9 +17,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.templating import Jinja2Templates
 
 from clover import archive
+from clover import compose as composemod
 from clover import comprehend as compmod
 from clover import config as cfgmod
 from clover import linkshares as lsmod
+from clover import sender as sendermod
 from clover import threads as threadmod
 from clover.comprehenders import get_comprehender
 from clover.errors import friendly_conn_error
@@ -94,6 +96,7 @@ def setup_page(request: Request):
     return templates.TemplateResponse(request, "setup.html", {
         "cfg": cfg, "error": None, "suite": SUITE,
         "has_pw": cfgmod.has_secret(cfgmod.SECRET_IMAP_PASSWORD),
+        "has_smtp_pw": cfgmod.has_secret(cfgmod.SECRET_SMTP_PASSWORD),
     })
 
 
@@ -109,13 +112,28 @@ def test_imap(host: str = Form(...), port: int = Form(993), security: str = Form
 @app.post("/setup/save")
 def setup_save(request: Request, host: str = Form(...), port: int = Form(993),
                security: str = Form("ssl"), user: str = Form(...), password: str = Form(""),
-               archive_path: str = Form("")):
+               archive_path: str = Form(""),
+               smtp_host: str = Form(""), smtp_port: int = Form(587), smtp_security: str = Form("starttls"),
+               send_from: str = Form(""), sending_enabled: str = Form(""), smtp_password: str = Form("")):
     ensure_runtime()
     cfg = cfgmod.load_config()
     cfg["auth"]["imap"] = {"host": host, "port": port, "security": security, "user": user}
     if archive_path.strip():
         cfg["archive_path"] = archive_path.strip()
+    prev_send = cfg.get("sending") or {}
+    cfg["sending"] = {
+        "enabled": sending_enabled.strip().lower() in ("1", "true", "on", "yes"),
+        "smtp": {"host": smtp_host.strip(), "port": smtp_port, "security": smtp_security},
+        "from": send_from.strip(),
+        "save_to_sent": prev_send.get("save_to_sent", True),
+        "sent_folder": prev_send.get("sent_folder", "Sent"),
+    }
     cfgmod.save_config(cfg)
+    if smtp_password:
+        try:
+            cfgmod.set_secret(cfgmod.SECRET_SMTP_PASSWORD, smtp_password)
+        except RuntimeError:
+            pass
     if password:
         try:
             cfgmod.set_secret(cfgmod.SECRET_IMAP_PASSWORD, password)
@@ -406,6 +424,7 @@ def thread_view(request: Request, thread_id: str):
         "ai_ready": _backend_available(cfg),
         "link_saved": link_saved, "link_pending": link_pending,
         "link_needs_confirm": link_needs_confirm,
+        "sending_enabled": _sending_enabled(cfg),
     })
 
 
@@ -451,7 +470,8 @@ def thread_message(request: Request, thread_id: str, idx: int):
     srcdoc = _wrap_srcdoc(block["body_html"]) if block.get("body_html") else None
     return templates.TemplateResponse(request, "thread_msg.html",
                                       {"block": block, "srcdoc": srcdoc, "tid": thread_id, "idx": idx,
-                                       "links": lsmod.links_for_member(arch, members[idx].get("message_id"), locs)})
+                                       "links": lsmod.links_for_member(arch, members[idx].get("message_id"), locs),
+                                       "sending_enabled": _sending_enabled(cfg)})
 
 
 _linktask = {"running": False, "stop": False}   # ONE link task (harvest OR fetch) at a time
@@ -539,6 +559,85 @@ def fetch_thread_links(thread_id: str):
         return JSONResponse({"ok": False, "message": "A link task (harvest or fetch) is already running."})
     return JSONResponse({"ok": True, "message":
                          "Downloading this conversation's linked files in the background — reopen shortly."})
+
+
+# ------------------------------------------------ Sending (delivery track — OFF by default, fail-closed)
+def _sending_enabled(cfg) -> bool:
+    return bool((cfg.get("sending") or {}).get("enabled"))
+
+
+def _from_addr(cfg) -> str:
+    return ((cfg.get("sending") or {}).get("from") or "").strip() \
+        or (cfg.get("auth", {}).get("imap", {}).get("user") or "")
+
+
+def _parse_addrs(s: str) -> list[str]:
+    from email.utils import getaddresses
+    return [a for _, a in getaddresses([s or ""]) if a]
+
+
+def _member_eml(cfg, thread_id, idx):
+    arch = _archive_dir(cfg)
+    t = threadmod.get_thread(arch, thread_id)
+    members = (t or {}).get("members", [])
+    if not t or not (0 <= idx < len(members)):
+        return None, None
+    locs = members[idx].get("locations") or []
+    return (arch, arch / locs[0]["path"]) if locs else (None, None)
+
+
+@app.post("/threads/{thread_id}/compose")
+def compose_preview(thread_id: str, idx: int = Form(...), action: str = Form(...)):
+    """Prefill recipients/subject for a reply/reply-all/forward. Gated: 403 when sending is off."""
+    cfg = cfgmod.load_config()
+    if not _sending_enabled(cfg):
+        return JSONResponse({"ok": False, "message": "Sending is turned off — enable it in Setup."}, status_code=403)
+    _, eml = _member_eml(cfg, thread_id, idx)
+    if not eml:
+        return JSONResponse({"ok": False, "message": "Message not found."}, status_code=404)
+    try:
+        original = composemod._load(eml)
+        me = _from_addr(cfg)
+        to, cc = composemod.recipients(original, action, me)
+        return JSONResponse({"ok": True, "to": ", ".join(to), "cc": ", ".join(cc),
+                             "subject": composemod.subject(original, action), "from": me})
+    except Exception as e:
+        return JSONResponse({"ok": False, "message": f"{type(e).__name__}: {e}"}, status_code=500)
+
+
+@app.post("/send")
+def send_mail(thread_id: str = Form(...), idx: int = Form(...), action: str = Form(...),
+              to: str = Form(""), cc: str = Form(""), body: str = Form("")):
+    """Send a composed reply/reply-all/forward. HARD-GATED: returns 403 unless sending is enabled."""
+    cfg = cfgmod.load_config()
+    if not _sending_enabled(cfg):                       # fail-closed: cannot send while off
+        return JSONResponse({"ok": False, "message": "Sending is turned off — enable it in Setup."}, status_code=403)
+    _, eml = _member_eml(cfg, thread_id, idx)
+    if not eml:
+        return JSONResponse({"ok": False, "message": "Message not found."}, status_code=404)
+    to_list, cc_list = _parse_addrs(to), _parse_addrs(cc)
+    if not to_list:
+        return JSONResponse({"ok": False, "message": "No recipients."}, status_code=400)
+    from_addr = _from_addr(cfg)
+    s = cfg.get("sending") or {}
+    try:
+        msg = composemod.build_message(eml, action, body_text=body, from_addr=from_addr,
+                                       to=to_list, cc=cc_list, me=from_addr)
+        sender = sendermod.get_sender("smtp", s.get("smtp") or {}, from_addr,
+                                      cfgmod.get_secret(cfgmod.SECRET_SMTP_PASSWORD) or "", from_addr)
+        mid = sender.send(msg)
+    except Exception as e:
+        _log(f"SEND FAILED to {to_list + cc_list}: {type(e).__name__}: {e}")
+        return JSONResponse({"ok": False, "message": f"Send failed: {type(e).__name__}: {e}"}, status_code=502)
+    note = ""
+    if s.get("save_to_sent", True):
+        try:
+            with get_source("imap", cfg["auth"]["imap"], cfgmod.get_secret(cfgmod.SECRET_IMAP_PASSWORD) or "") as src:
+                src.append(s.get("sent_folder", "Sent"), msg.as_bytes())
+        except Exception as e:
+            note = f" (couldn't save to Sent: {type(e).__name__})"
+    _log(f"SENT to {to_list + cc_list}: {msg['Subject']} [{mid}]")
+    return JSONResponse({"ok": True, "message": f"Sent to {len(to_list + cc_list)} recipient(s).{note}"})
 
 
 @app.get("/linkfile/{rel:path}")

@@ -38,6 +38,33 @@
     (full raw message incl. embedded attachments). An <code>_index.jsonl</code> links the same email across folders.</p>
   </div>
 
+  <div class="card">
+    <h2>Sending — reply / forward <span class="note" style="text-transform:none;letter-spacing:0">(optional, off by default)</span></h2>
+    <p class="note" style="margin:0 0 6px">Lets Clover <strong>send</strong> replies/forwards via SMTP from the Mail tab.
+      This is the only feature that sends mail to real recipients — leave it off until you're ready. Every send asks
+      for confirmation and a copy is saved to Sent.</p>
+    {% set snd = cfg.get('sending') or {} %}
+    <div class="row3">
+      <div><label for="smtp_host">SMTP host</label><input id="smtp_host" name="smtp_host" value="{{ snd.get('smtp', {}).get('host', '') }}" placeholder="smtp.example.com"></div>
+      <div><label for="smtp_port">Port</label><input id="smtp_port" name="smtp_port" type="number" value="{{ snd.get('smtp', {}).get('port', 587) }}"></div>
+      <div><label for="smtp_security">Security</label>
+        <select id="smtp_security" name="smtp_security">
+          <option value="starttls" {% if snd.get('smtp', {}).get('security') != 'ssl' %}selected{% endif %}>STARTTLS (587)</option>
+          <option value="ssl" {% if snd.get('smtp', {}).get('security') == 'ssl' %}selected{% endif %}>SSL/TLS (465)</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div><label for="send_from">From address</label><input id="send_from" name="send_from" value="{{ snd.get('from', '') }}" placeholder="you@example.com (defaults to your IMAP user)"></div>
+      <div><label for="smtp_password">SMTP password {% if has_smtp_pw %}(stored — blank to keep){% endif %}</label>
+           <input id="smtp_password" name="smtp_password" type="password" placeholder="{% if has_smtp_pw %}••••••••{% else %}SMTP password{% endif %}"></div>
+    </div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:12px;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink);cursor:pointer">
+      <input type="checkbox" name="sending_enabled" value="1" {% if snd.get('enabled') %}checked{% endif %} style="width:auto;margin:0;flex:none">
+      <span><strong>Enable sending</strong> — when off, the Reply/Forward buttons are hidden and the server refuses to send.</span>
+    </label>
+  </div>
+
   <p style="margin-top:18px"><button type="submit">Save &amp; continue →</button></p>
 </form>
 

@@ -129,6 +129,23 @@
 </div>
 {% endif %}
 
+{% if sending_enabled %}
+<div id="composer" class="card" style="display:none;border-color:var(--amber)">
+  <h2 id="composeTitle" style="color:var(--amber)">Compose</h2>
+  <label for="cTo">To</label><input id="cTo" type="text">
+  <label for="cCc">Cc</label><input id="cCc" type="text">
+  <label for="cSubject">Subject</label><input id="cSubject" type="text" readonly title="Auto: Re:/Fwd: of the original">
+  <label for="cBody">Message</label>
+  <textarea id="cBody" rows="8" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--input-bg);color:var(--ink);font:inherit"></textarea>
+  <div class="tbar" style="margin-top:10px">
+    <button type="button" id="cSend" onclick="sendCompose()" style="background:var(--amber);color:#1a1205">✉ Review &amp; send</button>
+    <button type="button" class="ghost" onclick="closeCompose()">Cancel</button>
+    <span id="cMsg" class="note dim"></span>
+  </div>
+  <p class="note dim" style="margin:8px 0 0">⚠ Sending is ON — this sends a real email to the recipients above. You'll confirm them first; a copy is saved to Sent.</p>
+</div>
+{% endif %}
+
 <div id="msgs" class="msgs">
 {% for m in thread.members %}
 <div class="card tmsg">
@@ -222,6 +239,45 @@ async function fetchThreadLinks(){
     if(m) m.textContent = res.message;
     if(!res.ok && b) b.disabled = false;
   }catch(e){ if(m) m.textContent = "Failed: " + e; if(b) b.disabled = false; }
+}
+let _compose = {idx: null, action: null};
+async function openCompose(idx, action){
+  _compose = {idx: idx, action: action};
+  const cMsg = document.getElementById("cMsg"); if(cMsg){ cMsg.className = "note dim"; cMsg.textContent = ""; }
+  const titles = {"reply": "Reply", "reply-all": "Reply all", "forward": "Forward"};
+  document.getElementById("composeTitle").textContent = titles[action] || "Compose";
+  const body = new URLSearchParams({idx: idx, action: action});
+  try{
+    const res = await (await fetch(location.pathname + "/compose", {method:"POST",
+      headers:{"Content-Type":"application/x-www-form-urlencoded"}, body})).json();
+    if(!res.ok){ if(cMsg){ cMsg.className = "msg err"; cMsg.style.display="block"; cMsg.textContent = res.message; } return; }
+    document.getElementById("cTo").value = res.to || "";
+    document.getElementById("cCc").value = res.cc || "";
+    document.getElementById("cSubject").value = res.subject || "";
+    document.getElementById("cBody").value = "";
+  }catch(e){ if(cMsg) cMsg.textContent = "Failed: " + e; return; }
+  const box = document.getElementById("composer");
+  box.style.display = ""; box.scrollIntoView({behavior:"smooth", block:"center"});
+}
+function closeCompose(){ document.getElementById("composer").style.display = "none"; }
+async function sendCompose(){
+  const to = document.getElementById("cTo").value.trim();
+  const cc = document.getElementById("cCc").value.trim();
+  const cMsg = document.getElementById("cMsg"), btn = document.getElementById("cSend");
+  if(!to){ if(cMsg){ cMsg.className="note dim"; cMsg.textContent = "Add at least one recipient."; } return; }
+  const who = to + (cc ? (", " + cc) : "");
+  if(!confirm("Send this email to:\n\n" + who + "\n\nThis sends a REAL message and cannot be undone.")) return;
+  if(btn) btn.disabled = true;
+  if(cMsg){ cMsg.className = "note dim"; cMsg.textContent = "Sending…"; }
+  const body = new URLSearchParams({thread_id: "{{ thread.thread_id }}", idx: _compose.idx,
+    action: _compose.action, to: to, cc: cc, body: document.getElementById("cBody").value});
+  try{
+    const res = await (await fetch("/send", {method:"POST",
+      headers:{"Content-Type":"application/x-www-form-urlencoded"}, body})).json();
+    if(cMsg){ cMsg.className = "msg " + (res.ok ? "ok" : "err"); cMsg.style.display="block"; cMsg.textContent = res.message; }
+    if(res.ok) setTimeout(closeCompose, 1800);
+  }catch(e){ if(cMsg) cMsg.textContent = "Failed: " + e; }
+  if(btn) btn.disabled = false;
 }
 applyOrder();
 (function(){     // small threads open fully; long ones stay collapsed (just headers -> instant + scrollable)

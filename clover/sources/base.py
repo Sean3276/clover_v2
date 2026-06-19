@@ -82,3 +82,8 @@ class MailSource(ABC):
         may raise from progress() to cancel mid-scan, so implementations must call it between
         batches and let that exception propagate (do not swallow it)."""
         raise NotImplementedError(f"{self.kind} source does not support metadata fetch")
+
+    def append(self, folder: str, raw_bytes: bytes) -> None:
+        """Write a message into `folder` (e.g. a Sent copy of a sent mail). Optional capability —
+        only sources that support writing implement it. Used by the delivery track."""
+        raise NotImplementedError(f"{self.kind} source does not support append (write)")

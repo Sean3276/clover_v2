@@ -257,6 +257,48 @@ def test_thread_view_link_bar_pending_then_saved(tmp_path, monkeypatch):
     assert "Download 2 linked file(s)" not in r2.text   # don't offer to re-fetch what's already kept
 
 
+def test_sending_is_gated_off_by_default(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import app.main as m
+    _write_eml(tmp_path, "INBOX", "1", mid="a@x", frm="alice@x.com", to="me@x.com", subject="Hi")
+    th.build_threads(tmp_path, log=lambda *_: None)
+    cfg = {"auth": {"imap": {"user": "me@x.com"}}, "folders": ["INBOX"],
+           "archive_path": str(tmp_path), "sending": {"enabled": False}}
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: dict(cfg))
+    c = TestClient(m.app)
+    tid = th.read_threads(tmp_path)[0]["thread_id"]
+    assert 'id="composer"' not in c.get(f"/threads/{tid}").text          # no compose UI
+    assert "↩ Reply" not in c.get(f"/threads/{tid}/msg/0").text          # no reply buttons
+    assert c.post("/send", data={"thread_id": tid, "idx": 0, "action": "reply", "to": "x@y.com"}).status_code == 403
+    assert c.post(f"/threads/{tid}/compose", data={"idx": 0, "action": "reply"}).status_code == 403
+
+
+def test_send_when_enabled_builds_and_dispatches(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import app.main as m
+    _write_eml(tmp_path, "INBOX", "1", mid="a@x", frm="alice@x.com", to="me@x.com, bob@x.com", subject="Hi")
+    th.build_threads(tmp_path, log=lambda *_: None)
+    cfg = {"auth": {"imap": {"user": "me@x.com"}}, "folders": ["INBOX"], "archive_path": str(tmp_path),
+           "sending": {"enabled": True, "smtp": {"host": "smtp.x"}, "from": "me@x.com", "save_to_sent": False}}
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: dict(cfg))
+    captured = {}
+
+    class _Stub:
+        def send(self, msg):
+            captured["msg"] = msg
+            return "<sent@x>"
+
+    monkeypatch.setattr(m.sendermod, "get_sender", lambda *a, **k: _Stub())
+    c = TestClient(m.app)
+    tid = th.read_threads(tmp_path)[0]["thread_id"]
+    pv = c.post(f"/threads/{tid}/compose", data={"idx": 0, "action": "reply"}).json()
+    assert pv["ok"] and pv["to"] == "alice@x.com" and pv["subject"] == "Re: Hi"
+    r = c.post("/send", data={"thread_id": tid, "idx": 0, "action": "reply", "to": "alice@x.com", "body": "thanks"})
+    assert r.status_code == 200 and r.json()["ok"]
+    msg = captured["msg"]
+    assert msg["To"] == "alice@x.com" and msg["Subject"] == "Re: Hi" and "thanks" in msg.get_content()
+
+
 def test_link_status_endpoint_resolves_before_thread_id(tmp_path, monkeypatch):
     from starlette.testclient import TestClient
     import app.main as m

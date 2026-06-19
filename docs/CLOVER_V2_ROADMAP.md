@@ -220,8 +220,10 @@ narrative warnings only? (c) acceptable to use embeddings/a local vector store f
   dashboard. Built incrementally; each phase adds its panel.
 - **Track B — Delivery & inbox actions.** The "operations" layer carried from v1: the 🍀
   digest/brief (Telegram), soft-delete sweep of no-action mail (move to Trash, reversible,
-  after verified archived), and **drafting** chase replies (this is where SMTP/IMAP-APPEND
-  lives — never auto-send to third parties). Optional; layers on after P3.
+  after verified archived), and replies/forwards. **Reply / Reply-all / Forward with direct
+  SMTP send is BUILT** (see [CLOVER_V2_SENDING_SPEC.md](CLOVER_V2_SENDING_SPEC.md)) but
+  **shipped disabled** (operator enables it post-phases; confirm-every-send, save-to-Sent,
+  fail-closed). Still pending in this track: Telegram digest, soft-delete sweep.
 
 **Recommendation (you asked me to decide):**
 - **Track A (UI) — fold a *thin* slice into each phase; defer the polished cockpit.** You

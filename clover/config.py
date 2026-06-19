@@ -7,6 +7,7 @@ from .paths import config_path, default_archive_path, ensure_runtime
 
 KEYRING_SERVICE = "clover_v2"
 SECRET_IMAP_PASSWORD = "imap_password"
+SECRET_SMTP_PASSWORD = "smtp_password"
 
 
 def default_config() -> dict:
@@ -17,6 +18,14 @@ def default_config() -> dict:
         "comprehension": {
             "backend": "claude-cli", "model": "sonnet", "profile": "construction",
             "budget_tokens": 200000, "autorun": True,
+        },
+        # Delivery track — OFF by default; sending is impossible until enabled (see CLOVER_V2_SENDING_SPEC).
+        "sending": {
+            "enabled": False,
+            "smtp": {"host": "", "port": 587, "security": "starttls"},
+            "from": "",
+            "save_to_sent": True,
+            "sent_folder": "Sent",
         },
     }
 

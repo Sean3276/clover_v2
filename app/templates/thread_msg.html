@@ -3,6 +3,13 @@
 {% else %}
   {% if block.subject %}<p class="msubj">{{ block.subject }}</p>{% endif %}
   <p class="note mono" style="margin:0 0 8px">{{ block.from }} → {{ block.to }}</p>
+  {% if sending_enabled %}
+  <div class="atts" style="margin:0 0 10px">
+    <button type="button" class="ghost" style="font-size:12px;padding:4px 10px" onclick="openCompose({{ idx }}, 'reply')">↩ Reply</button>
+    <button type="button" class="ghost" style="font-size:12px;padding:4px 10px" onclick="openCompose({{ idx }}, 'reply-all')">↩ Reply all</button>
+    <button type="button" class="ghost" style="font-size:12px;padding:4px 10px" onclick="openCompose({{ idx }}, 'forward')">⇢ Forward</button>
+  </div>
+  {% endif %}
   {% if srcdoc %}
     <iframe class="emlframe" sandbox="allow-same-origin" title="Email message body" srcdoc="{{ srcdoc }}" onload="sizeFrame(this)"></iframe>
   {% elif block.body_text %}

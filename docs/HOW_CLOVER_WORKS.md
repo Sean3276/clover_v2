@@ -143,10 +143,23 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 - **Trigger:** *Comprehend* on a thread.
 - **Does:** runs the AI comprehension pipeline for that thread and stores the result in `comprehension.jsonl`; the thread then shows the 🍀 stamp. *(Behaviour detailed in `CLOVER_V2_PHASE3_SPEC.md`.)*
 
+### Action: **Reply / Reply-all / Forward** (delivery track) · `POST /threads/{id}/compose` → `POST /send`
+- **Status: OFF by default.** This is the only feature that *sends* mail. While `sending.enabled` is
+  false (default), the Reply/Forward buttons are hidden **and** `/send` and `/compose` return 403.
+- **Enable:** Setup → *Sending* (SMTP host/port/security, From, password in keyring, **Enable sending**).
+- **Trigger (when enabled):** per-message *↩ Reply · ↩ Reply all · ⇢ Forward* in the open conversation
+  → a composer prefilled with recipients + `Re:`/`Fwd:` subject + quoted original (forward carries the
+  original's attachments) → *Review & send* → **a confirm naming every recipient** → SMTP send.
+- **Considerations:** never auto-sends (always a deliberate click + confirm); a copy is saved to Sent
+  (IMAP APPEND); every send is audit-logged. SMTP password lives in the keyring.
+  *(Design: `CLOVER_V2_SENDING_SPEC.md`.)*
+
 ---
 
 ## Safety guarantees (hold across all of the above)
-- **Read-only mail access** — `BODY.PEEK[]`; Clover never deletes, sends, moves, or marks mail.
+- **Read-only by default** — `BODY.PEEK[]`; Clover never deletes, moves, or marks mail. The **only**
+  write/send path is the delivery track, which is **off by default** and fail-closed (UI hidden +
+  route 403) until you explicitly enable it, and never sends without a per-send confirmation.
 - **Non-destructive & resumable** — every write is dedup'd/idempotent; re-running resumes.
 - **Deterministic & offline where claimed** — threading and reconcile use no network and no AI.
 - **No remote content** in the reader — sandbox + CSP neutralise tracking pixels and remote calls.

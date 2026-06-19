@@ -149,6 +149,11 @@ class ImapSource(MailSource):
                 return bytes(part[1])
         return None
 
+    def append(self, folder: str, raw_bytes: bytes) -> None:
+        """APPEND a message into `folder` (the Sent copy of a sent mail), flagged \\Seen."""
+        self._require_open()
+        self._mb.append(bytes(raw_bytes), folder, flag_set=["\\Seen"])
+
     # --- selection filters --------------------------------------------------
     def search(self, *, date_from=None, date_to=None, size_min=None) -> list[str] | None:
         """Server-side UID SEARCH for the selected folder. date_from/date_to are inclusive dates;
