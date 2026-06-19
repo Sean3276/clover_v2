@@ -221,9 +221,6 @@ def test_confirm_link_route_and_needs_confirm_render(tmp_path, monkeypatch):
     c = TestClient(m.app)
     tid = th.read_threads(tmp_path)[0]["thread_id"]
 
-    tv = c.get(f"/threads/{tid}")
-    assert tv.status_code == 200 and "Download linked files" in tv.text   # per-thread fetch button (thread has links)
-
     r = c.get(f"/threads/{tid}/msg/0")
     assert r.status_code == 200
     assert "Download anyway" in r.text and "needs-confirm" in r.text and "GB" in r.text
@@ -233,6 +230,28 @@ def test_confirm_link_route_and_needs_confirm_render(tmp_path, monkeypatch):
     assert resp.status_code == 200 and resp.json()["ok"] is True
     rec2 = ls.read_link_shares(tmp_path)[0]
     assert rec2["status"] == "pending" and rec2["confirmed"] is True       # re-queued past the gate
+
+
+def test_thread_view_link_bar_pending_then_saved(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import app.main as m
+    from clover import linkshares as ls
+    _write_eml(tmp_path, "INBOX", "1", mid="a@x", subject="Files",
+               html='<p>https://www.dropbox.com/s/A/a.pdf and https://www.dropbox.com/s/B/b.pdf</p>')
+    th.build_threads(tmp_path, log=lambda *_: None)
+    ls.harvest(tmp_path, log=lambda *_: None)
+    cfg = {"auth": {"imap": {}}, "folders": ["INBOX"], "archive_path": str(tmp_path)}
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: dict(cfg))
+    c = TestClient(m.app)
+    tid = th.read_threads(tmp_path)[0]["thread_id"]
+
+    r1 = c.get(f"/threads/{tid}")                       # nothing saved yet -> download button, no saved view
+    assert "Download 2 linked file(s)" in r1.text and "file(s) already saved" not in r1.text
+
+    ls.fetch_links(tmp_path, fetcher=lambda u, p: ("downloaded", "f.pdf", b"X"), log=lambda *_: None)
+    r2 = c.get(f"/threads/{tid}")                       # both saved -> view appears, download button gone
+    assert "file(s) already saved" in r2.text and "/linkfile/" in r2.text
+    assert "Download 2 linked file(s)" not in r2.text   # don't offer to re-fetch what's already kept
 
 
 def test_render_inlines_cid_images_and_image_attachments(tmp_path):

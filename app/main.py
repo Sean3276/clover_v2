@@ -380,14 +380,20 @@ def thread_view(request: Request, thread_id: str):
     t = threadmod.get_thread(arch, thread_id)
     if not t:
         return RedirectResponse("/threads", status_code=303)
-    link_ids = {r.get("message_id") for r in lsmod.read_link_shares(arch)}
-    has_links = any(m.get("message_id") in link_ids for m in t.get("members", []))
+    # this thread's share links: what's already saved (offer to view) vs still pending (offer to fetch)
+    members = t.get("members", [])
+    mids = {m.get("message_id") for m in members}
+    paths = {loc.get("path") for m in members for loc in (m.get("locations") or [])}
+    tlinks = [r for r in lsmod.read_link_shares(arch)
+              if r.get("message_id") in mids or r.get("eml") in paths]
+    link_saved = [r for r in tlinks if r.get("status") == "downloaded" and r.get("file")]
+    link_pending = sum(1 for r in tlinks if r.get("status") == "pending")
     # render only the lightweight header list from threads.jsonl; bodies load on demand below
     return templates.TemplateResponse(request, "thread_view.html", {
         "cfg": cfg, "thread": t,
         "comp": compmod.get_comprehension(arch, thread_id),
         "ai_ready": _backend_available(cfg),
-        "has_links": has_links,
+        "link_saved": link_saved, "link_pending": link_pending,
     })
 
 

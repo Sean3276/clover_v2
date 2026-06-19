@@ -133,9 +133,10 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 ### Action: **Open / download an attachment** · `GET /threads/{id}/msg/{idx}/att/{n}`
 - **Does:** extracts a genuine attachment from the `.eml` and serves it inline (so PDFs/images open, and you can save them). Inline *images* (signature logos, embedded screenshots referenced by the body) are shown in the body, not listed as attachments; inline PDFs/docs *are* listed.
 
-### Action: **Download linked files** (one conversation) · `POST /threads/{id}/fetch-links`
-- **Trigger:** *⬇ Download linked files* in an open conversation (shown only when it has share links).
-- **Does:** runs the link download scoped to **just this conversation's** messages (background, dedup + size-confirm, stoppable). Useful for grabbing one thread's files on demand without a full fetch.
+### Action: **Download / view a conversation's linked files** · `POST /threads/{id}/fetch-links`
+- **Trigger:** in an open conversation, a state-aware bar (only when it has links):
+  - *⬇ Download N linked file(s)* — shown only when N links are still **pending**; downloads just this conversation's messages (background, dedup + size-confirm, stoppable). **Never re-downloads files already kept** (fetch only touches `pending`).
+  - *📁 N file(s) already saved* — shown when files are already downloaded; toggles a list of them with open links (so you know they're kept and can open them).
 
 ### Action: **Comprehend** · `POST /threads/{id}/comprehend` (Phase 3 entry point)
 - **Trigger:** *Comprehend* on a thread.
