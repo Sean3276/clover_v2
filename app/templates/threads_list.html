@@ -6,20 +6,6 @@
   .thtools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
   .thtools input{flex:1;min-width:220px}
   .thtools select{width:auto}
-  .thlist{display:flex;flex-direction:column;gap:6px}
-  .throw{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:11px 13px;
-    border:1px solid var(--line);border-radius:9px;background:var(--tile-bg);text-decoration:none;color:var(--ink)}
-  .throw:hover{border-color:var(--clover);background:var(--card2)}
-  .thmain{min-width:0;flex:1}
-  .thsubj{display:block;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .thmeta{display:block;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .thside{flex:none;display:flex;flex-direction:column;gap:3px;align-items:flex-end}
-  .thn{font-size:11px;font-weight:700;color:var(--clover-d);background:rgba(52,210,123,.14);border-radius:20px;padding:2px 9px}
-  .cbadges{display:inline-flex;gap:5px;flex-wrap:wrap;margin-top:3px}
-  .cbadge{font-size:10px;font-weight:700;border:1px solid var(--line);border-radius:5px;padding:1px 7px;color:var(--sub)}
-  .cbadge.dom{background:rgba(52,210,123,.14);color:var(--clover-d);border-color:rgba(52,210,123,.3)}
-  .cbadge.warn{background:rgba(240,178,74,.16);color:var(--amber);border-color:rgba(240,178,74,.34)}
-  .leaf{font-size:13px;line-height:1}
 </style>
 
 <div class="runhdr">
@@ -83,7 +69,7 @@
         <span class="thsubj">{% if c %}<span class="leaf" title="Comprehended">🍀</span> {% endif %}{{ t.subject }}</span>
         {% if c %}
         <span class="thmeta note">{{ c.summary or (c.classification.category ~ ' — comprehended') }}</span>
-        <span class="cbadges"><span class="cbadge dom">{{ c.classification.domain }}</span><span class="cbadge">{{ c.classification.category }}</span>{% if c.classification.consensus == 'asked' %}<span class="cbadge warn">review</span>{% endif %}</span>
+        <span class="cbadges">{% if c.facts and c.facts.project %}<span class="cbadge proj">🏗 {{ c.facts.project }}</span>{% endif %}<span class="cbadge dom">{{ c.classification.domain }}</span><span class="cbadge">{{ c.classification.category }}</span>{% if c.classification.consensus == 'asked' %}<span class="cbadge warn">review</span>{% endif %}</span>
         {% else %}
         <span class="thmeta note">{{ t.participants[:3]|join(', ') }}{% if t.participants|length > 3 %} +{{ t.participants|length - 3 }} more{% endif %}</span>
         {% endif %}

@@ -19,8 +19,10 @@ from fastapi.templating import Jinja2Templates
 from clover import archive
 from clover import compose as composemod
 from clover import comprehend as compmod
+from clover import contacts as contactsmod
 from clover import config as cfgmod
 from clover import linkshares as lsmod
+from clover import projects as projmod
 from clover import sender as sendermod
 from clover import threads as threadmod
 from clover.comprehenders import get_comprehender
@@ -371,6 +373,29 @@ def threads_page(request: Request):
         "link_stats": link_stats,
         "link_total": sum(link_stats.values()),
     })
+
+
+@app.get("/projects", response_class=HTMLResponse)
+def projects_page(request: Request):
+    cfg = cfgmod.load_config()
+    return templates.TemplateResponse(request, "projects.html",
+                                      {"cfg": cfg, "projects": projmod.list_projects(_archive_dir(cfg))})
+
+
+@app.get("/projects/{key}", response_class=HTMLResponse)
+def project_detail(request: Request, key: str):
+    cfg = cfgmod.load_config()
+    p = projmod.get_project(_archive_dir(cfg), key)
+    if not p:
+        return RedirectResponse("/projects", status_code=303)
+    return templates.TemplateResponse(request, "project_detail.html", {"cfg": cfg, "project": p})
+
+
+@app.get("/contacts", response_class=HTMLResponse)
+def contacts_page(request: Request):
+    cfg = cfgmod.load_config()
+    return templates.TemplateResponse(request, "contacts.html",
+                                      {"cfg": cfg, "contacts": contactsmod.consolidate(_archive_dir(cfg))})
 
 
 @app.post("/threads/rebuild")

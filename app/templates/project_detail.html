@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} · Projects{% endblock %}
+{% block nav_projects %}active{% endblock %}
+{% block body %}
+<p style="margin:0 0 6px"><a href="/projects" class="note">← all projects</a></p>
+<h1>🏗 {{ project.name }}</h1>
+<p class="note">{{ project.count }} conversation(s){% if project.categories %} · {{ project.categories[:5]|join(' · ') }}{% endif %}</p>
+<div class="thlist" style="margin-top:14px">
+  {% for t in project.threads %}
+  <a class="throw" href="/threads/{{ t.thread_id }}">
+    <div class="thmain">
+      <span class="thsubj">{{ t.subject }}</span>
+      <span class="thmeta note">{{ t.summary or t.category or '' }}</span>
+    </div>
+    {% if t.category %}<div class="thside"><span class="cbadge">{{ t.category }}</span></div>{% endif %}
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

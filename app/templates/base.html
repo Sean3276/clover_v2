@@ -98,6 +98,22 @@
   @keyframes cloverspin{to{transform:rotate(360deg)}}
   .clover-spin{display:inline-block;animation:cloverspin 1.1s linear infinite;transform-origin:50% 50%}
   .mono{font-family:ui-monospace,Consolas,monospace}   /* global so Mail pages get it too */
+  /* shared list rows + classification badges (Mail / Projects / Contacts) */
+  .thlist{display:flex;flex-direction:column;gap:6px}
+  .throw{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:11px 13px;
+    border:1px solid var(--line);border-radius:9px;background:var(--card2);text-decoration:none;color:var(--ink)}
+  .throw:hover{border-color:var(--clover)}
+  .thmain{min-width:0;flex:1}
+  .thsubj{display:block;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .thmeta{display:block;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .thside{flex:none;display:flex;flex-direction:column;gap:3px;align-items:flex-end}
+  .thn{font-size:11px;font-weight:700;color:var(--clover-d);background:rgba(52,210,123,.14);border-radius:20px;padding:2px 9px}
+  .cbadges{display:inline-flex;gap:5px;flex-wrap:wrap;margin-top:3px}
+  .cbadge{font-size:10px;font-weight:700;border:1px solid var(--line);border-radius:5px;padding:1px 7px;color:var(--sub)}
+  .cbadge.dom{background:rgba(52,210,123,.14);color:var(--clover-d);border-color:rgba(52,210,123,.3)}
+  .cbadge.warn{background:rgba(240,178,74,.16);color:var(--amber);border-color:rgba(240,178,74,.34)}
+  .cbadge.proj{background:rgba(43,212,196,.12);color:var(--cyan);border-color:rgba(43,212,196,.3)}
+  .leaf{font-size:13px;line-height:1}
   .linkbtn{background:none;border:0;color:var(--clover);font:inherit;font-weight:600;padding:0;cursor:pointer}
   .linkbtn:hover{text-decoration:underline;filter:none;background:none}
   /* visible keyboard focus for every interactive element */
@@ -132,6 +148,8 @@
   <a href="/setup" class="{% block nav_setup %}{% endblock %}">Setup</a>
   <a href="/archive" class="{% block nav_archive %}{% endblock %}">Archive</a>
   <a href="/threads" class="{% block nav_threads %}{% endblock %}">Mail</a>
+  <a href="/projects" class="{% block nav_projects %}{% endblock %}">Projects</a>
+  <a href="/contacts" class="{% block nav_contacts %}{% endblock %}">Contacts</a>
   <span class="right">control room</span>
   <button id="themeBtn" class="themetoggle" type="button" onclick="toggleTheme()" aria-label="Toggle light/dark theme" title="Toggle light / dark">☀️</button>
 </header>

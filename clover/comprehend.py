@@ -26,7 +26,9 @@ _NUM = re.compile(r"\d[\d,]*\.?\d*")
 
 _DISTILL_SCHEMA = {"abstract": "str", "summary": "str", "event": "str (<=30 chars)",
                    "facts": {"project": "str", "parties": ["str"], "refs": ["str"],
-                             "dates": ["str"], "amounts": ["str"]}}
+                             "dates": ["str"], "amounts": ["str"]},
+                   "contacts": [{"name": "str", "position": "str", "company": "str",
+                                 "phone": "str", "email": "str"}]}
 _CLASSIFY_SCHEMA = {"domain": "str", "category": "str", "confidence": "number 0..1",
                     "dispute": "bool", "dissent": "str"}
 
@@ -145,7 +147,9 @@ def _distill_prompt(comprehension):
             "comprehension. For each fact give the BARE value EXACTLY as it appears in the thread "
             "(a date like '14 March 2025', an amount like 'S$878,000', a reference like 'EOT-05', a "
             "party or project name) — do NOT add descriptions, deadlines, or commentary to a fact "
-            "value, and do not invent.\n\nCOMPREHENSION:\n" + comprehension)
+            "value, and do not invent. Also extract CONTACTS seen in the thread (especially email "
+            "signatures): for each person give name, position, company, phone, email — leave a field "
+            "empty if unknown, and don't invent.\n\nCOMPREHENSION:\n" + comprehension)
 
 
 def _classify_prompt(profile: Profile, comprehension, full: bool):
@@ -255,6 +259,18 @@ def _refine(backend, thread, msgs, max_chars):
     return running
 
 
+def _clean_contacts(raw) -> list[dict]:
+    """Normalize the model's contacts list to {name, position, company, phone, email}; drop empties."""
+    out = []
+    for c in (raw or []):
+        if not isinstance(c, dict):
+            continue
+        rec = {k: str(c.get(k) or "").strip() for k in ("name", "position", "company", "phone", "email")}
+        if rec["name"] or rec["email"]:
+            out.append(rec)
+    return out
+
+
 # ---------------------------------------------------------------- pipeline
 def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Profile,
                       *, max_chars: int = 120_000, model: str = "?") -> dict:
@@ -280,6 +296,7 @@ def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Pro
         "summary": str(distilled.get("summary") or "").strip(),
         "event": str(distilled.get("event") or "").strip()[:30],
         "facts": facts,
+        "contacts": _clean_contacts(distilled.get("contacts")),
         "classification": classification,
         "method": method, "model": model, "profile": profile.name,
         "verified": {"facts_ok": not dropped, "dropped_facts": dropped,

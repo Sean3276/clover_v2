@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Projects · Clover v2{% endblock %}
+{% block nav_projects %}active{% endblock %}
+{% block body %}
+<h1>Projects</h1>
+<p class="note">Projects detected from <strong>comprehended</strong> conversations — grouped by the project
+  name each thread is about. Comprehend more mail to populate this.</p>
+{% if not projects %}
+<div class="card"><p class="note dim" style="margin:0">No projects yet — open a conversation in
+  <a href="/threads">Mail</a> and click <strong>Comprehend</strong>; detected project names group here.</p></div>
+{% else %}
+<div class="thlist" style="margin-top:14px">
+  {% for p in projects %}
+  <a class="throw" href="/projects/{{ p.key|urlencode }}">
+    <div class="thmain">
+      <span class="thsubj">🏗 {{ p.name }}</span>
+      {% if p.categories %}<span class="cbadges">{% for c in p.categories[:5] %}<span class="cbadge">{{ c }}</span>{% endfor %}</span>{% endif %}
+    </div>
+    <div class="thside"><span class="thn">{{ p.count }} thread{{ 's' if p.count != 1 }}</span></div>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

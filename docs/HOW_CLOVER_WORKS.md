@@ -143,6 +143,17 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 - **Trigger:** *Comprehend* on a thread.
 - **Does:** runs the AI comprehension pipeline for that thread and stores the result in `comprehension.jsonl`; the thread then shows the 🍀 stamp. *(Behaviour detailed in `CLOVER_V2_PHASE3_SPEC.md`.)*
 
+### Action: **Projects** · `GET /projects` → `GET /projects/{key}`
+- **Does:** groups **comprehended** conversations by their extracted project name (`facts.project`),
+  normalizing spelling/case so variants merge. The list shows each project + thread count + categories;
+  a project page lists its conversations. The project name also shows as a 🏗 badge on Mail rows.
+  Read-only over `comprehension.jsonl`; threads with no project (or not yet comprehended) don't appear.
+
+### Action: **Contacts** · `GET /contacts`
+- **Does:** a deduped directory (by email) merging two sources — **deterministic** name+email from every
+  `From` in `_index.jsonl` (full coverage, no AI) + **AI** position/company/phone the comprehender pulls
+  from signatures. Filterable; busiest senders first. Comprehend more mail to enrich the detail fields.
+
 ### Action: **Reply / Reply-all / Forward** (delivery track) · `POST /threads/{id}/compose` → `POST /send`
 - **Status: OFF by default.** This is the only feature that *sends* mail. While `sending.enabled` is
   false (default), the Reply/Forward buttons are hidden **and** `/send` and `/compose` return 403.

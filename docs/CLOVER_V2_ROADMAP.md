@@ -257,8 +257,9 @@ can re-organize (P2), re-comprehend (P3), or re-cluster issues (P4) without re-f
   **one-click installer**. Pending: the full provider suite; a full-corpus link fetch.
 - **P2:** ✅ **built** — header-only threading + stitched Threads reader, attachment view/download,
   cross-folder dedup. (See [HOW_CLOVER_WORKS.md](HOW_CLOVER_WORKS.md).)
-- **P3:** ✅ **built** — per-thread comprehension (4-tier + council + fact verification); pending: QAQC
-  gate, project-name classification, contact consolidation.
+- **P3:** ✅ **built** — per-thread comprehension (4-tier + council + fact verification), plus a
+  **Projects index** (group threads by extracted project name) and a **Contacts directory**
+  (headers + AI-from-signatures, deduped). Pending: QAQC gate, council sizing (5/10), operator-ask + learned rules.
 - **P4–P5:** not started (conceptual; approaches proposed above).
 
 ## Open decisions (summary)
