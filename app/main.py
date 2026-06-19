@@ -373,6 +373,16 @@ def _wrap_srcdoc(body_html: str) -> str:
             + "</head><body>" + body_html + "</body></html>")
 
 
+@app.get("/threads/link-status")     # defined BEFORE /threads/{thread_id} so it isn't captured as an id
+def link_status():
+    """Live link-task state + status counts, for the Mail page to poll during a background download."""
+    stats = {}
+    for r in lsmod.read_link_shares(_archive_dir(cfgmod.load_config())):
+        s = r.get("status", "pending")
+        stats[s] = stats.get(s, 0) + 1
+    return JSONResponse({"running": _linktask.get("running", False), "stats": stats, "total": sum(stats.values())})
+
+
 @app.get("/threads/{thread_id}", response_class=HTMLResponse)
 def thread_view(request: Request, thread_id: str):
     cfg = cfgmod.load_config()

@@ -307,7 +307,7 @@ async function stop(){
 async function reconcile(){
   const b=$("reconBtn"), m=$("reconMsg"), out=$("reconOut");
   if(b) b.disabled=true;
-  m.className="msg ok"; m.textContent="Verifying…"; out.innerHTML="";
+  m.className="msg ok"; m.innerHTML='<span class="clover-spin">🍀</span> Verifying… (scanning every archived file)'; out.innerHTML="";
   try{
     const r = await (await fetch("/archive/reconcile",{method:"POST"})).json();
     m.className="msg "+(r.ok?"ok":"err");

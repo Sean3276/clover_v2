@@ -41,15 +41,13 @@
 {% else %}
 {% if link_total %}
 <div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px;padding:12px 16px">
-  <span class="note linkstats" style="flex:1;min-width:240px">🔗 Share links: {{ link_total }} catalogued —
-    <strong>{{ link_stats.get('downloaded', 0) }}</strong> downloaded,
-    {{ link_stats.get('pending', 0) }} pending,
+  <span class="note" style="flex:1;min-width:240px">🔗 Share links: {{ link_total }} catalogued —
+    <strong id="lsDownloaded">{{ link_stats.get('downloaded', 0) }}</strong> downloaded,
+    <span id="lsPending">{{ link_stats.get('pending', 0) }}</span> pending,
     {{ link_stats.get('needs-auth', 0) }} need sign-in,
     {{ link_stats.get('dead', 0) }} dead{% if link_stats.get('needs-confirm', 0) %},
-    <strong style="color:var(--amber)">{{ link_stats['needs-confirm'] }} large — open the thread to confirm</strong>{% endif %}.</span>
-  {% if link_stats.get('pending', 0) %}
-  <button id="fetchBtn" type="button" onclick="fetchLinks()" title="Download every not-yet-downloaded link file in your archive (headless browser, runs in the background)">⬇ Download {{ link_stats['pending'] }} pending</button>
-  {% endif %}
+    <strong style="color:var(--amber)">{{ link_stats['needs-confirm'] }} large — open the thread to confirm</strong>{% endif %}.<span id="lsLive" class="dim"></span></span>
+  <button id="fetchBtn" type="button" onclick="fetchLinks()"{% if not link_stats.get('pending', 0) %} style="display:none"{% endif %} title="Download every not-yet-downloaded link file in your archive (headless browser, runs in the background)">⬇ Download <span id="fetchN">{{ link_stats.get('pending', 0) }}</span> pending</button>
   <button id="stopLinksBtn" type="button" class="ghost" onclick="stopLinks()" title="Halt a running download">⏹ Stop</button>
 </div>
 {% endif %}
@@ -60,8 +58,11 @@
     <button id="harvestBtn" type="button" class="ghost" onclick="harvestLinks()" title="Re-scan the archive for share links">🔗 Re-scan links</button>
   </div>
 </details>
-<div id="rebuildMsg" class="msg"></div>
+<div id="rebuildMsg" class="msg" role="status" aria-live="polite"></div>
 
+{% if not threads %}
+<div class="card"><p class="note dim" style="margin:0">No conversations yet. Archive mail on the <a href="/archive">Archive</a> tab, then they'll appear here automatically.</p></div>
+{% else %}
 <div class="card">
   <div class="thtools">
     <input id="filter" type="text" placeholder="Filter by subject or participant…" oninput="apply()">
@@ -94,7 +95,9 @@
     </a>
     {% endfor %}
   </div>
+  <p id="empty" class="note dim" style="display:none;margin:6px 2px 0">No conversations match your filter. <a href="#" onclick="clearFilter();return false">Clear filter</a></p>
 </div>
+{% endif %}
 {% endif %}
 
 <script>
@@ -113,7 +116,9 @@ function apply(){
   });
   const list = $("list"); vis.forEach(r => list.appendChild(r));
   if($("count")) $("count").textContent = shown + " thread(s)";
+  if($("empty")) $("empty").style.display = (shown === 0 && q) ? "" : "none";
 }
+function clearFilter(){ if($("filter")){ $("filter").value = ""; apply(); $("filter").focus(); } }
 async function rebuild(){
   const b = $("rebuildBtn"), m = $("rebuildMsg");
   if(b) b.disabled = true;
@@ -135,12 +140,30 @@ async function harvestLinks(){
   if(b) b.disabled = false;
 }
 async function fetchLinks(){
+  const n = $("fetchN") ? $("fetchN").textContent : "the pending";
+  if(!confirm("Download " + n + " pending link file(s)?\n\nRuns in the background. Identical links download once and very large files pause for your confirmation — but this can still use significant storage and bandwidth.")) return;
   const m = $("rebuildMsg");
   if(m){ m.className = "msg ok"; m.textContent = "Starting link download…"; }
   try{
     const res = await (await fetch("/threads/fetch-links", {method:"POST"})).json();
     if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }
+    pollLinks();
   }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Fetch failed: " + e; } }
+}
+let _linkPoll = null;
+async function pollLinks(){
+  try{
+    const s = await (await fetch("/threads/link-status")).json();
+    const st = s.stats || {};
+    if($("lsDownloaded")) $("lsDownloaded").textContent = st.downloaded || 0;
+    if($("lsPending")) $("lsPending").textContent = st.pending || 0;
+    const fb = $("fetchBtn"), fn = $("fetchN");
+    if(fb){ if(st.pending){ fb.style.display = ""; if(fn) fn.textContent = st.pending; } else { fb.style.display = "none"; } }
+    const live = $("lsLive");
+    if(s.running){ if(live) live.innerHTML = ' · <span class="clover-spin">🍀</span> downloading…';
+      clearTimeout(_linkPoll); _linkPoll = setTimeout(pollLinks, 3000); }
+    else { if(live) live.textContent = ""; _linkPoll = null; }
+  }catch(e){ _linkPoll = null; }
 }
 async function stopLinks(){
   const m = $("rebuildMsg");
@@ -149,6 +172,6 @@ async function stopLinks(){
     if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }
   }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Stop failed: " + e; } }
 }
-document.addEventListener("DOMContentLoaded", () => { if($("list")) apply(); });
+document.addEventListener("DOMContentLoaded", () => { if($("list")) apply(); if($("lsLive")) pollLinks(); });
 </script>
 {% endblock %}

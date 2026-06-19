@@ -128,7 +128,7 @@
 <div id="msgs" class="msgs">
 {% for m in thread.members %}
 <div class="card tmsg">
-  <div class="mhead" onclick="toggleMsg(this)">
+  <div class="mhead" role="button" tabindex="0" aria-expanded="false" onclick="toggleMsg(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleMsg(this);}">
     <span class="caret">▶</span>
     <div class="who">
       <strong>{{ m.from or '(unknown sender)' }}</strong>
@@ -142,8 +142,8 @@
 </div>
 
 <div class="scrollnav">
-  <button type="button" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Back to top">↑</button>
-  <button type="button" onclick="jumpEnd()" title="Jump to end (latest)">↓</button>
+  <button type="button" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Back to top" title="Back to top">↑</button>
+  <button type="button" onclick="jumpEnd()" aria-label="Jump to end (latest)" title="Jump to end (latest)">↓</button>
 </div>
 
 <script>
@@ -163,11 +163,13 @@ async function loadBody(msg){
 }
 function toggleMsg(head){
   const msg = head.closest(".tmsg");
-  msg.classList.toggle("open");
-  if(msg.classList.contains("open")) loadBody(msg);
+  const open = msg.classList.toggle("open");
+  head.setAttribute("aria-expanded", open ? "true" : "false");
+  if(open) loadBody(msg);
 }
 function expandAll(open){
   document.querySelectorAll("#msgs .tmsg").forEach(m => {
+    const h = m.querySelector(".mhead"); if(h) h.setAttribute("aria-expanded", open ? "true" : "false");
     if(open){ m.classList.add("open"); loadBody(m); } else { m.classList.remove("open"); }
   });
 }
@@ -186,7 +188,7 @@ function toggleOrder(){
 async function comprehend(){
   const b = document.getElementById("compBtn"), m = document.getElementById("compMsg");
   if(b) b.disabled = true;
-  if(m){ m.className = "msg ok"; m.textContent = "Comprehending… (calls the AI; may take a moment)"; }
+  if(m){ m.className = "msg ok"; m.innerHTML = '<span class="clover-spin">🍀</span> Comprehending… (calls the AI model; may take a moment)'; }
   try{
     const res = await (await fetch(location.pathname + "/comprehend", {method:"POST"})).json();
     if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }

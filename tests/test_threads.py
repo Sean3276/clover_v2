@@ -254,6 +254,22 @@ def test_thread_view_link_bar_pending_then_saved(tmp_path, monkeypatch):
     assert "Download 2 linked file(s)" not in r2.text   # don't offer to re-fetch what's already kept
 
 
+def test_link_status_endpoint_resolves_before_thread_id(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import app.main as m
+    from clover import linkshares as ls
+    _write_eml(tmp_path, "INBOX", "1", mid="a@x", html='<p>https://www.dropbox.com/s/x/a.pdf</p>')
+    th.build_threads(tmp_path, log=lambda *_: None)
+    ls.harvest(tmp_path, log=lambda *_: None)
+    cfg = {"auth": {"imap": {}}, "folders": ["INBOX"], "archive_path": str(tmp_path)}
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: dict(cfg))
+    c = TestClient(m.app)
+    r = c.get("/threads/link-status")                  # must NOT be captured as /threads/{thread_id}
+    assert r.status_code == 200
+    j = r.json()
+    assert j["running"] is False and j["stats"].get("pending") == 1 and j["total"] == 1
+
+
 def test_render_inlines_cid_images_and_image_attachments(tmp_path):
     import base64
     png = base64.b64decode(
