@@ -97,6 +97,24 @@
   .pill.down{background:rgba(240,178,74,.14);color:var(--amber);border:1px solid rgba(240,178,74,.34)}
   @keyframes cloverspin{to{transform:rotate(360deg)}}
   .clover-spin{display:inline-block;animation:cloverspin 1.1s linear infinite;transform-origin:50% 50%}
+  .mono{font-family:ui-monospace,Consolas,monospace}   /* global so Mail pages get it too */
+  /* visible keyboard focus for every interactive element */
+  a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,
+  [tabindex]:focus-visible,.help:focus-visible{outline:2px solid var(--clover);outline-offset:2px}
+  /* hover-help also opens on keyboard focus; clamp width on small screens */
+  .help::after{max-width:min(280px,92vw)}
+  .help:focus-visible::after,.help:focus::after{opacity:1;visibility:visible}
+  /* long URLs / ids never force horizontal page scroll */
+  code,.note,td{overflow-wrap:anywhere}
+  .tablewrap{overflow-x:auto}
+  /* mobile */
+  @media (max-width:640px){
+    header{flex-wrap:wrap;gap:10px 14px;padding:11px 15px}
+    header .right{display:none}
+    main{padding:18px 14px 60px}
+    .row,.row3,.folders{grid-template-columns:1fr}
+    table{display:block;overflow-x:auto;white-space:nowrap}
+  }
 </style>
 </head>
 <body>
@@ -106,7 +124,7 @@
   <a href="/archive" class="{% block nav_archive %}{% endblock %}">Archive</a>
   <a href="/threads" class="{% block nav_threads %}{% endblock %}">Mail</a>
   <span class="right">control room</span>
-  <button id="themeBtn" class="themetoggle" type="button" onclick="toggleTheme()" title="Toggle light / dark">☀️</button>
+  <button id="themeBtn" class="themetoggle" type="button" onclick="toggleTheme()" aria-label="Toggle light/dark theme" title="Toggle light / dark">☀️</button>
 </header>
 <main>{% block body %}{% endblock %}</main>
 <script>

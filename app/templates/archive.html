@@ -50,7 +50,7 @@
 <div class="runhdr">
   <div><h1>Archive monitor</h1>
     <p class="note">Mailbox <code>{{ cfg.auth.imap.user or "not set" }}</code> · Destination <code>{{ cfg.archive_path }}</code></p>
-    <p class="note dim" style="margin:4px 0 0"><strong>Step 2 — download your mail.</strong> Tick folders, optionally filter, then Archive. <span class="help" data-tip="Read-only: nothing on the server is moved, deleted, or marked read. It auto-resumes if the connection drops, and skips anything already archived.">?</span></p>
+    <p class="note dim" style="margin:4px 0 0"><strong>Step 2 — download your mail.</strong> Tick folders, optionally filter, then Archive. <span class="help" tabindex="0" role="note" data-tip="Read-only: nothing on the server is moved, deleted, or marked read. It auto-resumes if the connection drops, and skips anything already archived.">?</span></p>
     <p id="sessionLine" class="note dim" style="margin:4px 0 0"></p></div>
   <span id="runPill" class="pill down">● idle</span>
 </div>
@@ -159,7 +159,7 @@
     <label style="display:flex;gap:8px;align-items:center;margin:2px 0 12px;font-size:13px;cursor:pointer">
       <input type="checkbox" name="auto_links" value="1" checked style="width:auto;margin:0;flex:none">
       <span>Also <strong>download share links</strong> after archiving
-        <span class="help" data-tip="Links are always catalogued automatically; ticking this also downloads the files (SharePoint/OneDrive, Drive, Dropbox, WeTransfer, Box). Runs a headless browser in the background; identical links download once, very large files pause for confirmation in Mail, and 'Stop links' halts it.">?</span>
+        <span class="help" tabindex="0" role="note" data-tip="Links are always catalogued automatically; ticking this also downloads the files (SharePoint/OneDrive, Drive, Dropbox, WeTransfer, Box). Runs a headless browser in the background; identical links download once, very large files pause for confirmation in Mail, and 'Stop links' halts it.">?</span>
         <span style="color:var(--amber)">— can use significant storage &amp; data.</span></span>
     </label>
 

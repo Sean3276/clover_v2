@@ -4,7 +4,7 @@
   {% if block.subject %}<p class="msubj">{{ block.subject }}</p>{% endif %}
   <p class="note mono" style="margin:0 0 8px">{{ block.from }} → {{ block.to }}</p>
   {% if srcdoc %}
-    <iframe class="emlframe" sandbox="allow-same-origin" srcdoc="{{ srcdoc }}" onload="sizeFrame(this)"></iframe>
+    <iframe class="emlframe" sandbox="allow-same-origin" title="Email message body" srcdoc="{{ srcdoc }}" onload="sizeFrame(this)"></iframe>
   {% elif block.body_text %}
     <pre class="bodytext">{{ block.body_text }}</pre>
   {% else %}
@@ -13,9 +13,9 @@
   {% if block.attachments %}
     {% set chips = block.attachments|rejectattr('img')|list %}
     {% if chips %}<div class="atts">
-      {% for a in chips %}<a class="att" href="/threads/{{ tid }}/msg/{{ idx }}/att/{{ a.i }}" target="_blank" rel="noopener">📎 {{ a.name }} <span class="dim">({{ (a.size / 1024)|round(1) }} KB)</span></a>{% endfor %}
+      {% for a in chips %}<a class="att" href="/threads/{{ tid }}/msg/{{ idx }}/att/{{ a.i }}" target="_blank" rel="noopener">📎 {{ a.name }} <span class="dim">({{ ((a.size or 0) / 1024)|round(1) }} KB)</span></a>{% endfor %}
     </div>{% endif %}
-    {% for a in block.attachments if a.img %}<figure class="attimg"><a href="/threads/{{ tid }}/msg/{{ idx }}/att/{{ a.i }}" target="_blank" rel="noopener"><img src="{{ a.img }}" alt="{{ a.name }}" loading="lazy"></a><figcaption class="dim">📎 {{ a.name }} ({{ (a.size / 1024)|round(1) }} KB)</figcaption></figure>{% endfor %}
+    {% for a in block.attachments if a.img %}<figure class="attimg"><a href="/threads/{{ tid }}/msg/{{ idx }}/att/{{ a.i }}" target="_blank" rel="noopener"><img src="{{ a.img }}" alt="{{ a.name }}" loading="lazy"></a><figcaption class="dim">📎 {{ a.name }} ({{ ((a.size or 0) / 1024)|round(1) }} KB)</figcaption></figure>{% endfor %}
   {% endif %}
   {% if links %}
   <div class="lshares">
@@ -25,7 +25,7 @@
       {% if l.file %}<a href="/linkfile/{{ l.file }}" target="_blank" rel="noopener">⬇ downloaded file</a>
       {% else %}<a href="{{ l.url }}" target="_blank" rel="noopener">{{ l.url }}</a>{% endif %}
       {% if l.status == 'needs-confirm' %}
-        <span class="lsize">~{{ (l.size / 1073741824)|round(2) }} GB</span>
+        <span class="lsize">~{{ ((l.size or 0) / 1073741824)|round(2) }} GB</span>
         <button type="button" class="lconfirm" data-mid="{{ l.message_id }}" data-url="{{ l.url }}">Download anyway</button>
       {% endif %}
       <span class="lstat {{ l.status }}">{{ l.status }}</span></div>

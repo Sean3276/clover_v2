@@ -6,34 +6,34 @@
 <p class="note"><strong>Step 1 — connect your mailbox.</strong> Enter your email provider's IMAP details, click
   <strong>Test IMAP</strong> to check the connection, then <strong>Save &amp; continue</strong>. Your password is
   stored in your OS keyring (never in config files or logs).</p>
-{% if error %}<div class="msg err" style="display:block">{{ error }}</div>{% endif %}
+{% if error %}<div class="msg err" role="alert" style="display:block">{{ error }}</div>{% endif %}
 
 <form id="f" method="post" action="/setup/save">
   <div class="card">
     <h2>IMAP (mailbox)</h2>
     <div class="row3">
-      <div><label>Host</label><input name="host" value="{{ cfg.auth.imap.host }}" placeholder="imap.example.com" required></div>
-      <div><label>Port</label><input name="port" type="number" value="{{ cfg.auth.imap.port or 993 }}"></div>
-      <div><label>Security</label>
-        <select name="security">
+      <div><label for="host">Host</label><input id="host" name="host" value="{{ cfg.auth.imap.host }}" placeholder="imap.example.com" required></div>
+      <div><label for="port">Port</label><input id="port" name="port" type="number" value="{{ cfg.auth.imap.port or 993 }}"></div>
+      <div><label for="security">Security</label>
+        <select id="security" name="security">
           <option value="ssl" {% if cfg.auth.imap.security=='ssl' %}selected{% endif %}>SSL/TLS (993)</option>
           <option value="starttls" {% if cfg.auth.imap.security=='starttls' %}selected{% endif %}>STARTTLS (143)</option>
         </select>
       </div>
     </div>
     <div class="row">
-      <div><label>Username</label><input name="user" value="{{ cfg.auth.imap.user }}" placeholder="you@example.com" required></div>
-      <div><label>Password {% if has_pw %}(stored — leave blank to keep){% endif %}</label>
-           <input name="password" type="password" placeholder="{% if has_pw %}••••••••{% else %}IMAP password{% endif %}"></div>
+      <div><label for="user">Username</label><input id="user" name="user" value="{{ cfg.auth.imap.user }}" placeholder="you@example.com" required></div>
+      <div><label for="password">Password {% if has_pw %}(stored — leave blank to keep){% endif %}</label>
+           <input id="password" name="password" type="password" placeholder="{% if has_pw %}••••••••{% else %}IMAP password{% endif %}"></div>
     </div>
     <p style="margin-top:12px"><button type="button" class="ghost" onclick="testImap()">Test IMAP</button></p>
-    <div id="m" class="msg"></div>
+    <div id="m" class="msg" role="status" aria-live="polite"></div>
   </div>
 
   <div class="card">
     <h2>Archive destination</h2>
-    <label>Local archive path (where .eml files are saved — change anytime)</label>
-    <input name="archive_path" value="{{ cfg.archive_path }}" placeholder="D:\\CloverArchive or a Dropbox folder">
+    <label for="archive_path">Local archive path (where .eml files are saved — change anytime)</label>
+    <input id="archive_path" name="archive_path" value="{{ cfg.archive_path }}" placeholder="D:\\CloverArchive or a Dropbox folder">
     <p class="note" style="margin-top:8px">Each email is saved as <code>&lt;path&gt;/&lt;folder&gt;/&lt;message-id&gt;.eml</code>
     (full raw message incl. embedded attachments). An <code>_index.jsonl</code> links the same email across folders.</p>
   </div>
@@ -44,13 +44,15 @@
 <div class="card">
   <h2>Ingestion suite</h2>
   <p class="note">IMAP is available now; the rest are planned and added one by one (pluggable sources).</p>
+  <div class="tablewrap">
   <table>
     <tr><th>Source</th><th>Protocol</th><th>Status</th></tr>
     {% for s in suite %}
     <tr><td>{{ s.label }}</td><td>{{ s.protocol }}</td>
-      <td>{% if s.status=='available' %}<span style="color:#13632f;font-weight:600">✅ available</span>{% else %}<span class="note">⬜ planned</span>{% endif %}</td></tr>
+      <td>{% if s.status=='available' %}<span style="color:var(--clover-d);font-weight:600">✅ available</span>{% else %}<span class="note">⬜ planned</span>{% endif %}</td></tr>
     {% endfor %}
   </table>
+  </div>
 </div>
 
 <script>
