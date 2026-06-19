@@ -149,7 +149,7 @@ def archive_page(request: Request):
     })
 
 
-def _run_archive_bg(folders: list[str], limit: int | None, filters: dict):
+def _run_archive_bg(folders: list[str], limit: int | None, filters: dict, auto_links: bool = False):
     try:
         cfg = cfgmod.load_config()
         cfg["folders"] = folders
@@ -181,6 +181,12 @@ def _run_archive_bg(folders: list[str], limit: int | None, filters: dict):
             except Exception as e:
                 _log(f"Thread index rebuild failed: {type(e).__name__}: {e}")
             _maybe_autorun_comprehension(cfg)       # comprehend the new threads (budget-capped)
+        if auto_links and not _status.get("stop"):  # opt-in: catalogue + download share links after archiving
+            if _start_link_task(lambda: _auto_link_task(_archive_dir(cfg))):
+                _log("Auto share-links: cataloguing + downloading in the background "
+                     "(oversize files wait for confirmation in Threads; 'Stop links' halts it).")
+            else:
+                _log("Auto share-links skipped — a link task is already running.")
     except Exception as e:
         _log(f"ERROR: {type(e).__name__}: {e}")
     finally:
@@ -202,7 +208,9 @@ def _parse_date(s: str):
 @app.post("/archive/run")
 def archive_run(folders: list[str] = Form(default=[]), limit: int = Form(0),
                 date_from: str = Form(""), date_to: str = Form(""),
-                size_mode: str = Form("all"), size_mb: float = Form(0.0), top_n: int = Form(0)):
+                size_mode: str = Form("all"), size_mb: float = Form(0.0), top_n: int = Form(0),
+                auto_links: str = Form("")):
+    auto = auto_links.strip().lower() in ("1", "true", "on", "yes")
     df, dt = _parse_date(date_from), _parse_date(date_to)
     size_min = int(size_mb * 1024 * 1024) if (size_mode == "min" and size_mb and size_mb > 0) else None
     topn = top_n if (size_mode == "top" and top_n and top_n > 0) else None
@@ -216,7 +224,7 @@ def archive_run(folders: list[str] = Form(default=[]), limit: int = Form(0),
             return JSONResponse({"ok": False, "message": "Select at least one folder."})
         _status.update(running=True, started_at=time.time(), folders={}, log=[], manifest=None,
                        stop=False, attempt=0, session_saved=0, prep=None)
-    threading.Thread(target=_run_archive_bg, args=(folders, limit or None, filters), daemon=True).start()
+    threading.Thread(target=_run_archive_bg, args=(folders, limit or None, filters, auto), daemon=True).start()
     bits = []
     if df or dt:
         bits.append(f"{df or '…'}→{dt or '…'}")
@@ -441,6 +449,17 @@ def _start_link_task(target) -> bool:
                 _linktask["running"] = False
     threading.Thread(target=runner, daemon=True).start()
     return True
+
+
+def _auto_link_task(arch):
+    """Post-archive automation: catalogue links, then download all pending in batches of 50 — each
+    batch persists (crash-safe) and is stoppable; oversize links pause as needs-confirm."""
+    lsmod.harvest(arch, log=_log)
+    while not _linktask.get("stop"):
+        r = lsmod.fetch_links(arch, limit=50, headless=True, log=_log,
+                              should_stop=lambda: _linktask.get("stop", False))
+        if r.get("remaining", 0) <= 0:
+            break
 
 
 @app.post("/threads/harvest-links")

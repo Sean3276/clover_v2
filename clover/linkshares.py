@@ -322,8 +322,10 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
     """Download up to `limit` pending links into _linkfiles/<message-id>/, updating each record's
     status (downloaded | needs-confirm | dead | needs-auth | error). Re-runnable (only touches 'pending').
 
-    URL-dedup: the same share link is downloaded once; other emails citing it reuse that file (no
-    re-transfer). Size gate: a download exceeding `confirm_over_mb` is NOT kept — it's marked
+    URL-dedup: the same share link is resolved once — a successful download is reused, and a
+    dead/gated/oversize outcome is reused too — so duplicate links across emails never re-fetch
+    (critical at scale: ~85% of a real corpus is repeated links). Size gate: a download exceeding
+    `confirm_over_mb` is NOT kept — it's marked
     'needs-confirm' (with its size) so the UI can ask the user; a record flagged 'confirmed' bypasses
     the gate. `timeout` bounds the browser download wait per link (navigation capped separately)."""
     import inspect
@@ -342,6 +344,8 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
                   for r in recs if r.get("status") == "downloaded" and r.get("file")}
     oversize = {r.get("url"): r.get("size")              # url -> known-oversize size (don't re-pull)
                 for r in recs if r.get("status") == "needs-confirm"}
+    dead_urls = {r.get("url") for r in recs if r.get("status") == "dead"}        # don't re-try a known-dead link
+    auth_urls = {r.get("url") for r in recs if r.get("status") == "needs-auth"}  # ...or a known-gated one
     pending = [r for r in recs if r.get("status") == "pending"]
     updates = {}
     done = reused = confirm = dead = auth = 0
@@ -356,6 +360,14 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
         if not ok and url in oversize:                   # known too-big and not yet confirmed
             updates[(mid, url)] = {"status": "needs-confirm", "size": oversize[url]}
             confirm += 1
+            continue
+        if not ok and url in dead_urls:                  # same link already dead elsewhere — skip the re-fetch
+            updates[(mid, url)] = {"status": "dead"}
+            dead += 1
+            continue
+        if not ok and url in auth_urls:                  # same link already gated elsewhere — skip the re-fetch
+            updates[(mid, url)] = {"status": "needs-auth"}
+            auth += 1
             continue
         try:
             status, fname, data = fetch(url, prov, None if ok else limit_bytes)
@@ -378,8 +390,12 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
             if status == "downloaded":          # 'downloaded' with no bytes -> retryable failure, not success
                 status = "error"
             updates[(mid, url)] = {"status": status}
-            dead += status == "dead"
-            auth += status == "needs-auth"
+            if status == "dead":
+                dead += 1
+                dead_urls.add(url)              # remember so duplicate emails skip the re-fetch
+            elif status == "needs-auth":
+                auth += 1
+                auth_urls.add(url)
     _update_records(archive_path, updates)
     remaining = sum(1 for r in read_link_shares(archive_path) if r.get("status") == "pending")
     log(f"link fetch: {done} downloaded ({reused} reused), {confirm} need-confirm, "

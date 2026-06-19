@@ -156,6 +156,25 @@ def test_fetch_links_url_dedup_across_messages(tmp_path):
     assert len(recs) == 2 and len(files) == 1                    # both records point to the same file
 
 
+def test_fetch_links_dedup_dead_and_auth_across_messages(tmp_path):
+    # a dead link and a gated link each appear in two emails -> resolved once, reused for the duplicate
+    links = ("https://drive.google.com/file/d/DEADDEADDED/view "
+             "https://acme.sharepoint.com/:b:/x/gated")
+    _eml(tmp_path, "INBOX", "1", "m1@x", links)
+    _eml(tmp_path, "INBOX", "2", "m2@x", links)
+    ls.harvest(tmp_path, log=lambda *_: None)
+    calls = []
+
+    def fake(u, p):
+        calls.append(u)
+        return ("dead", None, None) if "DEAD" in u else ("needs-auth", None, None)
+
+    s = ls.fetch_links(tmp_path, fetcher=fake, log=lambda *_: None)
+    assert len(calls) == 2                              # each unique url fetched once, not 4 times
+    assert s["dead"] == 2 and s["needs_auth"] == 2     # yet all 4 records get a final status
+    assert sum(1 for r in ls.read_link_shares(tmp_path) if r["status"] == "pending") == 0
+
+
 def test_fetch_links_oversize_needs_confirm_then_confirm(tmp_path):
     _eml(tmp_path, "INBOX", "1", "m@x", "big https://www.dropbox.com/s/x/big.zip")
     ls.harvest(tmp_path, log=lambda *_: None)

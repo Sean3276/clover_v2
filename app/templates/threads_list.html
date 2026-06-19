@@ -32,6 +32,7 @@
     <button id="rebuildBtn" type="button" class="ghost" onclick="rebuild()">↻ Rebuild index</button>
     <button id="harvestBtn" type="button" class="ghost" onclick="harvestLinks()" title="Detect & catalogue share links in your archive">🔗 Harvest links</button>
     <button id="fetchBtn" type="button" class="ghost" onclick="fetchLinks()" title="Download catalogued link files (headless browser)">⬇ Fetch files</button>
+    <button id="stopLinksBtn" type="button" class="ghost" onclick="stopLinks()" title="Halt the running harvest/fetch (incl. auto-download started from Archive)">⏹ Stop links</button>
   </span>{% endif %}
 </div>
 
@@ -134,6 +135,13 @@ async function fetchLinks(){
     const res = await (await fetch("/threads/fetch-links", {method:"POST"})).json();
     if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }
   }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Fetch failed: " + e; } }
+}
+async function stopLinks(){
+  const m = $("rebuildMsg");
+  try{
+    const res = await (await fetch("/threads/stop-links", {method:"POST"})).json();
+    if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }
+  }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Stop failed: " + e; } }
 }
 document.addEventListener("DOMContentLoaded", () => { if($("list")) apply(); });
 </script>

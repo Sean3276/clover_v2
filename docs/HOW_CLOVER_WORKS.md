@@ -61,7 +61,10 @@ IMAP mailbox ──(Phase 1)──► local .eml archive ──(Phase 2)──�
   4. Writes each message as `<archive>/<folder>/<name>.eml` (collision-safe — a genuinely different message with the same derived name gets a `_<uid>` suffix) and appends a row to `_index.jsonl`:
      `{id, folder, key (UID), validity (UIDVALIDITY), from, subject, date, path, size, sha256}`.
   5. When new mail was saved, **auto-rebuilds the thread index** (Phase 2).
-- **Considerations:** read-only & non-destructive (never deletes/sends/flags); **resumable & idempotent**; survives flaky links (retries + plain-language errors); filters only change the *selected set* — they never change the dedup key, so narrowing then widening later still backfills cleanly.
+  6. *(Optional, if you tick **"also catalogue & download share links"**)* — after archiving, runs the
+     link **harvest + fetch** in the background (batched, stoppable, oversize links pause for
+     confirmation). See *Fetch files* below for the mechanics.
+- **Considerations:** read-only & non-destructive (never deletes/sends/flags); **resumable & idempotent**; survives flaky links (retries + plain-language errors); filters only change the *selected set* — they never change the dedup key, so narrowing then widening later still backfills cleanly. The auto-links option is **off by default** (downloading can be slow/large), and never runs if you Stopped the archive.
 - **Output:** `.eml` files + `_index.jsonl` (+ refreshed `threads.jsonl`).
 
 #### Date / size filters (optional)
@@ -92,7 +95,7 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 ### Action: **Fetch files** · `POST /threads/fetch-links`
 - **Trigger:** *⬇ Fetch files* on the Threads page.
 - **Does:** downloads `pending` links in the background:
-  1. **URL-dedup:** if the *same* link was already downloaded, the record reuses that file — no re-transfer. (On the real corpus ~85% of records are repeats, so this avoids most downloads.)
+  1. **URL-dedup (all outcomes):** each unique link is resolved **once** — a download is reused, and a `dead` / `needs-auth` / oversize result is reused too — so duplicate links never re-fetch. (On the real corpus ~85% of records are repeats, so this avoids almost all the work.)
   2. **Direct fast-path** (httpx) for Dropbox/Drive direct links, streamed; otherwise a **headless browser** (Playwright/Chromium) that dismisses cookie banners and clicks the provider's Download control.
   3. **Size gate:** a download over the threshold (default ~1 GB) is **not kept** — the record becomes `needs-confirm` with its size, so you can decide (see below). Direct links stop mid-stream; browser links are detected after they stream to a temp file (their size isn't known up front).
   4. Saved files go to `_linkfiles/<message-id>/<filename>` — **collision-safe** (`name (2).ext`) and **Unicode/CJK names preserved**. HTML login/interstitial pages are rejected, not saved as "files".
@@ -102,6 +105,10 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 ### Action: **Download anyway** (confirm a large link) · `POST /threads/confirm-link`
 - **Trigger:** for a `needs-confirm` link, click *Download anyway* in the thread (the row names the link, its email, and its size).
 - **Does:** clears the size gate for that link and re-queues it (`confirmed`); the next *Fetch files* downloads it in full.
+
+### Action: **Stop links** · `POST /threads/stop-links`
+- **Trigger:** *⏹ Stop links* on the Threads page.
+- **Does:** halts the running link task (manual fetch *or* the Archive auto-download) — the in-flight link finishes, then it stops; progress so far is saved. Re-run *Fetch files* to continue.
 
 ### Action: **Open a saved / linked file** · `GET /linkfile/{path}`
 - **Trigger:** click *⬇ saved file* on a link in the reader.
