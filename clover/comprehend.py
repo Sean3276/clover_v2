@@ -13,6 +13,7 @@ import time
 from html import unescape
 from pathlib import Path
 
+from . import rules as rulesmod
 from .comprehenders import Comprehender
 from .profiles import Profile, get_profile
 from .threads import read_threads, render_message
@@ -115,6 +116,30 @@ def _append(archive, record: dict, ts: float | None = None) -> None:
 
 def save_comprehension(archive, record: dict) -> None:
     _append(archive, record)
+
+
+def resolve_comprehension(archive, thread_id: str, domain: str, category: str, ts: str = "") -> bool:
+    """Operator override of a flagged thread's classification: set domain/category, consensus=resolved,
+    clear needs_review. Rewrites the latest record for that thread in place. Returns False if absent."""
+    recs = read_comprehensions(archive)
+    idx = None
+    for i, r in enumerate(recs):
+        if r.get("thread_id") == thread_id:
+            idx = i                                  # latest record for the thread
+    if idx is None:
+        return False
+    c = recs[idx].setdefault("classification", {})
+    c["domain"], c["category"], c["consensus"] = domain, category, "resolved"
+    if isinstance(recs[idx].get("qaqc"), dict):
+        recs[idx]["qaqc"]["needs_review"] = False
+    recs[idx]["resolved_ts"] = ts
+    p = comprehension_path(archive)
+    tmp = p.with_suffix(".jsonl.tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        for rec in recs:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    tmp.replace(p)
+    return True
 
 
 def estimate_thread_tokens(archive, thread: dict) -> int:
@@ -302,7 +327,14 @@ def _build_once(archive, thread, backend, profile, max_chars, model):
 
     distilled = backend.generate("distill", _distill_prompt(comprehension), schema=_DISTILL_SCHEMA) or {}
     facts, dropped = _verify_facts(distilled.get("facts") or {}, full)
-    classification = _classify(backend, profile, comprehension, full)
+    ruled = rulesmod.match(archive, text=full, project=facts.get("project", ""),
+                           senders=[m.get("from", "") for m in thread.get("members", [])])
+    if ruled:                                            # a learned rule wins deterministically — no AI council
+        classification = {"domain": ruled.get("domain", ""), "category": ruled.get("category", ""),
+                          "confidence": 1.0, "council": "rule", "members": 0,
+                          "consensus": "rule", "dissent": "", "votes": ""}
+    else:
+        classification = _classify(backend, profile, comprehension, full)
     rec = {
         "thread_id": thread.get("thread_id"), "root_id": thread.get("root_id"),
         "subject": thread.get("subject"),

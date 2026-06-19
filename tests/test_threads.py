@@ -299,6 +299,32 @@ def test_send_when_enabled_builds_and_dispatches(tmp_path, monkeypatch):
     assert msg["To"] == "alice@x.com" and msg["Subject"] == "Re: Hi" and "thanks" in msg.get_content()
 
 
+def test_resolve_ui_and_route_for_flagged_thread(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import app.main as m
+    from clover import comprehend as cp, rules
+    from clover.comprehenders import StubComprehender
+    from clover.profiles import get_profile
+    _write_eml(tmp_path, "INBOX", "1", mid="a@x", subject="Hi")
+    th.build_threads(tmp_path, log=lambda *_: None)
+    t = th.read_threads(tmp_path)[0]
+    stub = StubComprehender(responses={
+        "classify": {"domain": "Project", "category": "Operation", "confidence": 0.3, "dispute": True},
+        "classify_full": {"domain": "Project", "category": "Operation", "confidence": 0.3, "dissent": "x"}})
+    cp.save_comprehension(tmp_path, cp.comprehend_thread(tmp_path, t, stub, get_profile()))  # -> consensus 'asked'
+    cfg = {"auth": {"imap": {}}, "folders": ["INBOX"], "archive_path": str(tmp_path),
+           "comprehension": {"profile": "construction"}}
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: dict(cfg))
+    c = TestClient(m.app)
+    html = c.get(f"/threads/{t['thread_id']}").text
+    assert "Resolve / reclassify" in html and "_tax =" in html          # resolve UI renders for a flagged thread
+    r = c.post(f"/threads/{t['thread_id']}/resolve",
+               data={"domain": "Project", "category": "Quality", "rule_type": "keyword", "rule_match": "foo"})
+    assert r.json()["ok"]
+    assert cp.get_comprehension(tmp_path, t["thread_id"])["classification"]["consensus"] == "resolved"
+    assert any(rl["match"] == "foo" for rl in rules.read_rules(tmp_path))   # learned rule saved
+
+
 def test_link_status_endpoint_resolves_before_thread_id(tmp_path, monkeypatch):
     from starlette.testclient import TestClient
     import app.main as m

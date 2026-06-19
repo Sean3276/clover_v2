@@ -23,6 +23,7 @@ from clover import contacts as contactsmod
 from clover import config as cfgmod
 from clover import linkshares as lsmod
 from clover import projects as projmod
+from clover import rules as rulesmod
 from clover import sender as sendermod
 from clover import threads as threadmod
 from clover.comprehenders import get_comprehender
@@ -398,6 +399,37 @@ def contacts_page(request: Request):
                                       {"cfg": cfg, "contacts": contactsmod.consolidate(_archive_dir(cfg))})
 
 
+@app.post("/threads/{thread_id}/resolve")
+def resolve_thread(thread_id: str, domain: str = Form(...), category: str = Form(...),
+                   rule_type: str = Form(""), rule_match: str = Form("")):
+    """Operator override of a flagged classification, optionally saving a learned rule."""
+    from datetime import datetime, timezone
+    arch = _archive_dir(cfgmod.load_config())
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not compmod.resolve_comprehension(arch, thread_id, domain.strip(), category.strip(), ts):
+        return JSONResponse({"ok": False, "message": "This thread isn't comprehended yet."}, status_code=404)
+    msg = f"Classification set to {domain.strip()} / {category.strip()}."
+    if rule_type.strip() and rule_match.strip():
+        if rulesmod.add_rule(arch, rule_type, rule_match, domain.strip(), category.strip(), ts):
+            msg += f" Rule added — {rule_type.strip()}: “{rule_match.strip()}” → {category.strip()}."
+        else:
+            msg += " (rule not added — check the value)"
+    return JSONResponse({"ok": True, "message": msg})
+
+
+@app.get("/rules", response_class=HTMLResponse)
+def rules_page(request: Request):
+    cfg = cfgmod.load_config()
+    return templates.TemplateResponse(request, "rules.html",
+                                      {"cfg": cfg, "rules": rulesmod.read_rules(_archive_dir(cfg))})
+
+
+@app.post("/rules/delete")
+def rules_delete(index: int = Form(...)):
+    rulesmod.delete_rule(_archive_dir(cfgmod.load_config()), index)
+    return JSONResponse({"ok": True, "message": "Rule deleted."})
+
+
 @app.post("/threads/rebuild")
 def threads_rebuild():
     cfg = cfgmod.load_config()
@@ -442,6 +474,7 @@ def thread_view(request: Request, thread_id: str):
     link_saved = [r for r in tlinks if r.get("status") == "downloaded" and r.get("file")]
     link_pending = sum(1 for r in tlinks if r.get("status") == "pending")
     link_needs_confirm = sum(1 for r in tlinks if r.get("status") == "needs-confirm")
+    _prof = get_profile(_comp_cfg(cfg).get("profile"))   # taxonomy for the Resolve selects
     # render only the lightweight header list from threads.jsonl; bodies load on demand below
     return templates.TemplateResponse(request, "thread_view.html", {
         "cfg": cfg, "thread": t,
@@ -450,6 +483,7 @@ def thread_view(request: Request, thread_id: str):
         "link_saved": link_saved, "link_pending": link_pending,
         "link_needs_confirm": link_needs_confirm,
         "sending_enabled": _sending_enabled(cfg),
+        "taxonomy": {d: _prof.categories(d) for d in _prof.domain_names()},
     })
 
 

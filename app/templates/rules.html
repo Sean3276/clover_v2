@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Classification rules · Clover v2{% endblock %}
+{% block body %}
+<p style="margin:0 0 6px"><a href="/threads" class="note">← Mail</a></p>
+<h1>Classification rules</h1>
+<p class="note">Rules you taught Clover when resolving threads. A matching rule classifies a thread
+  <strong>directly</strong> (no AI council); newest wins on conflict. Delete any to stop applying it.</p>
+{% if not rules %}
+<div class="card"><p class="note dim" style="margin:0">No rules yet — when you <strong>Resolve</strong> a flagged
+  thread (Mail → a conversation), you can save one.</p></div>
+{% else %}
+<div class="card">
+  <div class="tablewrap">
+  <table>
+    <tr><th>When a thread matches</th><th>Domain</th><th>Category</th><th>Added</th><th></th></tr>
+    {% for r in rules %}
+    <tr>
+      <td><span class="cbadge">{{ r.type }}</span> {{ r.match }}</td>
+      <td>{{ r.domain }}</td><td>{{ r.category }}</td>
+      <td class="note mono">{{ (r.ts or '')[:10] }}</td>
+      <td><button type="button" class="linkbtn" style="color:var(--red)" onclick="delRule({{ loop.index0 }})">Delete</button></td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  <div id="rulesMsg" class="msg"></div>
+</div>
+<script>
+async function delRule(i){
+  if(!confirm('Delete this rule? Threads will no longer auto-classify from it.')) return;
+  try{
+    await fetch('/rules/delete', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body: new URLSearchParams({index: i})});
+    location.reload();
+  }catch(e){ const m=document.getElementById('rulesMsg'); if(m){ m.className='msg err'; m.style.display='block'; m.textContent='Failed: '+e; } }
+}
+</script>
+{% endif %}
+{% endblock %}

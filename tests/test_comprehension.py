@@ -169,6 +169,30 @@ def test_qaqc_fails_when_a_fact_is_ungrounded(tmp_path):
     assert rec["verified"]["facts_ok"] is False and rec["qaqc"]["needs_review"] is True
 
 
+# ---------------------------------------------------------------- learned rules + resolve
+def test_rule_classifies_directly_without_council(tmp_path):
+    from clover import rules
+    t = _one_thread(tmp_path, body_a="please process the retention sum release")
+    rules.add_rule(tmp_path, "keyword", "retention sum", "Project", "Commercial")
+    stub = StubComprehender()
+    c = cp.comprehend_thread(tmp_path, t, stub, get_profile())["classification"]
+    assert c["consensus"] == "rule" and c["council"] == "rule" and c["category"] == "Commercial"
+    assert "classify" not in stub.calls                # AI council was skipped by the rule
+
+
+def test_resolve_overrides_classification_and_clears_flag(tmp_path):
+    t = _one_thread(tmp_path)
+    stub = StubComprehender(responses={
+        "classify": {"domain": "Project", "category": "Operation", "confidence": 0.3, "dispute": True},
+        "classify_full": {"domain": "Project", "category": "Operation", "confidence": 0.3, "dissent": "x"}})
+    rec = cp.comprehend_thread(tmp_path, t, stub, get_profile())
+    cp.save_comprehension(tmp_path, rec)
+    assert rec["classification"]["consensus"] == "asked"
+    assert cp.resolve_comprehension(tmp_path, t["thread_id"], "Project", "Quality", "2026-06-19T00:00:00Z")
+    got = cp.get_comprehension(tmp_path, t["thread_id"])["classification"]
+    assert got["domain"] == "Project" and got["category"] == "Quality" and got["consensus"] == "resolved"
+
+
 # ---------------------------------------------------------------- runner
 def test_run_idempotent(tmp_path):
     _one_thread(tmp_path)

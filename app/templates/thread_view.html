@@ -91,6 +91,38 @@
   </div>
   {% endif %}
   {% if comp.verified and not comp.verified.facts_ok %}<p class="note dim" style="margin-top:8px">⚠ Some extracted facts weren't found in the thread and were dropped.</p>{% endif %}
+  {% if comp.classification.consensus in ('asked', 'rule', 'resolved') or (comp.qaqc and comp.qaqc.needs_review) %}
+  <details class="resolvebox" style="margin-top:10px"{% if comp.qaqc and comp.qaqc.needs_review or comp.classification.consensus == 'asked' %} open{% endif %}>
+    <summary class="note" style="cursor:pointer">✎ Resolve / reclassify{% if comp.classification.consensus in ('asked',) or (comp.qaqc and comp.qaqc.needs_review) %} — this thread needs your decision{% endif %}</summary>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:8px">
+      <div><label for="rDomain" style="margin:0 0 3px">Domain</label><select id="rDomain" onchange="rCats()" style="width:auto">{% for d in taxonomy %}<option{% if d == comp.classification.domain %} selected{% endif %}>{{ d }}</option>{% endfor %}</select></div>
+      <div><label for="rCat" style="margin:0 0 3px">Category</label><select id="rCat" style="width:auto"></select></div>
+    </div>
+    <label style="display:flex;gap:8px;align-items:center;margin:10px 0 0;text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink);cursor:pointer">
+      <input type="checkbox" id="rMakeRule" onchange="document.getElementById('rRuleWrap').style.display=this.checked?'flex':'none'" style="width:auto;margin:0;flex:none"> also make a rule so similar threads auto-classify</label>
+    <div id="rRuleWrap" style="display:none;gap:8px;flex-wrap:wrap;margin-top:6px">
+      <select id="rRuleType" style="width:auto"><option value="keyword">keyword in thread</option><option value="sender">sender</option><option value="project">project</option></select>
+      <input id="rRuleMatch" placeholder="value, e.g. retention sum / @acme.com / Marina Bridge" style="flex:1;min-width:200px">
+    </div>
+    <div class="tbar" style="margin-top:10px"><button type="button" onclick="resolveThread()">Save classification</button>
+      <a href="/rules" class="note">manage rules →</a><span id="rMsg" class="note dim"></span></div>
+  </details>
+  <script>
+    var _tax = {{ taxonomy|tojson }};
+    function rCats(){ var d=document.getElementById('rDomain').value, sel=document.getElementById('rCat'), cur="{{ comp.classification.category }}"; sel.innerHTML="";
+      (_tax[d]||[]).forEach(function(c){ var o=document.createElement('option'); o.textContent=c; if(c===cur) o.selected=true; sel.appendChild(o); }); }
+    async function resolveThread(){
+      var fd=new URLSearchParams({domain:document.getElementById('rDomain').value, category:document.getElementById('rCat').value});
+      if(document.getElementById('rMakeRule').checked){ fd.set('rule_type',document.getElementById('rRuleType').value); fd.set('rule_match',document.getElementById('rRuleMatch').value); }
+      var m=document.getElementById('rMsg'); if(m){ m.className='note dim'; m.textContent='Saving…'; }
+      try{ var res=await (await fetch(location.pathname+'/resolve',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:fd})).json();
+        if(m){ m.className='msg '+(res.ok?'ok':'err'); m.style.display='block'; m.textContent=res.message; }
+        if(res.ok) setTimeout(function(){location.reload();},1300);
+      }catch(e){ if(m) m.textContent='Failed: '+e; }
+    }
+    rCats();
+  </script>
+  {% endif %}
 </div>
 {% else %}
 <div class="card comp">

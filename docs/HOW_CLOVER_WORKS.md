@@ -144,6 +144,13 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 - **Does:** runs the AI comprehension pipeline (4-tier cascade + facts + a 5/10-member classification council) and stores the result in `comprehension.jsonl`; the thread then shows the 🍀 stamp.
 - **QAQC gate:** after building, an **AI reviewer** scores the comprehension against the source (faithfulness + completeness) and the deterministic fact-check must pass; on failure it **re-comprehends once**, and if it still fails the thread is marked **"needs review"** (badge on Mail + the thread, audit-logged) — never silently shipped. *(Detail: `CLOVER_V2_PHASE3_SPEC.md`.)*
 
+### Action: **Resolve a flagged classification + learned rules** · `POST /threads/{id}/resolve` · `GET /rules`
+- **Trigger:** on a flagged thread (`asked` or needs-review), a **Resolve / reclassify** control: pick
+  domain → category; optionally **make a rule** (keyword / sender / project → category).
+- **Does:** overrides that thread's classification (`consensus: "resolved"`, flag cleared). A saved rule
+  goes to `<archive>/rules.jsonl` and thereafter classifies matching threads **directly** (no AI council,
+  `consensus: "rule"`). Rules are inspectable + deletable at **/rules** (Mail → Maintenance → Classification rules).
+
 ### Action: **Projects** · `GET /projects` → `GET /projects/{key}`
 - **Does:** groups **comprehended** conversations by their extracted project name (`facts.project`),
   normalizing spelling/case so variants merge. The list shows each project + thread count + categories;
