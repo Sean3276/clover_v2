@@ -1,8 +1,10 @@
 # 🍀 Clover v2 — Phase 2 Spec: Per-thread organization + Threads browser
 
-> Status: **approved, not yet built**. Authoritative design for Phase 2. Consumes Phase 1's
+> Status: **BUILT** (created 2026-06-18; this doc captures the *design intent*). Consumes Phase 1's
 > `.eml` archive + `_index.jsonl`; produces `threads.jsonl` (the unit Phase 3 comprehends).
-> Created 2026-06-18.
+> **For what it actually does today, see [`HOW_CLOVER_WORKS.md`](HOW_CLOVER_WORKS.md).**
+> Note: two items listed below as *out of scope* — **attachment view/download** and **link-share
+> download** — were **since added** (in the Threads reader and as a Phase 1 add-on respectively).
 
 ## Purpose
 

@@ -2,6 +2,7 @@
 
 A mail-archive → comprehension → intelligence pipeline. **📍 Full plan:
 [docs/CLOVER_V2_ROADMAP.md](docs/CLOVER_V2_ROADMAP.md)** (5 phases + 2 cross-cutting tracks).
+**What it does today (per action): [docs/HOW_CLOVER_WORKS.md](docs/HOW_CLOVER_WORKS.md).**
 
 **Status:** Phase 1 (archiving), Phase 2 (per-thread organization), and Phase 3
 (comprehension) implemented; Phases 4–5 planned. Pluggable mail sources

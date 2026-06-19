@@ -117,6 +117,8 @@
           <label>Date</label>
           <select id="dateSel" onchange="onDate()">
             <option value="all">All time</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="3">Last 3 days</option>
             <option value="7">Last 7 days</option>
             <option value="30">Last 30 days</option>
             <option value="90">Last 90 days</option>
@@ -199,7 +201,9 @@ function onDate(){
   document.querySelectorAll(".custom-date").forEach(el => el.style.display = (v==="custom") ? "" : "none");
   if(v==="custom") return;                       // user types the range
   if(v==="all"){ f.value=""; t.value=""; return; }
-  const now=new Date(); t.value=ymd(now);
+  const now=new Date();
+  if(v==="yesterday"){ const y=new Date(); y.setDate(now.getDate()-1); f.value=ymd(y); t.value=ymd(y); return; }
+  t.value=ymd(now);
   if(v==="year"){ f.value = now.getFullYear()+"-01-01"; }
   else { const from=new Date(); from.setDate(now.getDate()-(parseInt(v,10)-1)); f.value=ymd(from); }
 }

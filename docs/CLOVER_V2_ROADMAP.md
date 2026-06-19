@@ -74,7 +74,13 @@ Pull every email from selected mailbox locations into a faithful local `.eml` ar
    rows == files on disk) surfaced in the UI.
 
 **Output:** `<archive>/<folder>/<message-id>.eml` + `_index.jsonl`
-`{id, folder, uid, uidvalidity, from, subject, date, path, size, sha256}`.
+`{id, folder, key (UID), validity (UIDVALIDITY), from, subject, date, path, size, sha256}`.
+
+> **Built ✅** incl. date/size **selection filters** (All time · Yesterday · Last 3 days · Last 7/30/90 ·
+> This year · Custom; size: any / min MB / largest-N) and a **reconcile/integrity** check. **Add-on:**
+> share-link **harvest + download** (SharePoint/OneDrive, Drive, Dropbox, WeTransfer, Box) with
+> URL-dedup + a size-confirm gate. A **one-click installer** (`run_clover.bat`) sets everything up.
+> Runtime behaviour: [`HOW_CLOVER_WORKS.md`](HOW_CLOVER_WORKS.md).
 
 **Acceptance:** every selected message on disk as valid `.eml`; index reconciles; re-run
 is idempotent; no message marked seen; no credential logged.
@@ -82,7 +88,7 @@ is idempotent; no message marked seen; no credential logged.
 ---
 
 ## Phase 2 — Per-thread organization
-**`disorganized .eml  →  organized thread archive`** · automation · ⬜ (spec approved 2026-06-18 — see [CLOVER_V2_PHASE2_SPEC.md](CLOVER_V2_PHASE2_SPEC.md))
+**`disorganized .eml  →  organized thread archive`** · automation · ✅ **BUILT** (see [CLOVER_V2_PHASE2_SPEC.md](CLOVER_V2_PHASE2_SPEC.md) for design, [HOW_CLOVER_WORKS.md](HOW_CLOVER_WORKS.md) for behaviour)
 
 Turn the flat `.eml` pile into linked, chronological **thread trees**. No AI. Decided: header-only
 linking (deterministic; subject/semantic grouping deferred to P4), `threads.jsonl` index, and a thin
@@ -109,7 +115,7 @@ any time without touching the `.eml` files).
 ---
 
 ## Phase 3 — Comprehension
-**`organized thread archive  →  council-cleared comprehension`** · AI (local agent) · ⬜
+**`organized thread archive  →  council-cleared comprehension`** · AI (local agent) · ✅ **BUILT** (see [CLOVER_V2_PHASE3_SPEC.md](CLOVER_V2_PHASE3_SPEC.md))
 
 Read each thread tree and produce a quality-gated cascade of understanding. This is the
 **only** phase that needs the AI. Each output passes a **2-tier council** (small accuracy
@@ -243,11 +249,15 @@ Each phase is independently **re-runnable** over the previous phase's on-disk ou
 can re-organize (P2), re-comprehend (P3), or re-cluster issues (P4) without re-fetching mail.
 
 ## Current status snapshot
-- **P1:** IMAP prototype **built, reviewed, live-run & byte-certified** on a real mailbox
-  (Trash + Sent archived, reconciled). **Date/size selection filters added** (2026-06-18).
-  Pending: the full provider suite + a built-in reconcile/verify panel.
-- **P2–P5:** not started (P4, P5 conceptual; approaches proposed above). P2 (per-thread
-  organization, option C: data + thin Threads browser) is approved and queued next.
+- **P1:** IMAP **built, reviewed, live-run & byte-certified** on a real mailbox (Trash + Sent
+  archived, reconciled). **Date/size filters** (incl. Yesterday / Last 3 days) + **reconcile panel**
+  shipped. **Add-on shipped:** share-link **harvest + download** (URL-dedup + size-confirm gate) and a
+  **one-click installer**. Pending: the full provider suite; a full-corpus link fetch.
+- **P2:** ✅ **built** — header-only threading + stitched Threads reader, attachment view/download,
+  cross-folder dedup. (See [HOW_CLOVER_WORKS.md](HOW_CLOVER_WORKS.md).)
+- **P3:** ✅ **built** — per-thread comprehension (4-tier + council + fact verification); pending: QAQC
+  gate, project-name classification, contact consolidation.
+- **P4–P5:** not started (conceptual; approaches proposed above).
 
 ## Open decisions (summary)
 1. ✅ **Decided.** Phase 1: IMAP first; full provider suite (table above) developed one by one;
