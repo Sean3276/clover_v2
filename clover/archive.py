@@ -8,7 +8,8 @@ later). Saves raw RFC822 (legal-grade, embedded attachments included) at
 Resilient: a hung fetch is force-timed-out; a dropped connection is reconnected with backoff;
 if it cannot be re-established the run STOPS cleanly (re-run resumes) rather than cascading.
 
-NOTE: .eml contains EMBEDDED attachments in full, but NOT link-shared files — later phase.
+NOTE: .eml contains EMBEDDED attachments in full; link-shared files (Dropbox/Drive/etc.) are
+captured separately by clover.linkshares (link_shares.jsonl + <archive>/_linkfiles/).
 """
 from __future__ import annotations
 
