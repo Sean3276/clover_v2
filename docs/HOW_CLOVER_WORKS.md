@@ -12,7 +12,7 @@
 
 ```
 IMAP mailbox ──(Phase 1)──► local .eml archive ──(Phase 2)──► thread trees ──(Phase 3)──► comprehension
-                 archive            _index.jsonl       threads.jsonl          comprehensions.jsonl
+                 archive            _index.jsonl       threads.jsonl          comprehension.jsonl
 ```
 
 - **Phase 1 = ingestion** (deterministic, read-only): copy mail to `.eml`, catalogue share links, download link files.
@@ -31,7 +31,7 @@ IMAP mailbox ──(Phase 1)──► local .eml archive ──(Phase 2)──�
    threads.jsonl                Phase 2 thread index
    link_shares.jsonl            catalogue of share links found in the mail
    _linkfiles/<message-id>/…    files downloaded from share links
-   comprehensions.jsonl         Phase 3 output (if run)
+   comprehension.jsonl          Phase 3 output (if run)
 ```
 
 ---
@@ -126,7 +126,7 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 
 ### Action: **Comprehend** · `POST /threads/{id}/comprehend` (Phase 3 entry point)
 - **Trigger:** *Comprehend* on a thread.
-- **Does:** runs the AI comprehension pipeline for that thread and stores the result in `comprehensions.jsonl`; the thread then shows the 🍀 stamp. *(Behaviour detailed in `CLOVER_V2_PHASE3_SPEC.md`.)*
+- **Does:** runs the AI comprehension pipeline for that thread and stores the result in `comprehension.jsonl`; the thread then shows the 🍀 stamp. *(Behaviour detailed in `CLOVER_V2_PHASE3_SPEC.md`.)*
 
 ---
 

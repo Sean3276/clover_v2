@@ -80,7 +80,7 @@ Pull every email from selected mailbox locations into a faithful local `.eml` ar
 > This year · Custom; size: any / min MB / largest-N) and a **reconcile/integrity** check. **Add-on:**
 > share-link **harvest + download** (SharePoint/OneDrive, Drive, Dropbox, WeTransfer, Box) with
 > URL-dedup + a size-confirm gate. A **one-click installer** (`run_clover.bat`) sets everything up.
-> Runtime behaviour: [`HOW_CLOVER_WORKS.md`](HOW_CLOVER_WORKS.md).
+> Design: [`CLOVER_V2_PHASE1_SPEC.md`](CLOVER_V2_PHASE1_SPEC.md) · behaviour: [`HOW_CLOVER_WORKS.md`](HOW_CLOVER_WORKS.md).
 
 **Acceptance:** every selected message on disk as valid `.eml`; index reconciles; re-run
 is idempotent; no message marked seen; no credential logged.
