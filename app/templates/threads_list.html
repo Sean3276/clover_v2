@@ -48,7 +48,7 @@
     {{ link_stats.get('dead', 0) }} dead{% if link_stats.get('needs-confirm', 0) %},
     <strong style="color:var(--amber)">{{ link_stats['needs-confirm'] }} large — open the thread to confirm</strong>{% endif %}.<span id="lsLive" class="dim"></span></span>
   <button id="fetchBtn" type="button" onclick="fetchLinks()"{% if not link_stats.get('pending', 0) %} style="display:none"{% endif %} title="Download every not-yet-downloaded link file in your archive (headless browser, runs in the background)">⬇ Download <span id="fetchN">{{ link_stats.get('pending', 0) }}</span> pending</button>
-  <button id="stopLinksBtn" type="button" class="ghost" onclick="stopLinks()" title="Halt a running download">⏹ Stop</button>
+  <button id="stopLinksBtn" type="button" class="ghost" onclick="stopLinks()" title="Halt a running download" style="display:none">⏹ Stop</button>
 </div>
 {% endif %}
 <details style="margin-top:10px">
@@ -159,6 +159,7 @@ async function pollLinks(){
     if($("lsPending")) $("lsPending").textContent = st.pending || 0;
     const fb = $("fetchBtn"), fn = $("fetchN");
     if(fb){ if(st.pending){ fb.style.display = ""; if(fn) fn.textContent = st.pending; } else { fb.style.display = "none"; } }
+    const sb = $("stopLinksBtn"); if(sb) sb.style.display = s.running ? "" : "none";
     const live = $("lsLive");
     if(s.running){ if(live) live.innerHTML = ' · <span class="clover-spin">🍀</span> downloading…';
       clearTimeout(_linkPoll); _linkPoll = setTimeout(pollLinks, 3000); }

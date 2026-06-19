@@ -60,21 +60,33 @@ def link_shares_path(archive_path) -> Path:
     return Path(archive_path) / "link_shares.jsonl"
 
 
+_shares_cache: dict = {}     # path -> (mtime_ns, rows); avoids re-parsing the whole catalogue per request
+
+
 def read_link_shares(archive_path) -> list[dict]:
+    """Parsed link_shares.jsonl, cached by file mtime. Callers treat the result as read-only
+    (the only mutator, _update_records, copies first)."""
     p = link_shares_path(archive_path)
+    if not p.exists():
+        return []
+    key = str(p)
+    mtime = p.stat().st_mtime_ns
+    hit = _shares_cache.get(key)
+    if hit and hit[0] == mtime:
+        return hit[1]
     out = []
-    if p.exists():
-        with p.open(encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    o = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(o, dict):
-                    out.append(o)
+    with p.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                o = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(o, dict):
+                out.append(o)
+    _shares_cache[key] = (mtime, out)
     return out
 
 
@@ -131,7 +143,7 @@ def harvest(archive_path, log=print) -> dict:
 # ---------------------------------------------------------------- download (4b/4c)
 def _update_records(archive_path, updates: dict) -> None:
     """Rewrite link_shares.jsonl applying {(message_id, url): {...}} status/file updates."""
-    recs = read_link_shares(archive_path)
+    recs = [dict(r) for r in read_link_shares(archive_path)]   # copy: never mutate cached rows
     for r in recs:
         u = updates.get((r.get("message_id"), r.get("url")))
         if u:

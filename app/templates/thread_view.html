@@ -97,10 +97,13 @@
 </div>
 {% endif %}
 
-{% if link_saved or link_pending %}
+{% if link_saved or link_pending or link_needs_confirm %}
 <div class="tbar" style="margin-bottom:8px;flex-wrap:wrap">
   {% if link_pending %}
   <button id="threadFetchBtn" type="button" class="ghost" onclick="fetchThreadLinks()" title="Download the not-yet-saved files shared via links in this conversation">⬇ Download {{ link_pending }} linked file(s)</button>
+  {% endif %}
+  {% if link_needs_confirm %}
+  <button type="button" class="ghost" onclick="expandAll(true)" title="Large files need your confirmation — open the messages and click ‘Download anyway’" style="color:var(--amber);border-color:var(--amber)">⚠ {{ link_needs_confirm }} large file(s) to confirm</button>
   {% endif %}
   {% if link_saved %}
   <button type="button" class="ghost" onclick="toggleSavedFiles()" title="These link files are already downloaded and kept in your archive">📁 {{ link_saved|length }} file(s) downloaded</button>
@@ -204,8 +207,8 @@ document.addEventListener("click", async (e) => {   // "Download anyway" on an o
   try{
     const res = await (await fetch("/threads/confirm-link", {method:"POST",
       headers:{"Content-Type":"application/x-www-form-urlencoded"}, body})).json();
-    btn.textContent = res.ok ? "✓ queued — run Fetch files" : "failed";
-    if(!res.ok) btn.disabled = false;
+    if(res.ok){ btn.textContent = "✓ confirmed — downloading…"; fetchThreadLinks(); }   // actually start it
+    else { btn.textContent = "failed"; btn.disabled = false; }
   }catch(err){ btn.textContent = "failed"; btn.disabled = false; }
 });
 function jumpEnd(){ window.scrollTo({top: document.body.scrollHeight, behavior: "smooth"}); }

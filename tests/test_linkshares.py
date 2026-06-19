@@ -199,6 +199,18 @@ def test_fetch_links_oversize_needs_confirm_then_confirm(tmp_path):
     assert rec3["status"] == "downloaded" and (tmp_path / rec3["file"]).read_bytes() == b"BIGDATA"
 
 
+def test_read_link_shares_cache_invalidates_and_is_immutable(tmp_path):
+    _eml(tmp_path, "INBOX", "1", "a@x", "x https://www.dropbox.com/s/x/a.pdf")
+    ls.harvest(tmp_path, log=lambda *_: None)
+    r1 = ls.read_link_shares(tmp_path)
+    assert ls.read_link_shares(tmp_path) is r1            # cached (same object) while file unchanged
+    url = r1[0]["url"]
+    ls._update_records(tmp_path, {("a@x", url): {"status": "dead"}})
+    r2 = ls.read_link_shares(tmp_path)
+    assert r2 is not r1 and r2[0]["status"] == "dead"     # re-read after the write (mtime changed)
+    assert r1[0]["status"] == "pending"                  # _update_records did NOT mutate the cached rows
+
+
 def test_links_for_member_matches_by_path_for_headerless(tmp_path):
     # a headerless email's harvested record keys on the index id ('uid_<key>'), but its thread member
     # id is the 'path::<rel>' fallback — links_for_member must still surface it (matched by .eml path).

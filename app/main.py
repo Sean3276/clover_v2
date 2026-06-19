@@ -23,7 +23,7 @@ from clover import linkshares as lsmod
 from clover import threads as threadmod
 from clover.comprehenders import get_comprehender
 from clover.errors import friendly_conn_error
-from clover.paths import auto_clover_root, ensure_runtime, runtime_dir
+from clover.paths import auto_clover_root, ensure_runtime
 from clover.profiles import get_profile
 from clover.sources import SUITE, get_source
 
@@ -145,7 +145,7 @@ def archive_page(request: Request):
     return templates.TemplateResponse(request, "archive.html", {
         "cfg": cfg, "folders": folders, "folder_err": folder_err,
         "selected": set(cfg.get("folders") or []), "summary": summary,
-        "running": running, "runtime": str(runtime_dir()),
+        "running": running,
     })
 
 
@@ -398,12 +398,14 @@ def thread_view(request: Request, thread_id: str):
               if r.get("message_id") in mids or r.get("eml") in paths]
     link_saved = [r for r in tlinks if r.get("status") == "downloaded" and r.get("file")]
     link_pending = sum(1 for r in tlinks if r.get("status") == "pending")
+    link_needs_confirm = sum(1 for r in tlinks if r.get("status") == "needs-confirm")
     # render only the lightweight header list from threads.jsonl; bodies load on demand below
     return templates.TemplateResponse(request, "thread_view.html", {
         "cfg": cfg, "thread": t,
         "comp": compmod.get_comprehension(arch, thread_id),
         "ai_ready": _backend_available(cfg),
         "link_saved": link_saved, "link_pending": link_pending,
+        "link_needs_confirm": link_needs_confirm,
     })
 
 

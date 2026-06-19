@@ -221,21 +221,32 @@ def build_threads(archive_path, log=print) -> dict:
 
 
 # ---------------------------------------------------------------- readers (for the browser)
+_threads_cache: dict[str, tuple] = {}    # path -> (mtime_ns, rows); avoids re-parsing on every /msg/ open
+
+
 def read_threads(archive_path) -> list[dict]:
+    """Parsed threads.jsonl, cached by file mtime (callers treat the result as read-only)."""
     p = Path(archive_path) / "threads.jsonl"
+    if not p.exists():
+        return []
+    key = str(p)
+    mtime = p.stat().st_mtime_ns
+    hit = _threads_cache.get(key)
+    if hit and hit[0] == mtime:
+        return hit[1]
     out: list[dict] = []
-    if p.exists():
-        with p.open(encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    o = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(o, dict):
-                    out.append(o)
+    with p.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                o = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(o, dict):
+                out.append(o)
+    _threads_cache[key] = (mtime, out)
     return out
 
 
