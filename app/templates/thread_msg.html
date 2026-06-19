@@ -22,7 +22,7 @@
     <div class="note" style="margin:10px 0 5px">🔗 Linked files ({{ links|length }})</div>
     {% for l in links %}
     <div class="lrow"><span class="lprov">{{ l.provider }}</span>
-      {% if l.file %}<a href="/linkfile/{{ l.file }}" target="_blank" rel="noopener">⬇ saved file</a>
+      {% if l.file %}<a href="/linkfile/{{ l.file }}" target="_blank" rel="noopener">⬇ downloaded file</a>
       {% else %}<a href="{{ l.url }}" target="_blank" rel="noopener">{{ l.url }}</a>{% endif %}
       {% if l.status == 'needs-confirm' %}
         <span class="lsize">~{{ (l.size / 1073741824)|round(2) }} GB</span>

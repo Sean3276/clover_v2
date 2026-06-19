@@ -245,12 +245,12 @@ def test_thread_view_link_bar_pending_then_saved(tmp_path, monkeypatch):
     c = TestClient(m.app)
     tid = th.read_threads(tmp_path)[0]["thread_id"]
 
-    r1 = c.get(f"/threads/{tid}")                       # nothing saved yet -> download button, no saved view
-    assert "Download 2 linked file(s)" in r1.text and "file(s) already saved" not in r1.text
+    r1 = c.get(f"/threads/{tid}")                       # nothing downloaded yet -> download button, no view
+    assert "Download 2 linked file(s)" in r1.text and "file(s) downloaded" not in r1.text
 
     ls.fetch_links(tmp_path, fetcher=lambda u, p: ("downloaded", "f.pdf", b"X"), log=lambda *_: None)
-    r2 = c.get(f"/threads/{tid}")                       # both saved -> view appears, download button gone
-    assert "file(s) already saved" in r2.text and "/linkfile/" in r2.text
+    r2 = c.get(f"/threads/{tid}")                       # both downloaded -> view appears, download button gone
+    assert "file(s) downloaded" in r2.text and "/linkfile/" in r2.text
     assert "Download 2 linked file(s)" not in r2.text   # don't offer to re-fetch what's already kept
 
 

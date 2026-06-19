@@ -102,13 +102,13 @@
   <button id="threadFetchBtn" type="button" class="ghost" onclick="fetchThreadLinks()" title="Download the not-yet-saved files shared via links in this conversation">⬇ Download {{ link_pending }} linked file(s)</button>
   {% endif %}
   {% if link_saved %}
-  <button type="button" class="ghost" onclick="toggleSavedFiles()" title="These link files are already kept in your archive">📁 {{ link_saved|length }} file(s) already saved</button>
+  <button type="button" class="ghost" onclick="toggleSavedFiles()" title="These link files are already downloaded and kept in your archive">📁 {{ link_saved|length }} file(s) downloaded</button>
   {% endif %}
   <span id="threadFetchMsg" class="note dim"></span>
 </div>
 {% if link_saved %}
 <div id="savedFiles" class="card" style="display:none;padding:12px 16px;margin-bottom:8px">
-  <div class="note" style="margin:0 0 6px">Already saved from links in this conversation:</div>
+  <div class="note" style="margin:0 0 6px">Downloaded from links in this conversation:</div>
   {% for r in link_saved %}
   <div class="lrow"><span class="lprov">{{ r.provider }}</span>
     <a href="/linkfile/{{ r.file }}" target="_blank" rel="noopener">⬇ {{ r.file.split('/')|last }}</a></div>

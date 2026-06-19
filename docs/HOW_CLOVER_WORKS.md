@@ -87,13 +87,13 @@ IMAP mailbox ──(Phase 1)──► local .eml archive ──(Phase 2)──�
 
 Many emails reference files behind share links (SharePoint/OneDrive, Google Drive, Dropbox, WeTransfer, Box) instead of attaching them. These actions catalogue and fetch those files so nothing is silently lost.
 
-### Action: **Harvest links** · `POST /threads/harvest-links`
-- **Trigger:** *🔗 Harvest links* on the Mail page.
+### Action: **Re-scan links** (harvest) · `POST /threads/harvest-links`
+- **Trigger:** *🔗 Re-scan links* under **⚙ Maintenance** on the Mail page (a fallback — harvesting runs automatically after each archive).
 - **Does:** scans every archived `.eml` body for share links, appends new ones to `link_shares.jsonl` (idempotent on `(message_id, url)`), each `status: "pending"`. Detection only — no downloads. Runs in the background.
 - **Output:** `link_shares.jsonl` rows `{message_id, folder, eml, provider, url, status, file, size, confirmed}`.
 
-### Action: **Fetch files** · `POST /threads/fetch-links`
-- **Trigger:** *⬇ Fetch files* on the Mail page.
+### Action: **Download pending links** (fetch all) · `POST /threads/fetch-links`
+- **Trigger:** *⬇ Download N pending* in the link-status bar on the Mail page (the home for the not-yet-downloaded backlog — e.g. mail archived before download-on-by-default). Shown only when N > 0.
 - **Does:** downloads `pending` links in the background:
   1. **URL-dedup (all outcomes):** each unique link is resolved **once** — a download is reused, and a `dead` / `needs-auth` / oversize result is reused too — so duplicate links never re-fetch. (On the real corpus ~85% of records are repeats, so this avoids almost all the work.)
   2. **Direct fast-path** (httpx) for Dropbox/Drive direct links, streamed; otherwise a **headless browser** (Playwright/Chromium) that dismisses cookie banners and clicks the provider's Download control.
@@ -107,7 +107,7 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 - **Does:** clears the size gate for that link and re-queues it (`confirmed`); the next *Fetch files* downloads it in full.
 
 ### Action: **Stop links** · `POST /threads/stop-links`
-- **Trigger:** *⏹ Stop links* on the Mail page.
+- **Trigger:** *⏹ Stop* in the link-status bar on the Mail page.
 - **Does:** halts the running link task (manual fetch *or* the Archive auto-download) — the in-flight link finishes, then it stops; progress so far is saved. Re-run *Fetch files* to continue.
 
 ### Action: **Open a saved / linked file** · `GET /linkfile/{path}`
@@ -123,7 +123,8 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 ### Action: **Open the Mail page** · `GET /threads`
 - **Does:** lists conversations from `threads.jsonl` (subject · participants · message count · date range), shows which are comprehended (🍀), and a **share-link status summary**. The index auto-builds after archiving new mail and auto-builds if missing.
 
-### Action: **Rebuild index** · `POST /threads/rebuild`
+### Action: **Rebuild conversations** (rebuild index) · `POST /threads/rebuild`
+- **Trigger:** *↻ Rebuild conversations* under **⚙ Maintenance** on the Mail page (a fallback — this runs automatically after each archive).
 - **Does:** re-links every `.eml` into threads by `Message-ID` / `In-Reply-To` / `References` (union-find; header-only; no AI, no network). **Cross-folder duplicates** (same Message-ID in Sent *and* Trash) become one thread member with multiple locations. Pure transform — identical result every run. Writes `threads.jsonl`.
 
 ### Action: **Open / read a thread** · `GET /threads/{id}` → `GET /threads/{id}/msg/{idx}`
@@ -136,7 +137,7 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 ### Action: **Download / view a conversation's linked files** · `POST /threads/{id}/fetch-links`
 - **Trigger:** in an open conversation, a state-aware bar (only when it has links):
   - *⬇ Download N linked file(s)* — shown only when N links are still **pending**; downloads just this conversation's messages (background, dedup + size-confirm, stoppable). **Never re-downloads files already kept** (fetch only touches `pending`).
-  - *📁 N file(s) already saved* — shown when files are already downloaded; toggles a list of them with open links (so you know they're kept and can open them).
+  - *📁 N file(s) downloaded* — shown when files are already downloaded; toggles a list of them with open links (so you know they're kept and can open them).
 
 ### Action: **Comprehend** · `POST /threads/{id}/comprehend` (Phase 3 entry point)
 - **Trigger:** *Comprehend* on a thread.

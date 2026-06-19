@@ -28,23 +28,7 @@
       chronological conversation <strong>across folders</strong> — your Sent copy, the inbound reply, and a
       filed or deleted copy in Trash all stitch into a single timeline. Click one to read it; conversations
       and their share links are built automatically after each archive.</p></div>
-  {% if has_index %}<span style="display:flex;gap:8px">
-    <button id="rebuildBtn" type="button" class="ghost" onclick="rebuild()">↻ Rebuild index</button>
-    <button id="harvestBtn" type="button" class="ghost" onclick="harvestLinks()" title="Detect & catalogue share links in your archive">🔗 Harvest links</button>
-    <button id="fetchBtn" type="button" class="ghost" onclick="fetchLinks()" title="Download catalogued link files (headless browser)">⬇ Fetch files</button>
-    <button id="stopLinksBtn" type="button" class="ghost" onclick="stopLinks()" title="Halt the running harvest/fetch (incl. auto-download started from Archive)">⏹ Stop links</button>
-  </span>{% endif %}
 </div>
-
-{% if link_total %}
-<p class="note linkstats">🔗 Share links: {{ link_total }} catalogued —
-  <strong>{{ link_stats.get('downloaded', 0) }}</strong> downloaded,
-  {{ link_stats.get('pending', 0) }} pending,
-  {{ link_stats.get('needs-auth', 0) }} need sign-in,
-  {{ link_stats.get('dead', 0) }} dead{% if link_stats.get('needs-confirm', 0) %},
-  <strong style="color:var(--amber)">{{ link_stats['needs-confirm'] }} large — open the thread to confirm download</strong>{% endif %}.
-</p>
-{% endif %}
 
 {% if not has_index %}
 <div class="card">
@@ -55,6 +39,29 @@
   <div id="rebuildMsg" class="msg"></div>
 </div>
 {% else %}
+{% if link_total %}
+<div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px;padding:12px 16px">
+  <span class="note linkstats" style="flex:1;min-width:240px">🔗 Share links: {{ link_total }} catalogued —
+    <strong>{{ link_stats.get('downloaded', 0) }}</strong> downloaded,
+    {{ link_stats.get('pending', 0) }} pending,
+    {{ link_stats.get('needs-auth', 0) }} need sign-in,
+    {{ link_stats.get('dead', 0) }} dead{% if link_stats.get('needs-confirm', 0) %},
+    <strong style="color:var(--amber)">{{ link_stats['needs-confirm'] }} large — open the thread to confirm</strong>{% endif %}.</span>
+  {% if link_stats.get('pending', 0) %}
+  <button id="fetchBtn" type="button" onclick="fetchLinks()" title="Download every not-yet-downloaded link file in your archive (headless browser, runs in the background)">⬇ Download {{ link_stats['pending'] }} pending</button>
+  {% endif %}
+  <button id="stopLinksBtn" type="button" class="ghost" onclick="stopLinks()" title="Halt a running download">⏹ Stop</button>
+</div>
+{% endif %}
+<details style="margin-top:10px">
+  <summary class="note" style="cursor:pointer">⚙ Maintenance — rebuild conversations / re-scan links (normally automatic after each archive)</summary>
+  <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+    <button id="rebuildBtn" type="button" class="ghost" onclick="rebuild()" title="Re-link emails into conversations">↻ Rebuild conversations</button>
+    <button id="harvestBtn" type="button" class="ghost" onclick="harvestLinks()" title="Re-scan the archive for share links">🔗 Re-scan links</button>
+  </div>
+</details>
+<div id="rebuildMsg" class="msg"></div>
+
 <div class="card">
   <div class="thtools">
     <input id="filter" type="text" placeholder="Filter by subject or participant…" oninput="apply()">
@@ -87,7 +94,6 @@
     </a>
     {% endfor %}
   </div>
-  <div id="rebuildMsg" class="msg"></div>
 </div>
 {% endif %}
 
