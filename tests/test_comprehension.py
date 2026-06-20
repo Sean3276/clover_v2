@@ -169,6 +169,25 @@ def test_qaqc_fails_when_a_fact_is_ungrounded(tmp_path):
     assert rec["verified"]["facts_ok"] is False and rec["qaqc"]["needs_review"] is True
 
 
+def test_floor_backfills_dropped_ref(tmp_path):
+    # the AI drops a reference that's plainly in the source -> the deterministic floor backfills it
+    t = _one_thread(tmp_path, body_a="Please action RFI-12 today.")
+    stub = StubComprehender(responses={"distill": {"abstract": "a", "summary": "s", "event": "e",
+        "facts": {"project": "", "parties": [], "refs": [], "dates": [], "amounts": []}}})
+    rec = cp.comprehend_thread(tmp_path, t, stub, get_profile())
+    assert "RFI-12" in rec["facts"]["refs"]
+    assert rec["verified"]["backfilled"].get("refs") == ["RFI-12"]
+
+
+def test_floor_does_not_duplicate_amount_in_other_format(tmp_path):
+    # AI captured the amount value (no currency); floor must NOT re-add it as a duplicate
+    t = _one_thread(tmp_path, body_a="The claim is SGD 1,250,000 in total.")
+    stub = StubComprehender(responses={"distill": {"abstract": "a", "summary": "s", "event": "e",
+        "facts": {"project": "", "parties": [], "refs": [], "dates": [], "amounts": ["1250000"]}}})
+    rec = cp.comprehend_thread(tmp_path, t, stub, get_profile())
+    assert rec["facts"]["amounts"] == ["1250000"]          # not duplicated as 'SGD 1250000'
+
+
 def test_distill_verification_flags_unfaithful_abstract(tmp_path):
     # step 8 (ii)-(iv) vs (i): a drifting abstract flags the task even when the comprehension itself passes
     stub = StubComprehender(responses={"verify_distill": {

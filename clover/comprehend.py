@@ -418,6 +418,22 @@ def _build_once(archive, thread, backend, profile, max_chars, model):
 
     distilled = backend.generate("distill", _distill_prompt(comprehension, profile), schema=_DISTILL_SCHEMA) or {}
     facts, dropped = _verify_facts(distilled.get("facts") or {}, full)
+    # Deterministic floor backfill (recall fix): add every catchable ref/date/amount the AI dropped
+    # but a rule finds in the SOURCE. Body-only (strip each message's From:/Date: header line) so the
+    # email's own send-date is never injected as a content fact. Backfilled atoms are grounded by
+    # construction (they came from the source) and recorded in verified.backfilled.
+    from .eval import scorer as _scorer
+    floor_src = "\n\n".join(m.split("\n", 1)[1] if "\n" in m else m for m in msgs)
+    floor = _scorer.crosscheck_floor(floor_src, facts)
+    backfilled = {}
+    _have_amt_digits = {re.sub(r"\D", "", str(a)) for a in facts.get("amounts", [])}
+    for _k in ("refs", "dates", "amounts"):
+        _miss = floor[_k]["missed"]
+        if _k == "amounts":          # don't duplicate an amount the AI already has in another format
+            _miss = [m for m in _miss if re.sub(r"\D", "", m) not in _have_amt_digits]
+        if _miss:
+            facts.setdefault(_k, []).extend(_miss)
+            backfilled[_k] = _miss
     ruled = rulesmod.match(archive, text=full, project=facts.get("project", ""),
                            senders=[m.get("from", "") for m in thread.get("members", [])])
     if ruled:                                            # a learned rule wins deterministically — no AI council
@@ -440,7 +456,7 @@ def _build_once(archive, thread, backend, profile, max_chars, model):
         "classification": classification,
         "method": method, "model": model, "profile": profile.name,
         "verified": {"facts_ok": not dropped, "dropped_facts": dropped,
-                     "grounded": bool(comprehension)},
+                     "grounded": bool(comprehension), "backfilled": backfilled},
     }
     return rec, full
 
