@@ -11,6 +11,11 @@ def test_refs_keep_leading_zeros_and_skip_stopwords():
     assert ex.extract_refs("rfi 12") == []                                # lowercase prefix = known floor gap
 
 
+def test_refs_do_not_swallow_currency_amounts():
+    # currency codes adjacent to numbers must NOT become refs (SGD 1,000 / USD 500)
+    assert ex.extract_refs("budget SGD 1,000 and USD 500 for RFI-7") == ["RFI-7"]
+
+
 def test_dates_normalised_to_iso():
     d = ex.extract_dates("Due 14 Mar 2025; logged 2025-03-14; sent 03/04/2025; dated March 5, 2025.")
     assert "2025-03-14" in d            # '14 Mar 2025' and ISO collapse to one

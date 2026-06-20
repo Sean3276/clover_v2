@@ -15,7 +15,10 @@ import re
 # Prefix is UPPERCASE 2–6 letters (the convention for project codes); lowercase variants
 # are a known floor gap to refine against gold. Digits are kept verbatim (SOI-018 ≠ SOI-18).
 _REF = re.compile(r"\b([A-Z]{2,6})[-/ ]?(\d{1,6})\b")
-_REF_STOP = {"ISO", "COVID", "MP", "H", "CO"}          # common non-ref letter+digit tokens
+# common letter+digit tokens that are NOT reference numbers — notably currency codes, which
+# otherwise mis-read "SGD 1,000" -> "SGD-1". (Amounts are handled by extract_amounts.)
+_REF_STOP = {"ISO", "COVID", "MP", "H", "CO",
+             "SGD", "USD", "EUR", "GBP", "MYR", "RMB", "CNY", "RM", "US", "EU"}
 
 
 def extract_refs(text: str) -> list[str]:
