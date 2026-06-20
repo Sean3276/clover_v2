@@ -16,6 +16,15 @@ def test_refs_do_not_swallow_currency_amounts():
     assert ex.extract_refs("budget SGD 1,000 and USD 500 for RFI-7") == ["RFI-7"]
 
 
+def test_refs_word_separator_no():
+    # "TQ no. 3" / "CTR No. 5" — a word sits between prefix and number
+    assert ex.extract_refs("refer to TQ no. 3 and CTR No. 5") == ["TQ-3", "CTR-5"]
+
+
+def test_dates_dotted_format():
+    assert ex.extract_dates("report as of 15.06.2026") == ["2026-06-15"]   # DD.MM.YYYY, day-first
+
+
 def test_dates_normalised_to_iso():
     d = ex.extract_dates("Due 14 Mar 2025; logged 2025-03-14; sent 03/04/2025; dated March 5, 2025.")
     assert "2025-03-14" in d            # '14 Mar 2025' and ISO collapse to one

@@ -20,16 +20,19 @@ _REF = re.compile(r"\b([A-Z]{2,6})[-/ ]?(\d{1,6})\b")
 # otherwise mis-read "SGD 1,000" -> "SGD-1". (Amounts are handled by extract_amounts.)
 _REF_STOP = {"ISO", "COVID", "MP", "H", "CO",
              "SGD", "USD", "EUR", "GBP", "MYR", "RMB", "CNY", "RM", "US", "EU"}
+# also catch a word separator between prefix and number: "TQ no. 3" / "CTR No. 5" -> TQ-3 / CTR-5
+_REF_NO = re.compile(r"\b([A-Z]{2,6})\s+[Nn]o\.?\s*(\d{1,6})\b")
 
 
 def extract_refs(text: str) -> list[str]:
     """Canonical ``PREFIX-N`` (uppercase prefix, separator normalised, leading zeros stripped)."""
     out: dict[str, None] = {}
-    for m in _REF.finditer(text or ""):
-        prefix = m.group(1).upper()
-        if prefix in _REF_STOP:
-            continue
-        out[f"{prefix}-{int(m.group(2))}"] = None          # leading zeros stripped: MCI-018 == MCI-18
+    for rx in (_REF, _REF_NO):
+        for m in rx.finditer(text or ""):
+            prefix = m.group(1).upper()
+            if prefix in _REF_STOP:
+                continue
+            out[f"{prefix}-{int(m.group(2))}"] = None      # leading zeros stripped: MCI-018 == MCI-18
     return list(out)
 
 
@@ -43,6 +46,7 @@ _DATE_ISO = re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b")
 _DATE_DMY = re.compile(r"\b(\d{1,2})\s*[-/ ]?\s*([A-Za-z]{3,9})\.?,?\s*(\d{4})\b")   # 14 Mar 2025
 _DATE_MDY = re.compile(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})\b")             # March 5, 2025
 _DATE_NUM = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")                            # 03/04/2025 (day-first)
+_DATE_DOT = re.compile(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b")                          # 15.06.2026 (day-first)
 # quoted-reply / header lines whose dates are reply machinery (the timestamp of a quoted email),
 # not content the to-do list needs — their dates are skipped.
 _NOISE_LINE = re.compile(r"(?i)^\s*(on\b.*\bwrote:|from:|sent:|to:|cc:|date:|subject:|-{2,}\s*original message)")
@@ -81,6 +85,8 @@ def extract_dates(text: str) -> list[str]:
                 add(_iso(m.group(3), mo, m.group(2)))
         for m in _DATE_NUM.finditer(line):
             add(_iso(m.group(3), m.group(2), m.group(1)))      # day-first: D/M/Y
+        for m in _DATE_DOT.finditer(line):
+            add(_iso(m.group(3), m.group(2), m.group(1)))      # day-first: D.M.Y
     return sorted(out)
 
 
