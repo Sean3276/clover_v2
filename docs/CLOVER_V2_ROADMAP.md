@@ -1,7 +1,15 @@
 # 🍀 Clover v2 — Development Roadmap
 
 > The authoritative phase plan for Clover v2. Supersedes the phase structure in
-> `history/CLOVER_V2_SPEC.md` (archived for reference). Last updated: 2026-06-18.
+> `history/CLOVER_V2_SPEC.md` (archived for reference). Last updated: 2026-06-20.
+>
+> **Quality bar:** comprehension quality (Phases 3–4) is governed by the measurable
+> [CLOVER_V2_COMPREHENSION_SPEC.md](CLOVER_V2_COMPREHENSION_SPEC.md) — a no-miss reliability
+> standard + benchmark suite whose PASS BARS gate the switch from manual to zero-touch auto-run.
+> **Operating model:** one operator-hosted machine running **local AI**, multi-tenant, 24/7; the
+> target is **zero-touch** (user imports mail → returns next day to finished gold-grade output).
+> **Build order:** per-stage reliability + the eval harness first, then the orchestration /
+> multi-tenant layer at the post–Phase-4 split.
 
 ## How many phases?
 
@@ -146,7 +154,7 @@ no output contradicts (i); structured `facts` extracted.
 ---
 
 ## Phase 4 — Per-issue tracking  💡 *conceptual — proposed approach below*
-**`comprehension  →  cross-thread issue registry`** · AI + deterministic rules
+**`comprehension  →  cross-thread issue registry + personalized action list`** · AI + deterministic rules
 
 An **issue** is a real-world matter (an EOT claim, a façade RFI chain, a payment dispute, an
 NCR→rectification→closeout) that can span **multiple threads / Message-IDs** over time.
@@ -168,9 +176,22 @@ Phase 2 links emails *within* a thread; Phase 4 links *threads into issues*.
    tags of all its threads. As new mail arrives, Phase 3 → match to an existing issue or
    spawn a new one; the issue's status + exposure update.
 
-**Output (proposed):** `issues.jsonl` — `{issue_id, title, type, project, status,
-references:[…], parties:[…], thread_ids:[…], timeline:[{date, event, thread_id}],
-cost_time_exposure, opened, last_update}`.
+**Two user-facing outputs (operator spec, 2026-06-20):**
+1. **Ongoing-issues register — grouped by classification.** Every open / in-progress issue,
+   sorted and grouped by its comprehension classification (domain › category + faceted tags), so
+   the operator sees the whole live landscape by type at a glance. The general overview.
+2. **Personalized action list — the no-miss deliverable.** A dedicated, per-user list of the
+   concrete actions the user must act on, distilled from issue state + the per-thread
+   `action_item` atoms. This is the highest-stakes output: governed by the **no-miss** bar in
+   [CLOVER_V2_COMPREHENSION_SPEC.md](CLOVER_V2_COMPREHENSION_SPEC.md) (CLOVER-NOMISS + resolvable
+   citations — nothing silently dropped), and it must clear that gate before it auto-runs.
+
+**Output (proposed):** `issues.jsonl` — `{issue_id, title, type, project, classification,
+status, references:[…], parties:[…], thread_ids:[…], timeline:[{date, event, thread_id}],
+cost_time_exposure, opened, last_update}` (the ongoing register, grouped by `classification`),
+plus per-user `action_list.jsonl` — `{action_id, issue_id, thread_id, what, owner, due,
+source:{message_id, span}, status}` — the no-miss deliverable: every item carries a resolvable
+citation and is governed by CLOVER-NOMISS in the comprehension spec.
 
 **Open questions for you:** (a) is "one governing reference = one issue" the right primary
 rule, or do some references share an issue? (b) how far back should an issue auto-absorb new
@@ -262,7 +283,10 @@ can re-organize (P2), re-comprehend (P3), or re-cluster issues (P4) without re-f
   (headers + AI-from-signatures, deduped), **5/10-member council**, and a **QAQC gate** (AI faithfulness/
   completeness review → auto-retry → 'needs-review' flag), and **operator resolve + learned rules**
   (override a flagged thread; save keyword/sender/project rules that classify directly). **Phase 3 complete.**
-- **P4–P5:** not started (conceptual; approaches proposed above).
+- **P4–P5:** not started (conceptual; approaches proposed above). **Quality gate:** P3/P4 output
+  quality is now governed by [CLOVER_V2_COMPREHENSION_SPEC.md](CLOVER_V2_COMPREHENSION_SPEC.md); the
+  **eval harness + gold set are built first**, and mass-comprehension of the backlog is gated on
+  clearing its PASS BARS (no silent misses).
 
 ## Open decisions (summary)
 1. ✅ **Decided.** Phase 1: IMAP first; full provider suite (table above) developed one by one;
