@@ -17,6 +17,7 @@ class Profile:
     safety_net: str                    # the high-stakes category (its miss is costliest)
     precedence: list = field(default_factory=list)   # ordered deterministic tie-break rules
     facets: dict = field(default_factory=dict)       # orthogonal tag vocabularies: facet -> [allowed values]
+    ref_examples: list = field(default_factory=list) # this domain's example reference identifiers (facts prompt)
 
     def domain_names(self) -> list:
         return list(self.domains)
@@ -76,9 +77,37 @@ CONSTRUCTION = Profile(
                      "Method Statement", "Schedule", "Report", "Certificate"],
         "Authority": ["BCA", "URA", "SCDF", "LTA", "PUB", "NEA", "NParks", "JTC"],
     },
+    # example ref identifiers for THIS domain (the facts prompt generalises beyond them — see
+    # comprehend_prompts.DISTILL_FACTS {REF_EXAMPLES}); a non-construction profile supplies its own.
+    ref_examples=["RFI", "NCR", "CR", "EOT", "VO", "SOI", "MCI", "IPC", "TQ", "CVI",
+                  "drawing no.", "contract no.", "PO no.", "clause/section no."],
 )
 
-PROFILES = {CONSTRUCTION.name: CONSTRUCTION}
+# Domain-neutral starter (industry-agnostic): a brand-new user with no preset gets generic taxonomy
+# /facets/refs and the engine learns their domain over time. Construction stays the shipped default
+# (existing data); a new tenant can select "generic" or a future per-industry preset.
+GENERIC = Profile(
+    name="generic",
+    description="Domain-neutral starter: Work vs Admin; learns the user's domain over time.",
+    domains={
+        "Work": ["Request", "Commitment", "Decision", "Issue", "Information"],
+        "Admin": ["Finance", "Scheduling", "People", "Compliance", "Vendor"],
+    },
+    safety_net="Issue",
+    precedence=[
+        {"if_any": ["urgent", "asap", "overdue", "escalate", "紧急", "逾期"], "then": "Issue"},
+        {"if_any": ["invoice", "payment", "purchase order", "quotation", "fee", "refund"],
+         "then": "Finance"},
+    ],
+    facets={
+        "Channel": ["Email", "Meeting", "Call", "Chat", "Document"],
+        "Stage": ["Request", "In Progress", "Blocked", "Done"],
+        "Artifact": ["Document", "Invoice", "Report", "Contract", "Schedule", "Ticket"],
+    },
+    ref_examples=["invoice no.", "PO no.", "ticket no.", "case/matter no.", "order no.", "ref no."],
+)
+
+PROFILES = {CONSTRUCTION.name: CONSTRUCTION, GENERIC.name: GENERIC}
 
 
 def get_profile(name: str | None = None) -> Profile:
@@ -89,7 +118,8 @@ def to_dict(p: Profile) -> dict:
     return {"name": p.name, "description": p.description,
             "domains": {k: list(v) for k, v in p.domains.items()},
             "safety_net": p.safety_net, "precedence": [dict(r) for r in p.precedence],
-            "facets": {k: list(v) for k, v in p.facets.items()}}
+            "facets": {k: list(v) for k, v in p.facets.items()},
+            "ref_examples": list(p.ref_examples)}
 
 
 def _clean_value_list(values) -> list:
@@ -133,7 +163,8 @@ def from_dict(d: dict) -> Profile:
         sn = allcats[0]
     return Profile(name=(str(d.get("name") or "").strip() or "custom"),
                    description=str(d.get("description") or "").strip(),
-                   domains=domains, safety_net=sn, precedence=prec, facets=facets)
+                   domains=domains, safety_net=sn, precedence=prec, facets=facets,
+                   ref_examples=_clean_value_list(d.get("ref_examples")))
 
 
 def effective_profile(cfg: dict | None) -> Profile:

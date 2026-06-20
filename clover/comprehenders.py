@@ -76,10 +76,10 @@ class StubComprehender(Comprehender):
             return r(prompt) if callable(r) else r
         if task in ("comprehend", "comprehend_refine"):
             return "Stub comprehension of the thread."
-        if task == "distill":
-            return {"abstract": "Stub abstract.", "summary": "Stub one-liner.",
-                    "event": "stub event",
-                    "facts": {"project": "", "parties": [], "refs": [], "dates": [], "amounts": []},
+        if task == "distill_facts":
+            return {"project": [], "facts": [], "contacts": []}
+        if task == "distill_summary":
+            return {"abstract": "Stub abstract.", "summary": "Stub one-liner.", "event": "stub event",
                     "tags": ["Discipline: M&E", "Artifact: RFI", "Made Up: Nonsense"]}
         if task in ("classify", "classify_full"):
             return {"domain": "Project", "category": "Commercial", "confidence": 0.9,
@@ -88,6 +88,8 @@ class StubComprehender(Comprehender):
             return {"passed": True, "faithfulness": 1.0, "completeness": 1.0, "issues": []}
         if task == "verify_distill":
             return {"passed": True, "abstract_ok": True, "summary_ok": True, "event_ok": True, "issues": []}
+        if task == "actions":
+            return {"actions": []}
         return {} if schema else ""
 
 

@@ -8,7 +8,8 @@ def test_refs_canonical_case_and_separator():
 
 def test_refs_strip_leading_zeros_and_skip_stopwords():
     assert ex.extract_refs("doc SOI-018 and SOI-18 per ISO9001") == ["SOI-18"]  # same ref collapses; ISO* skipped
-    assert ex.extract_refs("rfi 12") == []                                       # lowercase prefix = known floor gap
+    assert ex.extract_refs("rfi 12") == ["RFI-12"]                               # noun-anchored: lowercase gap now closed
+    assert ex.extract_refs("go 5 steps") == []                                   # non-ref noun still skipped (precision)
 
 
 def test_refs_do_not_swallow_currency_amounts():

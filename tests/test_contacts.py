@@ -142,7 +142,7 @@ def test_rebuild_merges_near_duplicate_company_names(tmp_path):
 
 def test_clean_name_strips_tag_and_rejects_domain():
     assert contacts._clean_name("Dan Goh | Initech SG", "derrick@initech.com") == "Dan Goh"
-    assert contacts._clean_name("Albert TANG (BCA)", "albert_tang@bca.gov.sg") == "Albert TANG"   # name == local-part is fine
+    assert contacts._clean_name("Albert TANG (AUTH)", "albert_tang@authority.example") == "Albert TANG"   # name == local-part is fine
     assert contacts._clean_name("VENDOR. COM", "projects@vendor.com") == ""           # domain, not a person
     assert contacts._clean_name("projects", "projects@x.com") == ""                               # role mailbox
 
@@ -230,7 +230,7 @@ def test_is_system_sender_examples():
     assert sys("billing@zoom.us") and sys("x@send.relay.app") and sys("y@mail.forma.autodesk.com")
     assert sys("rewards@foo.com") and sys("newsletter@foo.com")
     assert not sys("jane@gmail.com")            # free-mail person
-    assert not sys("alice@northwind.com") and not sys("info@stas.org.sg")   # real business mailboxes kept
+    assert not sys("alice@northwind.com") and not sys("info@globex.com")   # real business mailboxes kept
 
 
 def test_rebuild_does_not_merge_role_mailboxes(tmp_path):

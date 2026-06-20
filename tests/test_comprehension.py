@@ -55,23 +55,24 @@ def test_comprehend_thread_builds_full_record(tmp_path):
 
 def test_facts_verified_against_source(tmp_path):
     t = _one_thread(tmp_path, body_a="discussion regarding EOT-05 submission")
-    stub = StubComprehender(responses={"distill": {
-        "abstract": "a", "summary": "s", "event": "e",
-        "facts": {"project": "", "parties": [], "refs": ["EOT-05", "GHOST-99"],
-                  "dates": [], "amounts": []}}})
+    stub = StubComprehender(responses={"distill_facts": {
+        "project": [], "contacts": [],
+        "facts": [{"field": "ref", "value": "EOT-05", "cite": "M1"},
+                  {"field": "ref", "value": "GHOST-99", "cite": "M1"}]}})
     rec = cp.comprehend_thread(tmp_path, t, stub, get_profile())
     assert rec["facts"]["refs"] == ["EOT-05"]                 # present kept
     assert any("GHOST-99" in d for d in rec["verified"]["dropped_facts"])  # absent dropped
     assert rec["verified"]["facts_ok"] is False
+    assert {"field": "ref", "value": "EOT-05", "cite": "M1"} in rec["fact_sources"]  # citation trail kept
 
 
 def test_facts_strip_annotations_weekday_and_dedup(tmp_path):
     t = _one_thread(tmp_path, body_a="Tender on 14 March 2025 for S$878,000 re COB ID confirmed")
-    stub = StubComprehender(responses={"distill": {
-        "abstract": "a", "summary": "s", "event": "e",
-        "facts": {"project": "COB ID — interior fit-out", "parties": [], "refs": [],
-                  "dates": ["Fri 14 March 2025 — submission deadline", "14 March 2025"],
-                  "amounts": ["S$878,000 (excl GST)"]}}})
+    stub = StubComprehender(responses={"distill_facts": {
+        "project": [{"value": "COB ID — interior fit-out", "cite": "M1"}], "contacts": [],
+        "facts": [{"field": "date", "value": "Fri 14 March 2025 — submission deadline", "cite": "M1"},
+                  {"field": "date", "value": "14 March 2025", "cite": "M1"},
+                  {"field": "amount", "value": "S$878,000 (excl GST)", "cite": "M1"}]}})
     r = cp.comprehend_thread(tmp_path, t, stub, get_profile())
     assert r["facts"]["dates"] == ["14 March 2025"]        # weekday + annotation stripped, deduped
     assert r["facts"]["amounts"] == ["S$878,000"]          # trailing annotation stripped
@@ -81,18 +82,16 @@ def test_facts_strip_annotations_weekday_and_dedup(tmp_path):
 
 def test_amount_digit_fallback(tmp_path):
     t = _one_thread(tmp_path, body_a="the contract sum is S$1,250,000 total")
-    stub = StubComprehender(responses={"distill": {
-        "abstract": "a", "summary": "s", "event": "e",
-        "facts": {"project": "", "parties": [], "refs": [], "dates": [],
-                  "amounts": ["1250000"]}}})        # reformatted (no commas/currency) -> digit match
+    stub = StubComprehender(responses={"distill_facts": {  # reformatted (no commas/currency) -> digit match
+        "project": [], "contacts": [], "facts": [{"field": "amount", "value": "1250000", "cite": "M1"}]}})
     r = cp.comprehend_thread(tmp_path, t, stub, get_profile())
     assert r["facts"]["amounts"] == ["1250000"]
 
 
 def test_event_tag_truncated_to_30(tmp_path):
     t = _one_thread(tmp_path)
-    stub = StubComprehender(responses={"distill": {
-        "abstract": "a", "summary": "s", "event": "x" * 80, "facts": {}}})
+    stub = StubComprehender(responses={"distill_summary": {
+        "abstract": "a", "summary": "s", "event": "x" * 80, "tags": []}})
     rec = cp.comprehend_thread(tmp_path, t, stub, get_profile())
     assert len(rec["event"]) == 30
 
@@ -163,8 +162,8 @@ def test_qaqc_failure_retries_once_then_flags(tmp_path):
 
 def test_qaqc_fails_when_a_fact_is_ungrounded(tmp_path):
     t = _one_thread(tmp_path, body_a="a note with no references at all")
-    stub = StubComprehender(responses={"distill": {"abstract": "a", "summary": "s", "event": "e",
-        "facts": {"project": "", "parties": [], "refs": ["EOT-99"], "dates": [], "amounts": []}}})
+    stub = StubComprehender(responses={"distill_facts": {"project": [], "contacts": [],
+        "facts": [{"field": "ref", "value": "EOT-99", "cite": "M1"}]}})
     rec = cp.comprehend_thread(tmp_path, t, stub, get_profile())   # EOT-99 not in source -> dropped
     assert rec["verified"]["facts_ok"] is False and rec["qaqc"]["needs_review"] is True
 
@@ -172,8 +171,7 @@ def test_qaqc_fails_when_a_fact_is_ungrounded(tmp_path):
 def test_floor_backfills_dropped_ref(tmp_path):
     # the AI drops a reference that's plainly in the source -> the deterministic floor backfills it
     t = _one_thread(tmp_path, body_a="Please action RFI-12 today.")
-    stub = StubComprehender(responses={"distill": {"abstract": "a", "summary": "s", "event": "e",
-        "facts": {"project": "", "parties": [], "refs": [], "dates": [], "amounts": []}}})
+    stub = StubComprehender(responses={"distill_facts": {"project": [], "contacts": [], "facts": []}})
     rec = cp.comprehend_thread(tmp_path, t, stub, get_profile())
     assert "RFI-12" in rec["facts"]["refs"]
     assert rec["verified"]["backfilled"].get("refs") == ["RFI-12"]
@@ -182,8 +180,8 @@ def test_floor_backfills_dropped_ref(tmp_path):
 def test_floor_does_not_duplicate_amount_in_other_format(tmp_path):
     # AI captured the amount value (no currency); floor must NOT re-add it as a duplicate
     t = _one_thread(tmp_path, body_a="The claim is SGD 1,250,000 in total.")
-    stub = StubComprehender(responses={"distill": {"abstract": "a", "summary": "s", "event": "e",
-        "facts": {"project": "", "parties": [], "refs": [], "dates": [], "amounts": ["1250000"]}}})
+    stub = StubComprehender(responses={"distill_facts": {"project": [], "contacts": [],
+        "facts": [{"field": "amount", "value": "1250000", "cite": "M1"}]}})
     rec = cp.comprehend_thread(tmp_path, t, stub, get_profile())
     assert rec["facts"]["amounts"] == ["1250000"]          # not duplicated as 'SGD 1250000'
 
@@ -209,8 +207,7 @@ def test_attachment_content_reaches_the_floor(tmp_path):
         encoding="utf-8")
     th.build_threads(tmp_path, log=lambda *_: None)
     t = th.read_threads(tmp_path)[0]
-    stub = StubComprehender(responses={"distill": {"abstract": "a", "summary": "s", "event": "e",
-        "facts": {"project": "", "parties": [], "refs": [], "dates": [], "amounts": []}}})
+    stub = StubComprehender(responses={"distill_facts": {"project": [], "contacts": [], "facts": []}})
     rec = cp.comprehend_thread(tmp_path, t, stub, get_profile())
     assert "RFI-99" in rec["facts"]["refs"]                 # the ref was inside the attachment
 
@@ -232,6 +229,239 @@ def test_task_complete_only_when_all_layers_verify(tmp_path):
     assert rec["qaqc"]["distill_passed"] is True and rec["qaqc"]["needs_review"] is False
 
 
+# ---------------------------------------------------------------- actions / to-do extraction
+def test_messages_carry_position_tags(tmp_path):
+    # every message gets an [Mn] tag so the actions pass can cite which message an obligation came from
+    t = _one_thread(tmp_path)
+    seen = {}
+
+    def cap(prompt):
+        seen["p"] = prompt
+        return "ok"
+
+    cp.comprehend_thread(tmp_path, t, StubComprehender(responses={"comprehend": cap}),
+                         get_profile(), qaqc=False)
+    assert "[M1]" in seen["p"] and "[M2]" in seen["p"]
+
+
+def test_actions_extracted_and_normalized(tmp_path):
+    # the model's to-do items are normalized; an absolute deadline resolves to ISO; an empty action drops
+    t = _one_thread(tmp_path, body_a="Please submit the RFI-12 response by 14 March 2025.")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Submit the RFI-12 response", "about": "RFI-12", "owner": "b@x",
+         "counterparty": "a@x", "direction": "Inbound", "due_raw": "14 March 2025",
+         "refs": ["RFI-12"], "status": "Open", "priority": "High", "source": ["[M1]"],
+         "confidence": "high", "implied": False},
+        {"action": "", "about": "junk dropped"}]}})
+    rec = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)
+    assert len(rec["actions"]) == 1                        # the empty-action item was dropped
+    a = rec["actions"][0]
+    assert a["action"] == "Submit the RFI-12 response"
+    assert a["direction"] == "inbound" and a["status"] == "open" and a["priority"] == "high"
+    assert a["due_canonical"] == "2025-03-14" and a["due_pending"] is False
+    assert a["source"] == ["M1"]                           # [Mn] brackets stripped
+    assert a["refs"] == ["RFI-12"]
+
+
+def test_actions_relative_deadline_resolved_against_source_date(tmp_path):
+    # a relative deadline IS resolved to ISO against its source message's sent-date (no longer dead code)
+    t = _one_thread(tmp_path, body_a="Kindly revert within 14 days of receipt.")   # M1 sent 01 Jan 2026
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Revert with comments", "due_raw": "within 14 days", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["due_canonical"] == "2026-01-15" and a["due_pending"] is False   # 01 Jan + 14 days
+
+
+def test_actions_relative_deadline_pending_without_anchor(tmp_path):
+    # a relative deadline with no resolvable anchor (no/unknown source) stays pending
+    t = _one_thread(tmp_path, body_a="Kindly revert within 14 days of receipt.")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Revert with comments", "due_raw": "within 14 days", "source": []}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["due_canonical"] == "" and a["due_pending"] is True
+    assert a["owner"] == "unclear"                         # unstated owner defaults to 'unclear'
+
+
+def test_actions_default_empty_and_candidates_counted(tmp_path):
+    # default backend emits no actions; the deterministic candidate count is still recorded (no-miss audit)
+    t = _one_thread(tmp_path, body_a="Please confirm the schedule.")
+    rec = cp.comprehend_thread(tmp_path, t, StubComprehender(), get_profile(), qaqc=False)
+    assert rec["actions"] == []
+    assert rec["verified"]["action_candidates"] >= 1       # 'Please confirm…' surfaced by the floor
+
+
+def test_action_floor_surfaces_uncovered_obligation(tmp_path):
+    # the AI emits NO action for a plain obligation -> the deterministic floor must surface it (no-miss
+    # backstop, the parity-with-facts fix); recall-first over-capture beats a silent drop
+    t = _one_thread(tmp_path, body_a="Please submit the RFI-12 response by Friday.")
+    rec = cp.comprehend_thread(tmp_path, t, StubComprehender(), get_profile(), qaqc=False)
+    unc = rec["verified"]["action_floor_uncovered"]
+    assert any("RFI-12" in u or "submit" in u.lower() for u in unc)
+
+
+def test_action_floor_covered_not_flagged(tmp_path):
+    # when the AI DOES emit a matching action, the candidate is covered -> not flagged (no false noise)
+    t = _one_thread(tmp_path, body_a="Please submit the RFI-12 response by Friday.", body_b="Thanks, received.")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Submit RFI-12 response", "refs": ["RFI-12"], "source": ["M1"]}]}})
+    rec = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)
+    assert rec["verified"]["action_floor_uncovered"] == []
+
+
+def test_actions_richer_fields_normalized(tmp_path):
+    # is_mine tri-state, owner_history hand-off, quote, and false_positive_suspected survive cleaning
+    t = _one_thread(tmp_path, body_a="Please price VO-09.")
+    stub = StubComprehender(responses={"actions": {"actions": [{
+        "action": "Price VO-09", "about": "VO-09", "owner": "K", "counterparty": "C",
+        "direction": "Outbound", "is_mine": False, "due_raw": "", "refs": ["VO-09"],
+        "status": "Open", "priority": "high", "source": "[M1][M2]", "quote": "please price VO-09",
+        "confidence": "review", "false_positive_suspected": False, "implied": False,
+        "owner_history": [{"owner": "S", "source": "[M3][M4]"}]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["is_mine"] is False and a["direction"] == "outbound"
+    assert a["source"] == ["M1", "M2"] and a["quote"] == "please price VO-09"
+    assert a["owner_history"] == [{"owner": "S", "source": "M3,M4"}]   # multi-tag join is comma-delimited
+
+
+def test_is_mine_resolved_from_operator_identity(tmp_path):
+    # #2 (14 personas): given the operator's identity, is_mine/direction resolve deterministically
+    t = _one_thread(tmp_path, body_a="Please submit RFI-12.", body_b="Thanks.")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Submit RFI-12", "owner": "Alice <alice@ourco.com>", "counterparty": "Bob <bob@client.com>", "source": ["M1"]},
+        {"action": "Approve VO-09", "owner": "Bob <bob@client.com>", "counterparty": "alice@ourco.com", "source": ["M1"]}]}})
+    acts = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False, operator="alice@ourco.com")["actions"]
+    a0 = next(a for a in acts if "RFI-12" in a["action"])
+    a1 = next(a for a in acts if "VO-09" in a["action"])
+    assert a0["is_mine"] is True and a0["direction"] == "inbound"      # the operator owes it
+    assert a1["is_mine"] is False and a1["direction"] == "outbound"    # the counterparty owes it
+
+
+def test_business_day_deadline_estimate_is_pending_not_confident(tmp_path):
+    # business-day deadlines: weekend-aware ESTIMATE, but flagged pending (holidays not applied) so it's
+    # never presented as a confident hard date (round-1 review #2, regulated domains)
+    t = _one_thread(tmp_path, body_a="Respond within 14 working days.")   # M1 sent Thu 01 Jan 2026
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Respond to the notice", "due_raw": "within 14 working days", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["due_canonical"] == "2026-01-21"               # weekend-aware estimate kept
+    assert a["due_pending"] is True                         # but NOT confident — verify (holidays)
+    assert "business" in a["due_basis"].lower()
+
+
+def test_is_mine_match_is_whole_token_not_substring(tmp_path):
+    # operator 'ann@x.com' must NOT match inside 'joann@x.com' (round-1 review #5: blunt substring)
+    t = _one_thread(tmp_path, body_a="Please review.", body_b="Thanks.")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Review the draft", "owner": "Joann <joann@x.com>", "counterparty": "Bob", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False, operator="ann@x.com")["actions"][0]
+    assert a["is_mine"] is None                             # no false-positive override on a substring
+
+
+def test_action_quote_unverified_flagged(tmp_path):
+    # a quote not found in the comprehension is flagged + downgraded (the 'provable in 2s' control)
+    t = _one_thread(tmp_path, body_a="Please submit RFI-12.")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Submit RFI-12", "quote": "a quote that does not appear anywhere", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["quote_unverified"] is True and a["confidence"] == "review"
+
+
+def test_action_out_of_range_cite_dropped(tmp_path):
+    # a [Mn] cite beyond the thread's message count is dropped (2-message thread, action cites M9)
+    t = _one_thread(tmp_path, body_a="Please submit RFI-12.", body_b="Thanks.")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Submit RFI-12", "quote": "submit RFI-12", "source": ["M9"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["source"] == [] and a["confidence"] == "review"
+
+
+def test_event_deadline_pending_when_anchor_date_absent(tmp_path):
+    # '14 days after service' with NO service date in-thread must stay pending — never anchor a statutory
+    # clock to the email timestamp (round-3 review #2, Marcus/Aisha/Tomas)
+    t = _one_thread(tmp_path, body_a="File the defence 14 days after service.", body_b="ok")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "File the defence", "due_raw": "14 days after service", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["due_canonical"] == "" and a["due_pending"] is True
+    assert "anchor" in a["due_basis"].lower()
+
+
+def test_sensitivity_forces_needs_review(tmp_path):
+    # a detected sensitivity class is no longer inert: it gates the task to human review
+    t = _one_thread(tmp_path, body_a="WITHOUT PREJUDICE. Our settlement offer is S$50,000.")
+    rec = cp.comprehend_thread(tmp_path, t, StubComprehender(), get_profile())   # qaqc on
+    assert "without-prejudice" in rec["verified"]["sensitivity"]
+    assert rec["qaqc"]["needs_review"] is True
+
+
+def test_event_anchored_deadline_resolves_from_thread_date(tmp_path):
+    # "14 days before the trial" must resolve against the TRIAL date stated in the thread, not send-date
+    t = _one_thread(tmp_path, body_a="Serve the defence 14 days before the trial.", body_b="Thanks.")
+    stub = StubComprehender(responses={
+        "comprehend": lambda p: "The trial is fixed for 14 March 2025 [M1]. Serve the defence 14 days before the trial [M1].",
+        "actions": {"actions": [{"action": "Serve the defence", "due_raw": "14 days before the trial", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["due_canonical"] == "2025-02-28"               # 14 days before 14 March 2025
+    assert a["due_pending"] is False
+
+
+def test_is_mine_role_alias_match(tmp_path):
+    # operator declared by role/alias (not just company string) resolves is_mine
+    t = _one_thread(tmp_path, body_a="Please issue the drawing.", body_b="Thanks.")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Issue the drawing", "owner": "the Contractor", "counterparty": "the Architect", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False,
+                             operator="OurCo Pte Ltd, the Contractor, 我方")["actions"][0]
+    assert a["is_mine"] is True and a["direction"] == "inbound"
+
+
+def test_sensitivity_flag_detects_without_prejudice(tmp_path):
+    # privilege/WP/PHI-class content is flagged deterministically so it is never handled as ordinary
+    t = _one_thread(tmp_path, body_a="WITHOUT PREJUDICE. Our settlement offer is S$50,000.")
+    rec = cp.comprehend_thread(tmp_path, t, StubComprehender(), get_profile(), qaqc=False)
+    assert any("prejudice" in s.lower() for s in rec["verified"]["sensitivity"])
+
+
+def test_generic_profile_is_industry_neutral():
+    from clover.profiles import get_profile
+    p = get_profile("generic")
+    assert p.name == "generic" and p.domains
+    assert "EOT" not in " ".join(p.ref_examples) and "RFI" not in " ".join(p.ref_examples)
+
+
+def test_uncovered_single_token_overlap_still_flagged(tmp_path):
+    # one incidental shared word must NOT count as 'covered' (that would hide a real miss)
+    t = _one_thread(tmp_path, body_a="Please submit the safety method statement.", body_b="Thanks.")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Review the method on site", "source": ["M1"]}]}})    # shares only 'method'
+    rec = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)
+    assert any("submit" in u.lower() for u in rec["verified"]["action_floor_uncovered"])
+
+
+def test_refine_carries_ledger_forward(tmp_path):
+    # force the refine path (tiny max_chars); the prior ledger must reach the refine call AND the final
+    # comprehension must re-carry the ledger tail so QA/distill still see the open items
+    t = _one_thread(tmp_path, body_a="x" * 300, body_b="y" * 300)
+    seen = {}
+
+    def comp(_p):
+        return 'Walk [M1].\n<<<LEDGER>>>\n{"open_items":[{"id":"OI-1","status":"open"}]}\n<<<END>>>'
+
+    def refl(p):
+        seen["ledger_in"] = "OI-1" in p                     # the prior ledger reached the refine prompt
+        return 'Walk [M2].\nCURRENT STATE\nOI-1 [M2]: owed\n<<<LEDGER>>>\n[{"id":"OI-1","status":"open"}]'
+
+    stub = StubComprehender(responses={"comprehend": comp, "comprehend_refine": refl})
+    rec = cp.comprehend_thread(tmp_path, t, stub, get_profile(), max_chars=50, qaqc=False)
+    assert rec["method"] == "refine"
+    assert seen.get("ledger_in") is True
+    assert "<<<LEDGER>>>" in rec["comprehension"] and "OI-1" in rec["comprehension"]
+    assert stub.calls.count("comprehend") == 1 and stub.calls.count("comprehend_refine") == 1
+    # the per-chunk "CURRENT STATE" prose is stripped at the stitch (the re-attached ledger is authoritative)
+    assert "CURRENT STATE" not in rec["comprehension"]
+    assert "Walk [M2]" in rec["comprehension"]             # the delta prose itself is kept
+
+
 # ---------------------------------------------------------------- fact verification hardening
 def test_verify_rejects_fabricated_amount_spanning_two_numbers():
     out, dropped = cp._verify_facts({"amounts": ["1002"]}, "Call me at 6512 3456 then ref 100200300")
@@ -246,6 +476,13 @@ def test_verify_accepts_real_amount_despite_comma_formatting():
 def test_verify_party_uses_word_boundary():
     out, _ = cp._verify_facts({"parties": ["Sun"]}, "the sunshine project team met")
     assert out["parties"] == []                    # 'Sun' is not a whole word inside 'sunshine'
+
+
+def test_verify_keeps_verbatim_chinese_value():
+    # CJK has no word boundaries, so \b-anchoring wrongly dropped a value present verbatim in the source
+    out, dropped = cp._verify_facts({"parties": ["甲方"], "refs": ["RFI-12"]},
+                                    "本工程由甲方负责验收 RFI-12")
+    assert out["parties"] == ["甲方"] and out["refs"] == ["RFI-12"] and not dropped
 
 
 # ---------------------------------------------------------------- learned rules + resolve

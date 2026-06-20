@@ -15,6 +15,7 @@ from html import unescape
 from pathlib import Path
 
 from . import rules as rulesmod
+from . import comprehend_prompts as cprompts
 from .comprehenders import Comprehender
 from .profiles import Profile, get_profile
 from . import attachments as attmod
@@ -26,20 +27,37 @@ _WS = re.compile(r"\s+")
 _ANNOT = re.compile(r"\s+(?:[—–;(]|-\s).*$")   # trailing model annotation: " — desc", " (desc)", " - desc"
 _WEEKDAY = re.compile(r"^(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*[,.\s]+", re.I)   # leading "Wed " on a date
 _NUM = re.compile(r"\d[\d,]*\.?\d*")
+_LEDGER = re.compile(r"<<<LEDGER>>>(.*?)(?:<<<END>>>|$)", re.S)   # comprehend/refine open-items tail
+_MTAG = re.compile(r"[Mm]\d+")                                    # message position tag, e.g. M3
 
-_DISTILL_SCHEMA = {"abstract": "str", "summary": "str", "event": "str (<=30 chars)",
-                   "facts": {"project": "str", "parties": ["str"], "refs": ["str"],
-                             "dates": ["str"], "amounts": ["str"]},
-                   "contacts": [{"name": "str", "position": "str", "company": "str",
-                                 "phone": "str", "email": "str"}],
+# Decomposed distill (best-of-art prompts, see comprehend_prompts.py). The single mega "distill" call
+# was split: a FACTS pass (every fact + contact, each [Mn]-cited) and a SUMMARY pass (the narrative
+# layer). Schemas mirror each prompt's documented output shape.
+_FACTS_SCHEMA = {"project": [{"value": "str", "cite": "str"}],
+                 "facts": [{"field": "party|ref|date|amount", "value": "str", "cite": "str"}],
+                 "contacts": [{"name": "str", "position": "str", "company": "str",
+                               "phone": "str", "email": "str", "cite": "str"}]}
+_SUMMARY_SCHEMA = {"abstract": "str", "summary": "str", "event": "str (<=30 chars)",
                    "tags": ['"Facet: Value" strings, only from the listed facet vocabularies']}
 _CLASSIFY_SCHEMA = {"domain": "str", "category": "str", "confidence": "number 0..1",
                     "dispute": "bool", "dissent": "str", "votes": "str"}
+# qa_semantic emits the flat gate keys (passed/faithfulness/completeness/issues) plus per-lens detail;
+# only the flat keys gate the task.
 _QA_SCHEMA = {"passed": "bool", "faithfulness": "number 0..1", "completeness": "number 0..1",
-              "issues": ["str"]}
+              "more_minors": "bool", "lenses": "object", "issues": ["str"]}
 # step-8 (ii)-(iv) vs (i): verify the distilled abstract / one-liner / event tag against the comprehension
-_DISTILL_QA_SCHEMA = {"passed": "bool", "abstract_ok": "bool", "summary_ok": "bool",
-                      "event_ok": "bool", "issues": ["str"]}
+_DISTILL_QA_SCHEMA = {"abstract_ok": "bool", "summary_ok": "bool", "event_ok": "bool",
+                      "passed": "bool",
+                      "issues": [{"target": "str", "type": "str", "evidence": "str", "detail": "str"}]}
+# the per-thread to-do extraction (Phase-4 feeds off this) — one object per actionable item
+_ACTIONS_SCHEMA = {"actions": [{
+    "action": "str (imperative — what must be done)", "about": "str (short context, e.g. 'door contract')",
+    "owner": "str (who must act, or 'unclear')", "counterparty": "str",
+    "direction": "inbound|outbound|internal|unknown", "is_mine": "bool|null",
+    "due_raw": "str (deadline verbatim, '' if none)", "refs": ["str"], "status": "open|done|blocked|superseded",
+    "priority": "high|normal|low", "source": "str — the [Mn] tag(s)", "quote": "str (verbatim proof)",
+    "confidence": "high|review", "false_positive_suspected": "bool", "implied": "bool",
+    "owner_history": [{"owner": "str", "source": "str"}]}]}
 _SMALL_COUNCIL, _FULL_COUNCIL = 5, 10
 
 
@@ -113,11 +131,38 @@ def _thread_messages(archive, thread: dict) -> list[str]:
             b = render_message(archive, locs[0])
         except Exception:
             continue
-        text = f"From: {b.get('from','')}  Date: {b.get('date','')}\n{_block_text(b)}"
+        # [Mn] position tag (contiguous over messages actually rendered) so the actions pass can
+        # CITE which message each obligation came from. Still ONE header line, so the body-only
+        # floor_src (which strips the first line) is unaffected.
+        tag = f"[M{len(out) + 1}]"
+        text = f"{tag} From: {b.get('from','')} | Date: {b.get('date','')}\n{_block_text(b)}"
         att = _attachment_text(archive, locs[0], b.get("attachments") or [])
         if att:
             text += "\n\n" + att
         out.append(text)
+    return out
+
+
+def _msg_date_map(archive, thread: dict) -> dict:
+    """{"M1": "YYYY-MM-DD", ...} aligned with the [Mn] tags _thread_messages assigns (same numbering,
+    same render-skip), so a relative deadline citing [Mn] can be resolved against that message's sent
+    date. A message with no parseable date maps to ''."""
+    from email.utils import parsedate_to_datetime
+    out, i = {}, 0
+    for m in thread.get("members", []):
+        locs = m.get("locations") or []
+        if not locs:
+            continue
+        try:
+            b = render_message(archive, locs[0])
+        except Exception:
+            continue
+        i += 1
+        try:
+            dt = parsedate_to_datetime(b.get("date") or "")
+            out[f"M{i}"] = dt.date().isoformat() if dt else ""
+        except Exception:
+            out[f"M{i}"] = ""
     return out
 
 
@@ -250,45 +295,50 @@ def estimate_thread_tokens(archive, thread: dict) -> int:
     return max(1, total // 4)
 
 
-# ---------------------------------------------------------------- prompts
-def _comprehend_prompt(thread, text):
-    return (f"You are reading an email thread (subject: {thread.get('subject','')}). Produce a "
-            "faithful, chronological comprehension of the WHOLE thread. Going message by message in "
-            "order, capture who wrote and what they asked / decided / committed / changed, and list "
-            "EVERY deadline, amount, and reference number explicitly — never summarise these away. "
-            "Then give the CURRENT status of each matter, applying supersession (a later message "
-            "overrides an earlier one) and correct polarity (respect conditionals like 'only if…' and "
-            "negations like 'not approved'). Note any referenced attachment. Base everything STRICTLY "
-            "on the text — invent nothing. The thread may mix English and Chinese; keep both "
-            "verbatim.\n\nTHREAD:\n" + text)
+# ---------------------------------------------------------------- prompts + prompt helpers
+# The comprehend / refine / distill_facts / distill_summary / actions / qa / distill_qa prompts now
+# live in comprehend_prompts.py (best-of-art, adversarially scored >9). These helpers assemble the
+# runtime inputs those prompts consume.
+def _facet_vocab(profile: Profile | None) -> str:
+    """The 'Facet: value, value' vocabulary the distill_summary prompt picks tags from."""
+    if not (profile and profile.facets):
+        return "(no facets defined)"
+    return "\n".join(f"{f}: {', '.join(profile.facet_values(f))}" for f in profile.facet_names())
 
 
-def _refine_prompt(thread, running, chunk):
-    return ("Continue a faithful chronological comprehension of this email thread. Below is the "
-            "comprehension so far, then the next messages — update it to include them accurately, "
-            "inventing nothing. Carry forward EVERY still-open item (a pending request, an unmet "
-            "deadline, a held amount, an unanswered reference) — do not drop or summarise away an "
-            "earlier open item just because newer messages arrived.\n\nSO FAR:\n" + (running or "(none yet)")
-            + "\n\nNEXT MESSAGES:\n" + "\n\n----\n\n".join(chunk))
+def _ref_examples(profile: Profile | None) -> str:
+    """The profile's example ref identifiers for the facts prompt (industry-agnostic: construction is
+    only the seed). Falls back to a domain-spanning list so a profile with none set is still generic."""
+    ex = list(getattr(profile, "ref_examples", None) or [])
+    if ex:
+        return ", ".join(ex)
+    return "RFI, invoice no., case/matter no., ticket/PR no., PO no., clause/section no."
 
 
-def _distill_prompt(comprehension, profile: Profile | None = None):
-    tagblock = ""
-    if profile and profile.facets:
-        vocab = "\n".join(f"  {f}: {', '.join(profile.facet_values(f))}" for f in profile.facet_names())
-        tagblock = ("\n\nAlso assign TAGS — for each facet below, pick the value(s) that CLEARLY apply to this "
-                    "thread (a thread can have several facets or none). Output each as a \"Facet: Value\" "
-                    "string, using ONLY these exact values; omit a facet if unsure — do not invent values.\n"
-                    "FACETS:\n" + vocab)
-    return ("From this thread comprehension produce: an accurate abstract paragraph; a one-line "
-            "summary; an event tag of AT MOST 30 characters; and FACTS grounded ONLY in the "
-            "comprehension. For facts, list EVERY reference number, EVERY date, EVERY amount, EVERY "
-            "party, and the project — do NOT summarise or omit any. Give each fact's BARE value "
-            "EXACTLY as it appears (a date like '14 March 2025', an amount like 'S$878,000', a "
-            "reference like 'EOT-05') with no added description, deadline, or commentary, and invent "
-            "nothing. Also extract CONTACTS seen in the thread (especially email signatures): for each "
-            "person give name, position, company, phone, email — leave a field empty if unknown, and "
-            "don't invent." + tagblock + "\n\nCOMPREHENSION:\n" + comprehension)
+def _candidate_sheet(cands: list) -> str:
+    """The deterministic action-floor candidates, as the JSON list the actions prompt expects."""
+    return json.dumps(cands or [], ensure_ascii=False)
+
+
+def _split_ledger(text: str) -> tuple[str, str]:
+    """Split a comprehension into (prose, ledger_json). The comprehend/refine prompts append an
+    open-items ledger delimited by <<<LEDGER>>> … (<<<END>>>). Returns ('', '') safely when absent."""
+    text = text or ""
+    m = _LEDGER.search(text)
+    if not m:
+        return text.strip(), ""
+    return text[:m.start()].strip(), m.group(1).strip()
+
+
+def _strip_current_state(delta: str) -> str:
+    """Remove a refine chunk's trailing 'CURRENT STATE' id-list (a per-chunk live snapshot). The final
+    ledger is authoritative, so these intermediate snapshots are dropped at the stitch."""
+    out = []
+    for line in (delta or "").splitlines():
+        if line.strip().upper().startswith("CURRENT STATE"):
+            break
+        out.append(line)
+    return "\n".join(out).strip()
 
 
 def _classify_prompt(profile: Profile, comprehension, full: bool, members: int):
@@ -364,7 +414,9 @@ def _verify_facts(facts: dict, thread_text: str) -> tuple[dict, list]:
         raw = str(value).strip()
         core = _WEEKDAY.sub("", _ANNOT.sub("", raw)).strip() or raw
         c = _norm(core)
-        if c and re.search(r"\b" + re.escape(c) + r"\b", src):    # whole word/phrase, not any substring
+        # ASCII: whole-word match (so 'Sun' != 'sunshine'). CJK has no word boundaries, so \b would
+        # wrongly drop a value present verbatim inside a character run — use containment there.
+        if c and (re.search(r"\b" + re.escape(c) + r"\b", src) if c.isascii() else c in src):
             return core
         if numeric:
             nums = [re.sub(r"\D", "", n) for n in _NUM.findall(raw)]
@@ -393,28 +445,275 @@ def _verify_facts(facts: dict, thread_text: str) -> tuple[dict, list]:
 
 
 def _refine(backend, thread, msgs, max_chars):
-    running, chunk, size = "", [], 0
+    """Comprehend a thread too long for one pass, CARRYING a structured open-items ledger forward so
+    early items can't be lost (the prose-regen trap). First chunk: a full `comprehend` (prose + ledger
+    tail). Each later chunk: `refine` with the prior prose + ledger + next messages -> delta prose +
+    the full updated ledger. The final comprehension is the concatenated prose with the last ledger
+    re-attached, so the downstream QA / distill passes still see the open-items ledger."""
+    subject = thread.get("subject", "")
+    chunks, cur, size = [], [], 0
     for msg in msgs:
-        if chunk and size + len(msg) > max_chars:
-            running = str(backend.generate("comprehend_refine", _refine_prompt(thread, running, chunk)))
-            chunk, size = [], 0
-        chunk.append(msg)
-        size += len(msg)
-    if chunk:
-        running = str(backend.generate("comprehend_refine", _refine_prompt(thread, running, chunk)))
-    return running
+        if cur and size + len(msg) > max_chars:
+            chunks.append(cur); cur, size = [], 0
+        cur.append(msg); size += len(msg)
+    if cur:
+        chunks.append(cur)
+    if not chunks:
+        return ""
+    first = backend.generate("comprehend", cprompts.comprehend(subject, "\n\n----\n\n".join(chunks[0])))
+    running, ledger = _split_ledger(str(first))
+    for ch in chunks[1:]:
+        out = backend.generate("comprehend_refine",
+                               cprompts.refine(subject, running, ledger, "\n\n----\n\n".join(ch)))
+        delta, ledger = _split_ledger(str(out))
+        # drop each chunk's "CURRENT STATE" id-list (it's a per-chunk snapshot) — the re-attached final
+        # ledger is the authoritative live set, so stale intermediate snapshots must not pile up.
+        running = (running + "\n\n" + _strip_current_state(delta)).strip()
+    return running + "\n\n<<<LEDGER>>>\n" + ledger + "\n<<<END>>>" if ledger else running
 
 
 def _clean_contacts(raw) -> list[dict]:
-    """Normalize the model's contacts list to {name, position, company, phone, email}; drop empties."""
+    """Normalize the model's contacts list to {name, position, company, phone, email}; drop empties.
+    Carries the [Mn] `cite` through when the facts-registrar provides one (traceability), but never
+    adds the key when absent — so legacy/stub records stay byte-identical."""
     out = []
     for c in (raw or []):
         if not isinstance(c, dict):
             continue
         rec = {k: str(c.get(k) or "").strip() for k in ("name", "position", "company", "phone", "email")}
         if rec["name"] or rec["email"]:
+            cite = str(c.get("cite") or "").strip()
+            if cite:
+                rec["cite"] = cite
             out.append(rec)
     return out
+
+
+def _facts_from_registrar(raw) -> tuple[dict, list, list]:
+    """Convert the facts-registrar output ({project[], facts[](field/value/cite), contacts[]}) into
+    (a) the BARE-value facts dict the floor / scorer / views consume, (b) a citation trail
+    [{field, value, cite}] that preserves the [Mn] each fact came from, and (c) the contacts list.
+    Keeps the project as a single string (first named) for rule/view compatibility; any extra project
+    is preserved in the citation trail so it is never silently dropped."""
+    facts = {"project": "", "parties": [], "refs": [], "dates": [], "amounts": []}
+    sources: list = []
+    field_map = {"party": "parties", "ref": "refs", "date": "dates", "amount": "amounts"}
+    if not isinstance(raw, dict):
+        return facts, sources, []
+    projs = [str(p.get("value") or "").strip() for p in (raw.get("project") or [])
+             if isinstance(p, dict) and str(p.get("value") or "").strip()]
+    facts["project"] = projs[0] if projs else ""
+    for p in (raw.get("project") or []):
+        if isinstance(p, dict) and str(p.get("value") or "").strip():
+            sources.append({"field": "project", "value": str(p["value"]).strip(),
+                            "cite": str(p.get("cite") or "").strip()})
+    for f in (raw.get("facts") or []):
+        if not isinstance(f, dict):
+            continue
+        fld = field_map.get(str(f.get("field") or "").strip().lower())
+        val = str(f.get("value") or "").strip()
+        if not fld or not val:
+            continue
+        if val not in facts[fld]:
+            facts[fld].append(val)
+        sources.append({"field": str(f.get("field")).strip().lower(), "value": val,
+                        "cite": str(f.get("cite") or "").strip()})
+    return facts, sources, (raw.get("contacts") or [])
+
+
+def _msg_tags(value) -> list[str]:
+    """Parse [Mn] message tags out of any source field (a string '[M2][M5]' or a list), normalised to
+    ['M2','M5']. Robust to either convention the prompts emit."""
+    s = " ".join(str(x) for x in value) if isinstance(value, (list, tuple)) else str(value or "")
+    return [t.upper() for t in _MTAG.findall(s)]
+
+
+_EV_STOP = {"the", "a", "an", "after", "before", "from", "prior", "to", "following", "of", "day",
+            "days", "week", "weeks", "month", "months", "business", "working", "within", "net"}
+
+
+def _event_date(comprehension: str, anchor: str) -> str:
+    """Resolve a named-event deadline anchor ('the trial', 'discharge', 'the award') to a date stated
+    elsewhere in the comprehension: find a line mentioning the anchor's key word and read the date
+    co-located there. '' if none — the caller falls back to the send-date / pending."""
+    from .eval.extractors import extract_dates
+    words = [w for w in re.findall(r"[a-z一-鿿]{2,}", (anchor or "").lower()) if w not in _EV_STOP]
+    if not words:
+        return ""
+    for line in (comprehension or "").splitlines():
+        low = line.lower()
+        if any(w in low for w in words):
+            ds = extract_dates(line)
+            if ds:
+                return ds[0]
+    return ""
+
+
+# deterministic sensitivity cues -> class (legal/regulated domains: never handle these as ordinary)
+_SENSITIVITY = {
+    "without prejudice": "without-prejudice", "调解": "without-prejudice",
+    "privileged": "privileged", "legally privileged": "privileged", "attorney-client": "privileged",
+    "solicitor-client": "privileged", "work product": "privileged", "litigation privilege": "privileged",
+    "strictly confidential": "confidential", "private and confidential": "confidential",
+    "do not disclose": "confidential", "保密": "confidential", "不得披露": "confidential",
+    "medical record": "personal-data", "patient": "personal-data", "diagnosis": "personal-data",
+    "date of birth": "personal-data", "nric": "personal-data", "passport no": "personal-data",
+    "national id": "personal-data", "身份证": "personal-data", "病历": "personal-data",
+}
+
+
+def _sensitivity(text: str) -> list[str]:
+    """Deterministic sensitivity classes detected in the source (privilege / without-prejudice /
+    confidential / personal-data) so downstream handling can gate or mark them. Awareness, not redaction."""
+    low = (text or "").lower()
+    out = []
+    for cue, cls in _SENSITIVITY.items():
+        if cue in low and cls not in out:
+            out.append(cls)
+    return out
+
+
+def _tok_in(tok: str, s: str) -> bool:
+    """Whole-token containment (so 'ann@x.com' does NOT match inside 'joann@x.com'). Boundaries are
+    non email/word chars, so emails/domains match exactly, not as substrings."""
+    return re.search(r"(?<![\w.@-])" + re.escape(tok) + r"(?![\w.@-])", s) is not None
+
+
+def _clean_actions(raw, date_map: dict | None = None, operator: str = "",
+                   comprehension: str = "") -> list[dict]:
+    """Normalize the model's to-do items to a stable shape and resolve their deadline deterministically:
+    an absolute date in due_raw -> ISO due_canonical; a RELATIVE deadline (Net-30, 'within 14 days') is
+    resolved against the SOURCE message's sent-date — business/working-day phrasings skip weekends but
+    stay due_pending (an estimate, not a confident date — holidays unapplied). When the operator identity
+    matches the owner/counterparty by WHOLE token (and unambiguously), is_mine/direction resolve
+    deterministically. Each action's `quote` is verified to appear in the comprehension and its [Mn]
+    cites are range-checked; failures drop the bad cite and downgrade confidence to 'review'. Items with
+    no action text drop."""
+    from .eval.extractors import extract_dates
+    from .eval import deadlines as _dl
+    date_map = date_map or {}
+    valid_tags = set(date_map)
+    comp_norm = _norm(comprehension)
+    # operator identities/roles/aliases are comma/semicolon/newline separated so multi-word roles
+    # ('the Contractor') and short CJK aliases ('我方') stay intact as whole match tokens.
+    optokens = [t.strip() for t in re.split(r"[,;\n]+", (operator or "").lower()) if len(t.strip()) >= 2]
+    out = []
+    for a in (raw or []):
+        if not isinstance(a, dict):
+            continue
+        action = str(a.get("action") or "").strip()
+        if not action:
+            continue
+        owner = str(a.get("owner") or "").strip() or "unclear"
+        counterparty = str(a.get("counterparty") or "").strip()
+        confidence = str(a.get("confidence") or "review").strip().lower() or "review"
+        # cite range-check: drop any [Mn] beyond the real message universe; downgrade if we dropped one
+        raw_tags = _msg_tags(a.get("source"))
+        source = [t for t in raw_tags if t in valid_tags] if valid_tags else raw_tags
+        if valid_tags and raw_tags and len(source) < len(raw_tags):
+            confidence = "review"
+        # quote verification: the proving snippet must actually appear in the comprehension
+        quote = str(a.get("quote") or "").strip()
+        quote_unverified = bool(quote) and bool(comp_norm) and _norm(quote) not in comp_norm
+        if quote_unverified:
+            confidence = "review"
+        due_raw = str(a.get("due_raw") or "").strip()
+        iso = extract_dates(due_raw)
+        rel = _dl.find_relative_deadlines(due_raw)
+        due_basis = ""
+        if iso:                                           # an absolute date in due_raw wins
+            due_canonical, due_pending = iso[0], False
+        elif rel:                                         # relative deadline
+            r0 = rel[0]
+            if r0.get("kind") == "relative":              # anchored to a NAMED external event
+                ev = _event_date(comprehension, r0.get("anchor", ""))
+                if ev:                                    # the event's date is stated in-thread -> use it
+                    resolved = _dl.resolve(r0, ev)
+                    due_canonical, due_pending = (resolved or ""), (resolved is None)
+                    if resolved:
+                        due_basis = "event-anchored (verify the anchor date)"
+                else:                                     # NEVER anchor a statutory clock to the email date
+                    due_canonical, due_pending = "", True
+                    due_basis = f"anchor date not in thread — verify ({r0.get('anchor') or 'event'})"
+            else:                                         # within / net -> now/receipt -> source msg date
+                anchor = next((date_map.get(t) for t in source if date_map.get(t)), "")
+                resolved = _dl.resolve(r0, anchor) if anchor else None
+                due_canonical = resolved or ""
+                if resolved and r0.get("unit") == "businessdays":
+                    # weekend-aware ESTIMATE, but keep it pending — holidays aren't applied, so never
+                    # present a business/working-day statutory deadline as a confident hard date.
+                    due_pending, due_basis = True, "business-day estimate (holidays not applied — verify)"
+                else:
+                    due_pending = resolved is None
+        else:
+            due_canonical, due_pending = "", False
+        is_mine = a.get("is_mine")
+        if not isinstance(is_mine, bool):
+            is_mine = None
+        direction = str(a.get("direction") or "").strip().lower()
+        if optokens:                                      # deterministic operator-side resolution
+            ol, cl = owner.lower(), counterparty.lower()
+            owner_match = any(_tok_in(t, ol) for t in optokens)
+            cp_match = any(_tok_in(t, cl) for t in optokens)
+            if owner_match and not cp_match:
+                is_mine, direction = True, "inbound"      # the operator owes it
+            elif cp_match and not owner_match:
+                is_mine, direction = False, "outbound"    # a counterparty owes it
+            # both or neither -> ambiguous: leave the AI's value untouched
+        owner_history = []
+        for h in (a.get("owner_history") or []):
+            if isinstance(h, dict) and str(h.get("owner") or "").strip():
+                owner_history.append({"owner": str(h["owner"]).strip(),
+                                      "source": ",".join(_msg_tags(h.get("source")))})
+        out.append({
+            "action": action,
+            "about": str(a.get("about") or "").strip(),
+            "owner": owner,
+            "counterparty": counterparty,
+            "direction": direction,
+            "is_mine": is_mine,
+            "due_raw": due_raw,
+            "due_canonical": due_canonical,
+            "due_pending": due_pending,
+            "due_basis": due_basis,
+            "refs": [str(r).strip() for r in (a.get("refs") or []) if str(r).strip()],
+            "status": str(a.get("status") or "open").strip().lower() or "open",
+            "priority": str(a.get("priority") or "normal").strip().lower() or "normal",
+            "source": source,
+            "quote": quote,
+            "quote_unverified": quote_unverified,
+            "confidence": confidence,
+            "false_positive_suspected": bool(a.get("false_positive_suspected")),
+            "implied": bool(a.get("implied")),
+            "owner_history": owner_history,
+        })
+    return out
+
+
+def _uncovered_candidates(candidates, actions) -> list[str]:
+    """No-miss backstop for the to-do list (parity with the facts floor backfill): strong obligation
+    sentences the deterministic floor surfaced that NO emitted action covers. Conservative — a candidate
+    is 'covered' if any of its distinctive tokens (a ref, a >=5-char word, or a CJK run) appears in the
+    actions' text. Recall-first: surfaced for one-click triage, never silently dropped."""
+    from .eval.extractors import extract_refs
+    hay = " ".join(str(a.get(k) or "") for a in (actions or [])
+                   for k in ("action", "about", "quote")).lower()
+    hay += " " + " ".join(str(r) for a in (actions or []) for r in (a.get("refs") or [])).lower()
+    out = []
+    for c in (candidates or []):
+        if not (set(c.get("cues") or []) & {"request", "obligation", "waiver"}):
+            continue                                       # only STRONG obligation cues qualify
+        text = str(c.get("text") or "")
+        refs = {r.lower() for r in extract_refs(text)}
+        words = set(re.findall(r"[a-z]{5,}", text.lower())) | set(re.findall(r"[一-鿿]{2,}", text))
+        if not (refs or words):
+            continue
+        # 'covered' needs a shared REF or >=2 shared distinctive words — one incidental word is not
+        # enough (that would silently hide a real miss). Recall-first: when unsure, surface it.
+        covered = any(r in hay for r in refs) or sum(1 for w in words if w in hay) >= 2
+        if not covered:
+            out.append(text)
+    return out[:10]
 
 
 def _clean_tags(raw, profile: Profile | None) -> list[str]:
@@ -438,43 +737,37 @@ def _clean_tags(raw, profile: Profile | None) -> list[str]:
 
 
 # ---------------------------------------------------------------- pipeline
-def _qa_prompt(comprehension, thread_text):
-    return ("You are a strict QA reviewer — assume a defect exists and try to find it. Compare the "
-            "COMPREHENSION against the SOURCE thread. Check FAITHFULNESS (every statement is supported "
-            "by the source — nothing fabricated, misattributed, or distorted) and COMPLETENESS (no "
-            "material point omitted — a decision, request, commitment, deadline, amount, or change, AND "
-            "every reference number / date / amount that appears in the source). Also check the CURRENT "
-            "status is right: latest message wins, and conditionals / negations are not flipped. Set "
-            "passed=true ONLY if all hold; give faithfulness and completeness each 0..1; list specific "
-            "issues if any.\n\nCOMPREHENSION:\n" + comprehension + "\n\nSOURCE:\n" + thread_text)
+def _issue_str(i) -> str:
+    """Render a QA issue (a flat string from qa_semantic, or a {target,type,evidence,detail} object
+    from distill_qa) into one readable line for the merged needs-review list."""
+    if isinstance(i, dict):
+        head = " ".join(x for x in (i.get("target"), i.get("type")) if x)
+        body = i.get("detail") or i.get("problem") or ""
+        ev = i.get("evidence") or i.get("cite") or ""
+        return " — ".join(x for x in (head, str(body).strip(), str(ev).strip()) if x).strip(" —")
+    return str(i)
 
 
-def _distill_qa_prompt(comprehension, abstract, summary, event):
-    return ("You are a strict reviewer checking distilled outputs against the COMPREHENSION (the single "
-            "source of truth). For EACH of the abstract, the one-liner summary, and the event tag, decide: "
-            "is it FAITHFUL (states nothing the comprehension does not support) and not LOSSY (omits no "
-            "material point that belongs at its level of detail)? Set abstract_ok / summary_ok / event_ok, "
-            "passed=true ONLY if all three hold, and list specific issues.\n\nCOMPREHENSION:\n"
-            + comprehension + "\n\nABSTRACT:\n" + (abstract or "") + "\n\nONE-LINER:\n" + (summary or "")
-            + "\n\nEVENT TAG:\n" + (event or ""))
-
-
-def _build_once(archive, thread, backend, profile, max_chars, model):
+def _build_once(archive, thread, backend, profile, max_chars, model, operator: str = ""):
     msgs = _thread_messages(archive, thread)
     full = "\n\n----\n\n".join(msgs)
     if len(msgs) <= 1 or len(full) <= max_chars:
         method = "whole"
-        comprehension = backend.generate("comprehend", _comprehend_prompt(thread, full))
+        comprehension = backend.generate("comprehend", cprompts.comprehend(thread.get("subject", ""), full))
     else:
         method = "refine"
         comprehension = _refine(backend, thread, msgs, max_chars)
     comprehension = (comprehension if isinstance(comprehension, str) else str(comprehension)).strip()
 
-    distilled = backend.generate("distill", _distill_prompt(comprehension, profile), schema=_DISTILL_SCHEMA) or {}
-    facts, dropped = _verify_facts(distilled.get("facts") or {}, full)
+    # FACTS pass (decomposed from the old mega-distill) — every fact + contact, each [Mn]-cited.
+    # ref examples are profile-driven so the facts prompt stays industry-agnostic (construction = seed).
+    fraw = backend.generate("distill_facts", cprompts.distill_facts(comprehension, _ref_examples(profile)),
+                            schema=_FACTS_SCHEMA) or {}
+    facts, fact_sources, contacts_raw = _facts_from_registrar(fraw)
+    facts, dropped = _verify_facts(facts, full)
     # Deterministic floor backfill (recall fix): add every catchable ref/date/amount the AI dropped
-    # but a rule finds in the SOURCE. Body-only (strip each message's From:/Date: header line) so the
-    # email's own send-date is never injected as a content fact. Backfilled atoms are grounded by
+    # but a rule finds in the SOURCE. Body-only (strip each message's [Mn] From:/Date: header line) so
+    # the email's own send-date is never injected as a content fact. Backfilled atoms are grounded by
     # construction (they came from the source) and recorded in verified.backfilled.
     from .eval import scorer as _scorer
     floor_src = "\n\n".join(m.split("\n", 1)[1] if "\n" in m else m for m in msgs)
@@ -488,6 +781,21 @@ def _build_once(archive, thread, backend, profile, max_chars, model):
         if _miss:
             facts.setdefault(_k, []).extend(_miss)
             backfilled[_k] = _miss
+
+    # SUMMARY pass (decomposed) — the narrative layer + facet tags, grounded in the comprehension.
+    sraw = backend.generate("distill_summary", cprompts.distill_summary(comprehension, _facet_vocab(profile)),
+                            schema=_SUMMARY_SCHEMA) or {}
+
+    # ACTIONS pass — the per-thread to-do extraction. Deterministic action-floor candidates (strong
+    # obligation cues over BODY-only source) are fed in as a no-silent-miss checklist; the AI turns the
+    # thread into itemized cited actions, then deadlines are resolved deterministically in _clean_actions.
+    from .eval import action_floor as _afloor
+    action_cands = _afloor.action_candidates(floor_src)
+    araw = backend.generate("actions", cprompts.actions(comprehension, _candidate_sheet(action_cands), operator),
+                            schema=_ACTIONS_SCHEMA) or {}
+    actions = _clean_actions(araw.get("actions") if isinstance(araw, dict) else None,
+                             _msg_date_map(archive, thread), operator, comprehension)
+
     ruled = rulesmod.match(archive, text=full, project=facts.get("project", ""),
                            senders=[m.get("from", "") for m in thread.get("members", [])])
     if ruled:                                            # a learned rule wins deterministically — no AI council
@@ -501,43 +809,50 @@ def _build_once(archive, thread, backend, profile, max_chars, model):
         "subject": thread.get("subject"),
         "source": thread_sig(thread),                    # thread state when comprehended (staleness check)
         "comprehension": comprehension,
-        "abstract": str(distilled.get("abstract") or "").strip(),
-        "summary": str(distilled.get("summary") or "").strip(),
-        "event": str(distilled.get("event") or "").strip()[:30],
+        "abstract": str(sraw.get("abstract") or "").strip(),
+        "summary": str(sraw.get("summary") or "").strip(),
+        "event": str(sraw.get("event") or "").strip()[:30],
         "facts": facts,
-        "contacts": _clean_contacts(distilled.get("contacts")),
-        "tags": _clean_tags(distilled.get("tags"), profile),
+        "fact_sources": fact_sources,                    # [{field, value, cite}] — [Mn] traceability
+        "contacts": _clean_contacts(contacts_raw),
+        "tags": _clean_tags(sraw.get("tags"), profile),
+        "actions": actions,
         "classification": classification,
         "method": method, "model": model, "profile": profile.name,
         "verified": {"facts_ok": not dropped, "dropped_facts": dropped,
-                     "grounded": bool(comprehension), "backfilled": backfilled},
+                     "grounded": bool(comprehension), "backfilled": backfilled,
+                     "action_candidates": len(action_cands),
+                     "action_floor_uncovered": _uncovered_candidates(action_cands, actions),
+                     "sensitivity": _sensitivity(full)},
     }
     return rec, full
 
 
 def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Profile,
-                      *, max_chars: int = 120_000, model: str = "?", qaqc: bool = True) -> dict:
+                      *, max_chars: int = 120_000, model: str = "?", qaqc: bool = True,
+                      operator: str = "") -> dict:
     """Build the record, then run the FULL task verification before the task counts as COMPLETE
     (Phase-3 spec step 8). Two gates: (a) the comprehension (i) is checked for faithfulness +
     completeness vs the source — re-comprehend ONCE on failure; and (b) the distilled abstract /
     one-liner / event tag (ii)-(iv) are each verified against the comprehension (i). The deterministic
     fact-check must also pass. Any failure -> `needs_review` (never silently shipped)."""
-    rec, full = _build_once(archive, thread, backend, profile, max_chars, model)
+    rec, full = _build_once(archive, thread, backend, profile, max_chars, model, operator)
     if not qaqc:
         return rec
 
-    # (a) comprehension (i) vs raw source — faithfulness + completeness; re-comprehend once on failure
+    # (a) comprehension (i) vs raw source — independent adversarial SEMANTIC review (atom recall is the
+    # floor's job, not re-checked here); faithfulness + completeness; re-comprehend once on failure.
     comp = None
     for attempt in (1, 2):
-        qa = backend.generate("qa", _qa_prompt(rec["comprehension"], full), schema=_QA_SCHEMA) or {}
+        qa = backend.generate("qa", cprompts.qa_semantic(rec["comprehension"], full), schema=_QA_SCHEMA) or {}
         passed = bool(qa.get("passed")) and rec["verified"]["facts_ok"]
-        issues = [str(i) for i in (qa.get("issues") or [])][:6]
+        issues = [_issue_str(i) for i in (qa.get("issues") or [])][:6]
         if passed or attempt == 2:
             comp = {"passed": passed, "faithfulness": _f(qa.get("faithfulness")),
                     "completeness": _f(qa.get("completeness")), "issues": issues, "attempts": attempt}
             break
         try:
-            rec, full = _build_once(archive, thread, backend, profile, max_chars, model)   # one retry
+            rec, full = _build_once(archive, thread, backend, profile, max_chars, model, operator)   # one retry
         except Exception as e:                 # retry failed -> keep the first attempt, flag for review
             comp = {"passed": False, "faithfulness": _f(qa.get("faithfulness")),
                     "completeness": _f(qa.get("completeness")),
@@ -546,18 +861,22 @@ def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Pro
 
     # (b) distilled (ii)-(iv) vs the comprehension (i) — the step-8 check the task must also pass
     dq = backend.generate("verify_distill",
-                          _distill_qa_prompt(rec["comprehension"], rec["abstract"], rec["summary"],
-                                             rec["event"]), schema=_DISTILL_QA_SCHEMA) or {}
+                          cprompts.distill_qa(rec["comprehension"], rec["abstract"], rec["summary"],
+                                              rec["event"]), schema=_DISTILL_QA_SCHEMA) or {}
     rec["verified"].update({"abstract_ok": bool(dq.get("abstract_ok", True)),
                             "summary_ok": bool(dq.get("summary_ok", True)),
                             "event_ok": bool(dq.get("event_ok", True))})
     distill_passed = bool(dq.get("passed", True)) and all(
         rec["verified"][k] for k in ("abstract_ok", "summary_ok", "event_ok"))
 
-    # the TASK is COMPLETE only when BOTH the comprehension and every distilled layer verify
-    rec["qaqc"] = {**comp, "distill_passed": distill_passed,
-                   "issues": (comp["issues"] + [str(i) for i in (dq.get("issues") or [])])[:8],
-                   "needs_review": (not comp["passed"]) or (not distill_passed)}
+    # the TASK is COMPLETE only when BOTH the comprehension and every distilled layer verify; detected
+    # sensitive content (privilege / without-prejudice / PHI) ALSO gates to human review (not inert).
+    sens = rec["verified"].get("sensitivity") or []
+    issues = comp["issues"] + [_issue_str(i) for i in (dq.get("issues") or [])]
+    if sens:
+        issues = issues + [f"sensitive content ({', '.join(sens)}) — route to human review"]
+    rec["qaqc"] = {**comp, "distill_passed": distill_passed, "issues": issues[:8],
+                   "needs_review": (not comp["passed"]) or (not distill_passed) or bool(sens)}
     return rec
 
 
@@ -581,7 +900,7 @@ def run_comprehension(archive, *, backend: Comprehender, profile: Profile | None
                       budget_tokens: int = 200_000, log=print,
                       should_stop=lambda: False, allowed=lambda: True,
                       only=None, redo: bool = False, include_stale: bool = True,
-                      limit: int | None = None, concurrency: int = 1,
+                      limit: int | None = None, concurrency: int = 1, operator: str = "",
                       progress=lambda **k: None) -> dict:
     """Comprehend the threads that need it within a token-estimate budget. Idempotent, resumable.
     Processes never-comprehended threads, plus stale ones (changed since comprehension) when
@@ -616,7 +935,8 @@ def run_comprehension(archive, *, backend: Comprehender, profile: Profile | None
             + (" ⚠ NEEDS-REVIEW" if nr else ""))
 
     def _one(t):
-        return comprehend_thread(archive, t, backend, profile, model=getattr(backend, "model", "?"))
+        return comprehend_thread(archive, t, backend, profile, model=getattr(backend, "model", "?"),
+                                 operator=operator)
 
     if max(1, int(concurrency or 1)) <= 1:
         for t in todo:                                  # sequential (default; unchanged behaviour)

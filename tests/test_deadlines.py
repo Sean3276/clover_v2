@@ -28,4 +28,4 @@ def test_chinese_relative_forms():
     rels = dl.find_relative_deadlines("请在30天内回复，并在收到后5个工作日内确认。")
     kinds = {(r["kind"], r["n"], r["unit"]) for r in rels}
     assert ("within", 30, "days") in kinds
-    assert ("relative", 5, "days") in kinds
+    assert ("relative", 5, "businessdays") in kinds        # 工作日 now resolves as business days (weekends skipped)

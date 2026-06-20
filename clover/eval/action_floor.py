@@ -20,9 +20,15 @@ _SENT = re.compile(r"[^.!?;\n。！？；]+")
 _STRONG_REQ_EN = ["please", "kindly", "could you", "can you", "request", "ensure", "make sure",
                   "confirm", "provide", "submit", "send ", "approve", "sign ", "pay ", "release ",
                   "furnish", "endorse", "expedite", "revert", "advise", "follow up", "action required",
-                  "respond", "reply", "arrange", "prepare", "complete the", "fill in", "fill out"]
+                  "respond", "reply", "arrange", "prepare", "complete the", "fill in", "fill out",
+                  # scheduling / meeting (cross-domain: recruiting, agency, facilities)
+                  "reschedule", "schedule a", "schedule the", "set up a", "book a", "set a time",
+                  # creative / iterative revision (agency, design, QA)
+                  "revise", "rework", "redo", "amend", "another round", "another pass", "sign off",
+                  "sign-off", "turn around", "circle back", "loop in", "action this"]
 _STRONG_REQ_CN = ["请", "麻烦", "务必", "需要", "需", "应当", "应", "提交", "确认", "批准", "审批",
-                  "回复", "提供", "安排", "签署", "盖章", "付款", "落实", "尽快"]
+                  "回复", "提供", "安排", "签署", "盖章", "付款", "落实", "尽快",
+                  "修改", "重做", "改期", "跟进", "处理"]
 _MODAL = ["must ", "shall ", "need to", "needs to", "required to", "have to", "has to", "is to ",
           "are to ", "obligated", "responsible for"]
 _WAIVER_EN = ["failing which", "failure to", "will be deemed", "deemed to", "or else"]
