@@ -3,8 +3,8 @@
 > The authoritative phase plan for Clover v2. Supersedes the phase structure in
 > `history/CLOVER_V2_SPEC.md` (archived for reference). Last updated: 2026-06-20.
 >
-> **Quality bar:** comprehension quality (Phases 3–4) is governed by the measurable
-> [CLOVER_V2_COMPREHENSION_SPEC.md](CLOVER_V2_COMPREHENSION_SPEC.md) — a no-miss reliability
+> **Quality bar:** Phase-3 comprehension quality (extending into the Phase-4 action list) is governed by
+> the measurable [CLOVER_V2_COMPREHENSION_SPEC.md](CLOVER_V2_COMPREHENSION_SPEC.md) — a no-miss reliability
 > standard + benchmark suite whose PASS BARS gate the switch from manual to zero-touch auto-run.
 > **Operating model:** one operator-hosted machine running **local AI**, multi-tenant, 24/7; the
 > target is **zero-touch** (user imports mail → returns next day to finished gold-grade output).
@@ -124,6 +124,13 @@ any time without touching the `.eml` files).
 
 ## Phase 3 — Comprehension
 **`organized thread archive  →  council-cleared comprehension`** · AI (local agent) · ✅ **BUILT** (see [CLOVER_V2_PHASE3_SPEC.md](CLOVER_V2_PHASE3_SPEC.md))
+
+> **Phase-3 quality standard (folded in):** comprehension reliability is governed by the measurable
+> [CLOVER_V2_COMPREHENSION_SPEC.md](CLOVER_V2_COMPREHENSION_SPEC.md) — the no-miss reliability + benchmark
+> suite (its consolidated-action-list / CASE bars §9–§12 extend forward into the Phase-4 action list).
+> Mass-comprehension of the backlog is gated on clearing its PASS BARS. Comprehension runs **multiple
+> threads in parallel**; the worker count is set in the developer panel (`/dev`), capped by what the
+> backend sustains (a local model serializes on one GPU; CLI backends are rate-limited).
 
 Read each thread tree and produce a quality-gated cascade of understanding. This is the
 **only** phase that needs the AI. Each output passes a **2-tier council** (small accuracy

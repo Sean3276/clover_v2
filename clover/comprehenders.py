@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from abc import ABC, abstractmethod
 
 _REGISTRY: dict = {}
@@ -64,10 +65,12 @@ class StubComprehender(Comprehender):
         self.model = model
         self.tokens = 0
         self.cost = 0.0
+        self._lock = threading.Lock()                    # token/call accrual is concurrency-safe
 
     def generate(self, task: str, prompt: str, schema: dict | None = None):
-        self.calls.append(task)
-        self.tokens += max(1, len(prompt) // 4)          # rough, so usage accrual is testable
+        with self._lock:
+            self.calls.append(task)
+            self.tokens += max(1, len(prompt) // 4)       # rough, so usage accrual is testable
         if task in self.responses:
             r = self.responses[task]
             return r(prompt) if callable(r) else r
@@ -98,6 +101,7 @@ class ClaudeCliComprehender(Comprehender):
         self.timeout = timeout
         self.tokens = 0           # actual tokens consumed (from the CLI usage envelope)
         self.cost = 0.0           # USD, if the CLI reports it
+        self._lock = threading.Lock()   # token/cost accrual is concurrency-safe
 
     def generate(self, task: str, prompt: str, schema: dict | None = None):
         import shutil
@@ -121,9 +125,10 @@ class ClaudeCliComprehender(Comprehender):
             env = json.loads(proc.stdout)        # CLI envelope: {"result": "...", "usage": {...}, ...}
             text = env.get("result", proc.stdout)
             u = env.get("usage") or {}
-            self.tokens += sum(int(v) for k, v in u.items()
-                               if isinstance(v, (int, float)) and "token" in k.lower())
-            self.cost += float(env.get("total_cost_usd") or 0)
+            with self._lock:
+                self.tokens += sum(int(v) for k, v in u.items()
+                                   if isinstance(v, (int, float)) and "token" in k.lower())
+                self.cost += float(env.get("total_cost_usd") or 0)
         except Exception:
             text = proc.stdout
         return _parse_json(text) if schema else text

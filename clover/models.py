@@ -113,3 +113,26 @@ def reset_usage(cfg, model_id: str) -> None:
             m["tokens_used"] = 0
             m["cost_usd"] = 0.0
             return
+
+
+_MAX_CONCURRENCY = 16
+
+
+def get_concurrency(cfg) -> int:
+    """How many threads Phase-3 comprehension processes in parallel (developer-controlled). 1 = serial."""
+    try:
+        n = int(_comp(cfg).get("concurrency") or 1)
+    except (TypeError, ValueError):
+        n = 1
+    return min(_MAX_CONCURRENCY, max(1, n))
+
+
+def set_concurrency(cfg, n) -> int:
+    """Set the comprehension parallelism, clamped to 1..16. Returns the stored value."""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        n = 1
+    n = min(_MAX_CONCURRENCY, max(1, n))
+    cfg.setdefault("comprehension", {})["concurrency"] = n
+    return n

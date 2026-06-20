@@ -389,6 +389,7 @@ def _maybe_autorun_comprehension(cfg: dict) -> None:
             limit=int(c.get("autorun_limit", 100)),   # bounded by COUNT instead — explicit, never silent
             should_stop=lambda: _status.get("stop", False),
             allowed=lambda: _comprehension_allowed(cfg),
+            concurrency=modelsmod.get_concurrency(cfg),   # parallel workers (developer-controlled in /dev)
             include_stale=False,    # autorun stays cheap: only NEW threads; stale ones go brown for a manual refresh
         )
         _record_usage(backend)
@@ -818,6 +819,7 @@ def _start_comp_task(cfg: dict, only, redo: bool) -> bool:
                 budget_tokens=10 ** 12, log=clog,    # MANUAL run: do the whole selection the user chose (Stop to halt)
                 should_stop=lambda: _comptask.get("stop", False),
                 allowed=lambda: _comprehension_allowed(cfg),
+                concurrency=modelsmod.get_concurrency(cfg),   # parallel workers (developer-controlled in /dev)
                 only=only, redo=redo, include_stale=True, progress=prog)
             _record_usage(backend)
             _comptask["tokens"] = getattr(backend, "tokens", 0)

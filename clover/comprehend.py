@@ -7,6 +7,7 @@ council with a deterministic precedence referee. Facts are verified against the 
 """
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import re
 import time
@@ -479,7 +480,8 @@ def run_comprehension(archive, *, backend: Comprehender, profile: Profile | None
                       budget_tokens: int = 200_000, log=print,
                       should_stop=lambda: False, allowed=lambda: True,
                       only=None, redo: bool = False, include_stale: bool = True,
-                      limit: int | None = None, progress=lambda **k: None) -> dict:
+                      limit: int | None = None, concurrency: int = 1,
+                      progress=lambda **k: None) -> dict:
     """Comprehend the threads that need it within a token-estimate budget. Idempotent, resumable.
     Processes never-comprehended threads, plus stale ones (changed since comprehension) when
     `include_stale`, plus everything when `redo`. `only` restricts to a set of thread_ids (one
@@ -494,29 +496,70 @@ def run_comprehension(archive, *, backend: Comprehender, profile: Profile | None
     total = len(todo)
     spent = done = errors = needs = 0
     last_done = ""
-    for t in todo:
-        if should_stop():
-            break
-        progress(done=done, total=total, current=(t.get("subject") or t.get("thread_id") or ""),
-                 errors=errors, last_done=last_done)
-        est = estimate_thread_tokens(archive, t)
-        if done > 0 and spent + est > budget_tokens:
-            log(f"Budget reached (~{spent} est. tokens) — stopping; re-run to continue.")
-            break
-        try:
-            rec = comprehend_thread(archive, t, backend, profile, model=getattr(backend, "model", "?"))
-            _append(archive, rec)
-            spent += est
-            done += 1
-            last_done = t.get("subject") or t.get("thread_id") or ""
-            c = rec["classification"]
-            nr = rec.get("qaqc", {}).get("needs_review")
-            needs += 1 if nr else 0
-            log(f"  ✓ {t.get('thread_id')} [{t.get('n')} msgs] -> {c['domain']}/{c['category']} ({c['consensus']})"
-                + (" ⚠ NEEDS-REVIEW" if nr else ""))
-        except Exception as e:
+
+    def _record(t, est, rec, err):
+        """Fold one thread's result into the run totals + log. Always called in THIS thread."""
+        nonlocal spent, done, errors, needs, last_done
+        if err is not None:
             errors += 1
-            log(f"  ! {t.get('thread_id')}: {type(e).__name__}: {e}")
+            log(f"  ! {t.get('thread_id')}: {type(err).__name__}: {err}")
+            return
+        _append(archive, rec)
+        spent += est
+        done += 1
+        last_done = t.get("subject") or t.get("thread_id") or ""
+        c = rec["classification"]
+        nr = rec.get("qaqc", {}).get("needs_review")
+        needs += 1 if nr else 0
+        log(f"  ✓ {t.get('thread_id')} [{t.get('n')} msgs] -> {c['domain']}/{c['category']} ({c['consensus']})"
+            + (" ⚠ NEEDS-REVIEW" if nr else ""))
+
+    def _one(t):
+        return comprehend_thread(archive, t, backend, profile, model=getattr(backend, "model", "?"))
+
+    if max(1, int(concurrency or 1)) <= 1:
+        for t in todo:                                  # sequential (default; unchanged behaviour)
+            if should_stop():
+                break
+            progress(done=done, total=total, current=(t.get("subject") or t.get("thread_id") or ""),
+                     errors=errors, last_done=last_done)
+            est = estimate_thread_tokens(archive, t)
+            if done > 0 and spent + est > budget_tokens:
+                log(f"Budget reached (~{spent} est. tokens) — stopping; re-run to continue.")
+                break
+            try:
+                _record(t, est, _one(t), None)
+            except Exception as e:
+                _record(t, est, None, e)
+    else:                                               # concurrent — per-thread work is independent + I/O-bound
+        work, acc = [], 0                               # budget pre-bounded up-front (always allow the first)
+        for t in todo:
+            est = estimate_thread_tokens(archive, t)
+            if work and acc + est > budget_tokens:
+                log(f"Budget reached (~{acc} est. tokens) — stopping; re-run to continue.")
+                break
+            work.append((t, est)); acc += est
+
+        def _job(item):
+            t, est = item
+            if should_stop():
+                return None
+            try:
+                return (t, est, _one(t), None)
+            except Exception as e:                      # report per-thread; keep the rest going
+                return (t, est, None, e)
+
+        progress(done=0, total=total, current="", errors=0, last_done="")
+        # Results are folded in THIS thread as they complete, so the counters + _append need no lock;
+        # only the backend's token tally is touched by workers (made thread-safe in the comprehender).
+        with concurrent.futures.ThreadPoolExecutor(max_workers=int(concurrency)) as ex:
+            for fut in concurrent.futures.as_completed([ex.submit(_job, it) for it in work]):
+                r = fut.result()
+                if r is None:
+                    continue
+                _record(*r)
+                progress(done=done, total=total, current="", errors=errors, last_done=last_done)
+
     progress(done=done, total=total, current="", errors=errors, last_done=last_done)
     return {"done": done, "pending": len(backlog) - done, "total": total, "backlog": len(backlog),
             "errors": errors, "needs_review": needs, "spent": spent, "last_done": last_done,

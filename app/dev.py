@@ -40,6 +40,7 @@ def dev_page(request: Request):
             for m in models]
     return _templates.TemplateResponse(request, "dev.html", {
         "cfg": cfg, "models": rows, "active_id": modelsmod.active_id(cfg),
+        "concurrency": modelsmod.get_concurrency(cfg),
         "legacy": (cfg.get("comprehension") or {}).get("model", "")})
 
 
@@ -77,6 +78,18 @@ def dev_models_delete(id: str = Form(...)):
     ok = modelsmod.delete_model(cfg, id.strip())
     cfgmod.save_config(cfg)
     return JSONResponse({"ok": ok, "message": "Model deleted." if ok else "Model not found."})
+
+
+@router.post("/dev/concurrency")
+def dev_concurrency(n: int = Form(1)):
+    g = _guard()
+    if g:
+        return g
+    cfg = cfgmod.load_config()
+    val = modelsmod.set_concurrency(cfg, n)
+    cfgmod.save_config(cfg)
+    return JSONResponse({"ok": True, "concurrency": val,
+                         "message": f"Comprehension concurrency set to {val} parallel thread(s)."})
 
 
 @router.post("/dev/models/reset-usage")

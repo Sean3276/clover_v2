@@ -234,6 +234,16 @@ def test_run_budget_stops_after_first(tmp_path):
     assert out["done"] == 1 and out["pending"] == 1
 
 
+def test_run_concurrent_processes_all(tmp_path):
+    # several independent single-message threads, comprehended in parallel — nothing lost, counts intact
+    for i in range(8):
+        _eml(tmp_path, "INBOX", str(i), f"u{i}@x", text=f"msg {i}")
+    th.build_threads(tmp_path, log=lambda *_: None)
+    out = cp.run_comprehension(tmp_path, backend=StubComprehender(), concurrency=4, log=lambda *_: None)
+    assert out["done"] == 8 and out["errors"] == 0
+    assert len(cp.read_comprehensions(tmp_path)) == 8        # every result appended under concurrency
+
+
 def test_registry_get():
     assert isinstance(get_comprehender("stub"), StubComprehender)
 

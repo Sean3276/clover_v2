@@ -71,6 +71,18 @@
   </form>
 </div>
 
+<div class="card">
+  <h2>Comprehension concurrency</h2>
+  <p class="note">How many threads Phase&nbsp;3 comprehends in parallel. Higher drains the backlog
+    faster, but throughput is ultimately capped by the backend — a local model serializes on one GPU,
+    and CLI backends are rate-limited. Start at 2–4 and watch the error count.</p>
+  <div style="display:flex;gap:10px;align-items:flex-end">
+    <div><label for="conc">Parallel workers (1–16)</label>
+      <input id="conc" type="number" min="1" max="16" value="{{ concurrency }}"></div>
+    <button type="button" onclick="saveConc()">Save</button>
+  </div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 function msg(ok, t){ const m = $("devMsg"); m.className = "msg " + (ok ? "ok" : "err"); m.textContent = t; }
@@ -97,5 +109,6 @@ async function resetUsage(id){ if(!confirm("Reset recorded token usage for this 
   const r = await post("/dev/models/reset-usage", {id}); msg(r.ok, r.message); if(r.ok) setTimeout(() => location.reload(), 500); }
 async function del(id, label){ if(!confirm("Delete model “" + label + "”?")) return;
   const r = await post("/dev/models/delete", {id}); msg(r.ok, r.message); if(r.ok) setTimeout(() => location.reload(), 500); }
+async function saveConc(){ const r = await post("/dev/concurrency", {n: $("conc").value || 1}); msg(r.ok, r.message); }
 </script>
 {% endblock %}

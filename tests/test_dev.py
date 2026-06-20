@@ -34,6 +34,15 @@ def test_set_active_delete_and_disabled_skipped():
     assert mdl.delete_model(cfg, "b") and mdl.active_id(cfg) == "a"   # active falls back after delete
 
 
+def test_concurrency_get_set_clamped():
+    cfg = {}
+    assert mdl.get_concurrency(cfg) == 1                  # default = serial
+    assert mdl.set_concurrency(cfg, 5) == 5 and mdl.get_concurrency(cfg) == 5
+    assert mdl.set_concurrency(cfg, 999) == 16            # clamped to max
+    assert mdl.set_concurrency(cfg, 0) == 1               # clamped to min
+    assert mdl.set_concurrency(cfg, "x") == 1             # non-numeric -> 1
+
+
 # ── token tracking + estimate ─────────────────────────────────────────────────
 def test_stub_accrues_tokens():
     s = StubComprehender()
@@ -88,6 +97,18 @@ def test_dev_routes_crud_and_active(tmp_path, monkeypatch):
     assert c.post("/dev/models/activate", data={"id": "sonnet"}).json()["ok"] is True
     assert store["cfg"]["comprehension"]["active_model"] == "sonnet"
     assert c.post("/dev/models/delete", data={"id": mid}).json()["ok"] is True
+
+
+def test_dev_concurrency_route(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import app.main as m
+    monkeypatch.setenv("CLOVER_DEV", "1")
+    store = _store(monkeypatch, m, {"auth": {"imap": {}}, "archive_path": str(tmp_path), "comprehension": {}})
+    c = TestClient(m.app)
+    r = c.post("/dev/concurrency", data={"n": "4"})
+    assert r.json()["ok"] is True and r.json()["concurrency"] == 4
+    assert store["cfg"]["comprehension"]["concurrency"] == 4
+    assert 'id="conc"' in c.get("/dev").text             # control is rendered
 
 
 def test_dev_gated_off(tmp_path, monkeypatch):
