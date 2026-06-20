@@ -43,6 +43,9 @@ _DATE_ISO = re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b")
 _DATE_DMY = re.compile(r"\b(\d{1,2})\s*[-/ ]?\s*([A-Za-z]{3,9})\.?,?\s*(\d{4})\b")   # 14 Mar 2025
 _DATE_MDY = re.compile(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})\b")             # March 5, 2025
 _DATE_NUM = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")                            # 03/04/2025 (day-first)
+# quoted-reply / header lines whose dates are reply machinery (the timestamp of a quoted email),
+# not content the to-do list needs — their dates are skipped.
+_NOISE_LINE = re.compile(r"(?i)^\s*(on\b.*\bwrote:|from:|sent:|to:|cc:|date:|subject:|-{2,}\s*original message)")
 
 
 def _iso(y, mo, d) -> str | None:
@@ -54,26 +57,30 @@ def _iso(y, mo, d) -> str | None:
 
 
 def extract_dates(text: str) -> list[str]:
-    """Canonical ISO dates (deduped, sorted). ``DD/MM/YYYY`` is read **day-first**."""
-    text = text or ""
+    """Canonical ISO dates (deduped, sorted). ``DD/MM/YYYY`` is read **day-first**. Dates on
+    quoted-reply / header lines (``On … wrote:``, ``Sent:``, ``Date:`` …) are skipped — they are
+    reply machinery, not content the to-do list needs."""
     out: dict[str, None] = {}
 
     def add(v):
         if v:
             out[v] = None
 
-    for m in _DATE_ISO.finditer(text):
-        add(_iso(m.group(1), m.group(2), m.group(3)))
-    for m in _DATE_DMY.finditer(text):
-        mo = _MON.get(m.group(2).lower())
-        if mo:
-            add(_iso(m.group(3), mo, m.group(1)))
-    for m in _DATE_MDY.finditer(text):
-        mo = _MON.get(m.group(1).lower())
-        if mo:
-            add(_iso(m.group(3), mo, m.group(2)))
-    for m in _DATE_NUM.finditer(text):
-        add(_iso(m.group(3), m.group(2), m.group(1)))          # day-first: D/M/Y
+    for line in (text or "").splitlines() or [text or ""]:
+        if _NOISE_LINE.match(line):
+            continue
+        for m in _DATE_ISO.finditer(line):
+            add(_iso(m.group(1), m.group(2), m.group(3)))
+        for m in _DATE_DMY.finditer(line):
+            mo = _MON.get(m.group(2).lower())
+            if mo:
+                add(_iso(m.group(3), mo, m.group(1)))
+        for m in _DATE_MDY.finditer(line):
+            mo = _MON.get(m.group(1).lower())
+            if mo:
+                add(_iso(m.group(3), mo, m.group(2)))
+        for m in _DATE_NUM.finditer(line):
+            add(_iso(m.group(3), m.group(2), m.group(1)))      # day-first: D/M/Y
     return sorted(out)
 
 

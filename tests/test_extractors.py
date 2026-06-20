@@ -28,6 +28,11 @@ def test_dates_reject_impossible():
     assert ex.extract_dates("2025-13-40") == []                           # month/day out of range
 
 
+def test_dates_skip_quoted_reply_and_header_lines():
+    text = "Please confirm by 5 Feb 2025.\nOn 14 Mar 2024, John wrote:\nSent: 1 Jan 2023"
+    assert ex.extract_dates(text) == ["2025-02-05"]                       # reply/header dates skipped
+
+
 def test_amounts_canonical_with_multiplier():
     a = {(x["currency"], x["value"]) for x in ex.extract_amounts(
         "Claim SGD 1,234.50, variation $2m, retention USD 500, RM 1k.")}
