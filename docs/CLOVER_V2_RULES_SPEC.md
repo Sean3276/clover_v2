@@ -1,8 +1,8 @@
 # 🍀 Clover v2 — Spec: Resolve flagged threads + learned classification rules (Phase 3 #2)
 
-> Status: **approved, building.** Closes the comprehension feedback loop: the operator answers a
+> Status: **BUILT.** Closes the comprehension feedback loop: the operator answers a
 > flagged classification, and that answer can become an inspectable, deterministic rule that
-> auto-classifies similar threads. Created 2026-06-19. Behaviour → `HOW_CLOVER_WORKS.md`.
+> auto-classifies similar threads. Created 2026-06-19. Behaviour → [`HOW_CLOVER_WORKS.md`](HOW_CLOVER_WORKS.md).
 
 ## Purpose
 

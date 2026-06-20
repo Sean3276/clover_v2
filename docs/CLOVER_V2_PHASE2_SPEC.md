@@ -25,7 +25,7 @@ comprehend. Deterministic, offline, no AI. (Option C: build the index **and** a 
 ## Scope
 
 In: header-based threading, chronological ordering, the `threads.jsonl` index, and a thin
-"Threads" browser (list + stitched reader) in the existing web app.
+**Mail** browser (list + stitched reader; ships as the "Mail" nav tab, routes `/threads`) in the existing web app.
 Out (later phases): subject/semantic linking, comprehension/AI (P3), issue clustering (P4),
 attachment extraction, link-share download.
 
@@ -35,8 +35,9 @@ Two parts, mirroring the pipeline's deterministic/AI split:
 
 1. **Builder — `clover/threads.py`** (pure, testable): reads the archive + `_index.jsonl`,
    links messages into threads, writes `<runtime>/threads.jsonl`. No network; idempotent.
-2. **Browser** — new `/threads` routes + templates in the existing FastAPI app (new "Threads"
-   nav tab). Reads `threads.jsonl` for the list; reads member `.eml` on demand for the reader.
+2. **Browser** — new `/threads` routes + templates in the existing FastAPI app (the **Mail**
+   nav tab; renamed from "Threads", routes still `/threads`). Reads `threads.jsonl` for the list;
+   reads member `.eml` on demand for the reader.
 
 ## Linking & dedup (header-only)
 

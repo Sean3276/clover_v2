@@ -356,13 +356,6 @@ A clinical-trial-style escalator where the **patient is the BENCHMARK earning tr
 - **`clover/eval/gold.jsonl` → CASE records** — add `consolidated_actions:[{...action schema...}]`, `mention_partition`, `identity_map`, `chronology`, `parent_issues`, `planted_defect?`, `adversarial_existence_set` membership, and per-record `gold_version`.
 - **`clover/eval/history/`** — CI fails on any per-class recall regression OR any rise in `oracle_escape_rate_EXISTENCE` / `_VALUES` / `FCR`, and on `benchmark_sensitivity < 100%`.
 
-## Open Questions for the Operator (extends §-Open-Questions)
-
-7. What is the **measured annotator recall against the adversarial existence set** (§10.3) — i.e. how large is the shared human blind spot on implied/politeness/interrogative actions — before IAA is frozen as a value-bar ceiling?
-8. Who staffs the **third, out-of-distribution existence-hunter** (§11.2), and what makes them demonstrably independent of the annotator pool so `oracle_escape_rate_EXISTENCE` is not circular?
-9. What **FCR upper-bound target** (e.g. ≤1%) and **audit sample size** are pre-registered for Stage 2 / Stage 3, and what audit cadence keeps `FCR_upper` meaningful at 1000+ scale without auditor fatigue (extends Open Q6)?
-10. What is the **identity-resolution recall** (§10.2) on adversarial alias/handle/display-name gold before a second channel may join the mixed corpus?
-
 ## Open Questions for the Operator
 
 1. What is the actual inter-annotator agreement on action_item recall once two annotators independently label the first 100-thread gold set? That number sets the real bar-1 ceiling and is currently unknown.
@@ -371,3 +364,7 @@ A clinical-trial-style escalator where the **patient is the BENCHMARK earning tr
 4. For CLOVER-SYNTH, is there any operator-controlled long-context backend (not free cloud) that sustains >128k for whole-project synthesis, or does Phase-4 stay manual until one exists?
 5. What cosine threshold for the frozen entailment matcher minimizes both false-cover (value-level misses scored as recall) and false-miss? This must be tuned against the ACE found-vs-correct split before freezing gold_version 1.
 6. What red-team audit cadence (per gold version? monthly? per N production threads?) keeps oracle_escape_rate meaningful without overloading the second auditor?
+7. What is the **measured annotator recall against the adversarial existence set** (§10.3) — i.e. how large is the shared human blind spot on implied/politeness/interrogative actions — before IAA is frozen as a value-bar ceiling?
+8. Who staffs the **third, out-of-distribution existence-hunter** (§11.2), and what makes them demonstrably independent of the annotator pool so `oracle_escape_rate_EXISTENCE` is not circular?
+9. What **FCR upper-bound target** (e.g. ≤1%) and **audit sample size** are pre-registered for Stage 2 / Stage 3, and what audit cadence keeps `FCR_upper` meaningful at 1000+ scale without auditor fatigue?
+10. What is the **identity-resolution recall** (§10.2) on adversarial alias/handle/display-name gold before a second channel may join the mixed corpus?

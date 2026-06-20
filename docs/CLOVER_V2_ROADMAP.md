@@ -151,9 +151,10 @@ lenses) checks each output; on disagreement or low confidence it **escalates to 
 council**, which clears or sends back for revision. (i) is checked against the raw thread;
 (ii)–(iv) are checked against (i) as the single source of truth. Records consensus strength.
 
-**Output:** per-thread `comprehension.json` `{thread_id, detail (i), abstract (ii),
-summary (iii), event (iv), council:{per-output consensus}, facts:{refs, parties, project,
-dates, amounts}}`. The `facts` block is the structured seed Phase 4 needs.
+**Output:** per-thread `comprehension.jsonl` (one thread per line) `{thread_id, comprehension (i),
+abstract (ii), summary (iii), event (iv), facts:{refs, parties, project, dates, amounts},
+classification:{domain, category, council/consensus}, verified, qaqc}`. The `facts` block is the
+structured seed Phase 4 needs. (Authoritative output shape: [CLOVER_V2_PHASE3_SPEC.md](CLOVER_V2_PHASE3_SPEC.md).)
 
 **Acceptance:** every thread has all four outputs, each council-cleared; (iv) ≤ 30 chars;
 no output contradicts (i); structured `facts` extracted.

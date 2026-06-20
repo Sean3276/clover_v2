@@ -1,6 +1,6 @@
 # 🍀 Clover v2 — Sending Spec: Reply / Reply-all / Forward (direct send, shipped disabled)
 
-> Status: **approved; building — shipped DISABLED by default.** The "delivery" track from the
+> Status: **BUILT — shipped DISABLED by default.** The "delivery" track from the
 > roadmap. This is the first capability that lets Clover **write to your mailbox and send mail**, so
 > it is gated off until explicitly enabled. Created 2026-06-19.
 > Behaviour doc: [`HOW_CLOVER_WORKS.md`](HOW_CLOVER_WORKS.md) (updated when built).

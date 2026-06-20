@@ -150,6 +150,7 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 - **Does:** overrides that thread's classification (`consensus: "resolved"`, flag cleared). A saved rule
   goes to `<archive>/rules.jsonl` and thereafter classifies matching threads **directly** (no AI council,
   `consensus: "rule"`). Rules are inspectable + deletable at **/rules** (Mail → Maintenance → Classification rules).
+  *(Design: `CLOVER_V2_RULES_SPEC.md`.)*
 
 ### Action: **Projects** · `GET /projects` → `GET /projects/{key}`
 - **Does:** groups **comprehended** conversations by their extracted project name (`facts.project`),

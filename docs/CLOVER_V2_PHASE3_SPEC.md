@@ -73,10 +73,10 @@ Default profile (construction; legacy-derived):
   Commercial · Engineering & Operation
 
 **Council (adapted from legacy `classification-council.md`, scaled for the prototype):**
-- **Small council** — one structured pass returning each lens's `{claims?, category, confidence}`
+- **Small council (5 members)** — one structured pass returning each lens's `{claims?, category, confidence}`
   over the active profile's categories (Commercial is the high-stakes safety-net lens). One clear
   claim → filed. Conflict / none / multiple → escalate.
-- **Full council** — only on dispute: a richer adjudication pass **plus a deterministic precedence
+- **Full council (10 members)** — only on dispute: a richer adjudication pass **plus a deterministic precedence
   referee** (ordered rules: instruction/variation → Commercial; signed contract → Commercial;
   claim/EOT/payment → Commercial; safety incident → Safety; else document-type). Still split →
   **ask the operator** (answer saved as a rule).
@@ -97,9 +97,12 @@ prompts handle mixed **English + Chinese**.
 
 ```json
 { "thread_id":"…", "root_id":"…", "subject":"…",
+  "source":"… thread state when comprehended (staleness signature) …",
   "comprehension":"… full chronological understanding …",
   "abstract":"…", "summary":"…", "event":"≤30 chars",
   "facts":{ "project":"…", "parties":["…"], "refs":["…"], "dates":["…"], "amounts":["…"] },
+  "contacts":[ { "name":"…", "position":"…", "company":"…", "phone":"…", "email":"…" } ],
+  "tags":[ "Facet: Value" ],
   "classification":{ "domain":"Project|Corporate", "category":"…", "confidence":0.0,
                      "council":"small|full", "consensus":"…", "dissent":"…" },
   "method":"whole|refine", "model":"sonnet", "profile":"construction",
