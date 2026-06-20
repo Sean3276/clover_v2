@@ -193,35 +193,37 @@ Phase 2 links emails *within* a thread; Phase 4 links *threads into issues*.
    tags of all its threads. As new mail arrives, Phase 3 → match to an existing issue or
    spawn a new one; the issue's status + exposure update.
 
-**Two user-facing Phase-4 products (operator spec, 2026-06-20):**
+**Phase-4 UI — two tabs, three lists (operator spec, 2026-06-20):**
 
-1. **Issues — the full register (everything, not just actions).** Every ongoing matter, **grouped
-   collapsibly by classification: tier-1 domain › tier-2 category** (+ faceted tags). The whole live
-   landscape at a glance, organised by type — NOT filtered to actionable items.
+**Tab 1 — Issues.** The full register of every ongoing matter (NOT just actions), **grouped collapsibly
+by classification: tier-1 domain › tier-2 category** and **filterable by domain and category**. Each
+issue row shows to-do-like content — **title, status, due date, last updated**, references, parties —
+so it reads like a tracked list, not a wall of text.
 
-2. **To-do → "Need You" — the personalized, *learned* action list.** A dedicated list of the concrete
-   to-dos, governed by the **no-miss** bar in
-   [CLOVER_V2_COMPREHENSION_SPEC.md](CLOVER_V2_COMPREHENSION_SPEC.md) (CLOVER-NOMISS + resolvable
-   citations). It is **trained to the user's lens**, not assumed:
-   - Starts as a **general list of ALL actionable items**.
-   - On the summary page each to-do has an **"it's for me / not for me"** toggle.
-   - Clover **learns from those choices** → begins to **propose "it's for you"** → eventually learns
-     the user's focus (their profile lens) = trained to gold → the curated **"Need You"** triage.
-     *(This learning loop IS the per-user calibration — the optional-but-recommended Settings step.)*
-   - **View:** the full list, **sorted by deadline (ascending) by default**, a **classification facet
-     tag** (tier-1 › tier-2) on each item, and **filter + sort** controls (deadline, owner,
-     classification, status, project).
-   - **Two-row display per item:** row 1 = **the action needed**; row 2 = the **one-liner TLDR**
-     (from comprehension) so the user instantly sees what it's about — plus the **event tag**.
+**Tab 2 — To-do.** Two stacked lists: **personalized on top, general below.**
+- **Personalized — "Need You" (the triage).** The items the user marked **"it's for me."** The moment
+  a to-do's *for-me* toggle is turned on it appears here straight away, showing **due date + how many
+  days left (countdown)** and a **★ important toggle** (star / unstar). Default sort: deadline (soonest
+  first); **filter + sort** (deadline, owner, classification, status, project); domain › category facet
+  tag per item.
+- **General — all actionable to-dos.** Every actionable item, each with the **"it's for me / not for
+  me"** toggle. Toggling *for me* promotes it into Need-You above; Clover **learns from these choices**
+  → starts to **propose "it's for you"** → trains to the user's lens (= the per-user relevance
+  calibration; the optional Settings step). Governed by the **no-miss** bar
+  ([CLOVER_V2_COMPREHENSION_SPEC.md](CLOVER_V2_COMPREHENSION_SPEC.md): CLOVER-NOMISS + resolvable citations).
+- **Every to-do is a two-row item:** row 1 = **the action needed**; row 2 = the **one-liner TLDR**
+  (from comprehension) + the **event tag** — action and gist at a glance.
 
 **Output (proposed):** `issues.jsonl` — `{issue_id, title, type, project, classification:{domain,
-category}, status, references:[…], parties:[…], thread_ids:[…], timeline:[{date, event, thread_id}],
-cost_time_exposure, opened, last_update}` (the **Issues** register, grouped collapsibly by
-domain › category). Plus per-user `action_list.jsonl` — `{action_id, issue_id, thread_id, what,
-about (short context, e.g. "door contract"), owner, counterparty, direction, due_raw, due_canonical,
-status, priority, classification:{domain, category}, one_liner, event, source:{message_id, span},
-for_me:"yes"|"no"|"proposed"}` — the **To-do / Need-You** list: every item cited (CLOVER-NOMISS),
-two-row display (what + one-liner), `for_me` trained from the user's it's-for-me/not-for-me feedback.
+category}, status, due, last_update, references:[…], parties:[…], thread_ids:[…],
+timeline:[{date, event, thread_id}], cost_time_exposure, opened}` (the **Issues** register —
+collapsible + filterable by domain › category). Plus per-user `action_list.jsonl` —
+`{action_id, issue_id, thread_id, what, about (short context, e.g. "door contract"), owner,
+counterparty, direction, due_raw, due_canonical, status, priority, important (★ user star),
+classification:{domain, category}, one_liner, event, source:{message_id, span},
+for_me:"yes"|"no"|"proposed"}` — the **To-do** list (personalized "Need You" first, general below);
+`days_left` is derived from `due_canonical`; every item cited (CLOVER-NOMISS); `for_me` + `important`
+are the user's triage signals (and `for_me` trains the lens).
 The per-thread `action` object (Phase 3) therefore carries `about` + links to the thread's
 `one_liner` and `event` so Phase 4 can render the two rows.
 
