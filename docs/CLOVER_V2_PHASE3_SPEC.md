@@ -1,7 +1,11 @@
 # 🍀 Clover v2 — Phase 3 Spec: Comprehension (first AI phase)
 
-> Status: **approved, building**. Consumes Phase 2 `threads.jsonl` + the `.eml` archive;
+> Status: **built**. Consumes Phase 2 `threads.jsonl` + the `.eml` archive;
 > produces `comprehension.jsonl`. The only phase that needs AI. Created 2026-06-18.
+> Updated 2026-06-20: step-8 per-layer verification (ii)–(iv) now enforced, the per-email **task**
+> is complete only when every output verifies, and tasks run **concurrently** (see Task model below).
+> Output quality is graded by the reliability harness in
+> [`CLOVER_V2_COMPREHENSION_SPEC.md`](CLOVER_V2_COMPREHENSION_SPEC.md).
 
 ## Purpose
 
@@ -46,7 +50,20 @@ classification, so the archive becomes searchable, summarised intelligence — a
    thread (deterministic); council consensus recorded. Low-confidence → flagged / operator ask.
 9. **Record** — append to `comprehension.jsonl`.
 
-## Classification — two-level, profile-driven 2-tier council
+## Task model & concurrency
+
+- **One email = one packaged task.** Steps 1–9 are a single task per thread. The task is **COMPLETE
+  only when every output (i)–(iv) + facts + classification is produced AND verified** (step 8). The
+  verification of (ii)–(iv) against (i) is a *required* part of the task, not optional; a failure at
+  any check sets `needs_review` — **never a silent ship**. (Implemented in `comprehend_thread`:
+  comprehension-vs-source QA with one re-comprehend retry, the deterministic fact-check, and the
+  distilled-layer check `verify_distill`; `qaqc.needs_review` is true unless all pass.)
+- **Concurrency.** Tasks run in parallel — up to **K emails at once**, K set in the developer panel
+  (`/dev`, default 1). Each task independently drives and monitors its own sequence of CLI calls
+  (comprehend → distill → classify → verify) to completion. **Within a task the calls are sequential**
+  (each needs the previous); **across tasks they run concurrently** (independent CLI subprocesses).
+  No quality is traded for concurrency — every task runs the full verified cascade regardless of how
+  many run at once; only the backend's token tally is shared (lock-guarded).
 
 Default profile (construction; legacy-derived):
 
@@ -86,7 +103,10 @@ prompts handle mixed **English + Chinese**.
   "classification":{ "domain":"Project|Corporate", "category":"…", "confidence":0.0,
                      "council":"small|full", "consensus":"…", "dissent":"…" },
   "method":"whole|refine", "model":"sonnet", "profile":"construction",
-  "verified":{ "facts_ok":true, "grounded":true }, "ts":"…" }
+  "verified":{ "facts_ok":true, "grounded":true,
+               "abstract_ok":true, "summary_ok":true, "event_ok":true },
+  "qaqc":{ "passed":true, "distill_passed":true, "needs_review":false,
+           "faithfulness":1.0, "completeness":1.0, "attempts":1, "issues":[] }, "ts":"…" }
 ```
 
 ## Run model

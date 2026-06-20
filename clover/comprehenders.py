@@ -86,6 +86,8 @@ class StubComprehender(Comprehender):
                     "dispute": False, "dissent": ""}
         if task == "qa":
             return {"passed": True, "faithfulness": 1.0, "completeness": 1.0, "issues": []}
+        if task == "verify_distill":
+            return {"passed": True, "abstract_ok": True, "summary_ok": True, "event_ok": True, "issues": []}
         return {} if schema else ""
 
 

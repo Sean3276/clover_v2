@@ -169,6 +169,23 @@ def test_qaqc_fails_when_a_fact_is_ungrounded(tmp_path):
     assert rec["verified"]["facts_ok"] is False and rec["qaqc"]["needs_review"] is True
 
 
+def test_distill_verification_flags_unfaithful_abstract(tmp_path):
+    # step 8 (ii)-(iv) vs (i): a drifting abstract flags the task even when the comprehension itself passes
+    stub = StubComprehender(responses={"verify_distill": {
+        "passed": False, "abstract_ok": False, "summary_ok": True, "event_ok": True,
+        "issues": ["abstract states something the comprehension does not support"]}})
+    rec = cp.comprehend_thread(tmp_path, _one_thread(tmp_path), stub, get_profile())
+    assert rec["verified"]["abstract_ok"] is False
+    assert rec["qaqc"]["distill_passed"] is False and rec["qaqc"]["needs_review"] is True
+
+
+def test_task_complete_only_when_all_layers_verify(tmp_path):
+    # a clean task records the per-layer verification and is NOT flagged
+    rec = cp.comprehend_thread(tmp_path, _one_thread(tmp_path), StubComprehender(), get_profile())
+    assert rec["verified"]["abstract_ok"] and rec["verified"]["summary_ok"] and rec["verified"]["event_ok"]
+    assert rec["qaqc"]["distill_passed"] is True and rec["qaqc"]["needs_review"] is False
+
+
 # ---------------------------------------------------------------- fact verification hardening
 def test_verify_rejects_fabricated_amount_spanning_two_numbers():
     out, dropped = cp._verify_facts({"amounts": ["1002"]}, "Call me at 6512 3456 then ref 100200300")

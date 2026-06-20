@@ -36,6 +36,9 @@ _CLASSIFY_SCHEMA = {"domain": "str", "category": "str", "confidence": "number 0.
                     "dispute": "bool", "dissent": "str", "votes": "str"}
 _QA_SCHEMA = {"passed": "bool", "faithfulness": "number 0..1", "completeness": "number 0..1",
               "issues": ["str"]}
+# step-8 (ii)-(iv) vs (i): verify the distilled abstract / one-liner / event tag against the comprehension
+_DISTILL_QA_SCHEMA = {"passed": "bool", "abstract_ok": "bool", "summary_ok": "bool",
+                      "event_ok": "bool", "issues": ["str"]}
 _SMALL_COUNCIL, _FULL_COUNCIL = 5, 10
 
 
@@ -392,6 +395,16 @@ def _qa_prompt(comprehension, thread_text):
             "COMPREHENSION:\n" + comprehension + "\n\nSOURCE:\n" + thread_text)
 
 
+def _distill_qa_prompt(comprehension, abstract, summary, event):
+    return ("You are a strict reviewer checking distilled outputs against the COMPREHENSION (the single "
+            "source of truth). For EACH of the abstract, the one-liner summary, and the event tag, decide: "
+            "is it FAITHFUL (states nothing the comprehension does not support) and not LOSSY (omits no "
+            "material point that belongs at its level of detail)? Set abstract_ok / summary_ok / event_ok, "
+            "passed=true ONLY if all three hold, and list specific issues.\n\nCOMPREHENSION:\n"
+            + comprehension + "\n\nABSTRACT:\n" + (abstract or "") + "\n\nONE-LINER:\n" + (summary or "")
+            + "\n\nEVENT TAG:\n" + (event or ""))
+
+
 def _build_once(archive, thread, backend, profile, max_chars, model):
     msgs = _thread_messages(archive, thread)
     full = "\n\n----\n\n".join(msgs)
@@ -434,29 +447,47 @@ def _build_once(archive, thread, backend, profile, max_chars, model):
 
 def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Profile,
                       *, max_chars: int = 120_000, model: str = "?", qaqc: bool = True) -> dict:
-    """Build the comprehension record, then run the QAQC gate: an AI reviewer scores faithfulness +
-    completeness against the source (and the deterministic fact-check must pass). On failure it
-    re-comprehends ONCE; if it still fails the record is marked `needs_review` (never silently shipped)."""
+    """Build the record, then run the FULL task verification before the task counts as COMPLETE
+    (Phase-3 spec step 8). Two gates: (a) the comprehension (i) is checked for faithfulness +
+    completeness vs the source — re-comprehend ONCE on failure; and (b) the distilled abstract /
+    one-liner / event tag (ii)-(iv) are each verified against the comprehension (i). The deterministic
+    fact-check must also pass. Any failure -> `needs_review` (never silently shipped)."""
     rec, full = _build_once(archive, thread, backend, profile, max_chars, model)
     if not qaqc:
         return rec
+
+    # (a) comprehension (i) vs raw source — faithfulness + completeness; re-comprehend once on failure
+    comp = None
     for attempt in (1, 2):
         qa = backend.generate("qa", _qa_prompt(rec["comprehension"], full), schema=_QA_SCHEMA) or {}
         passed = bool(qa.get("passed")) and rec["verified"]["facts_ok"]
         issues = [str(i) for i in (qa.get("issues") or [])][:6]
         if passed or attempt == 2:
-            rec["qaqc"] = {"passed": passed, "faithfulness": _f(qa.get("faithfulness")),
-                           "completeness": _f(qa.get("completeness")),
-                           "issues": issues, "attempts": attempt, "needs_review": not passed}
-            return rec
+            comp = {"passed": passed, "faithfulness": _f(qa.get("faithfulness")),
+                    "completeness": _f(qa.get("completeness")), "issues": issues, "attempts": attempt}
+            break
         try:
             rec, full = _build_once(archive, thread, backend, profile, max_chars, model)   # one retry
         except Exception as e:                 # retry failed -> keep the first attempt, flag for review
-            rec["qaqc"] = {"passed": False, "faithfulness": _f(qa.get("faithfulness")),
-                           "completeness": _f(qa.get("completeness")),
-                           "issues": issues + [f"retry failed: {type(e).__name__}"],
-                           "attempts": attempt, "needs_review": True}
-            return rec
+            comp = {"passed": False, "faithfulness": _f(qa.get("faithfulness")),
+                    "completeness": _f(qa.get("completeness")),
+                    "issues": issues + [f"retry failed: {type(e).__name__}"], "attempts": attempt}
+            break
+
+    # (b) distilled (ii)-(iv) vs the comprehension (i) — the step-8 check the task must also pass
+    dq = backend.generate("verify_distill",
+                          _distill_qa_prompt(rec["comprehension"], rec["abstract"], rec["summary"],
+                                             rec["event"]), schema=_DISTILL_QA_SCHEMA) or {}
+    rec["verified"].update({"abstract_ok": bool(dq.get("abstract_ok", True)),
+                            "summary_ok": bool(dq.get("summary_ok", True)),
+                            "event_ok": bool(dq.get("event_ok", True))})
+    distill_passed = bool(dq.get("passed", True)) and all(
+        rec["verified"][k] for k in ("abstract_ok", "summary_ok", "event_ok"))
+
+    # the TASK is COMPLETE only when BOTH the comprehension and every distilled layer verify
+    rec["qaqc"] = {**comp, "distill_passed": distill_passed,
+                   "issues": (comp["issues"] + [str(i) for i in (dq.get("issues") or [])])[:8],
+                   "needs_review": (not comp["passed"]) or (not distill_passed)}
     return rec
 
 
