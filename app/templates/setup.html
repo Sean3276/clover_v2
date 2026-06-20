@@ -1,11 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Setup · Clover v2{% endblock %}
+{% block title %}Settings · Clover v2{% endblock %}
 {% block nav_setup %}active{% endblock %}
 {% block body %}
-<h1>Setup</h1>
-<p class="note"><strong>Step 1 — connect your mailbox.</strong> Enter your email provider's IMAP details, click
-  <strong>Test IMAP</strong> to check the connection, then <strong>Save &amp; continue</strong>. Your password is
-  stored in your OS keyring (never in config files or logs).</p>
+<h1>Settings</h1>
+<p class="note"><strong>Connect your mailbox</strong> (IMAP), and tune how Clover classifies. Enter your provider's
+  IMAP details, click <strong>Test IMAP</strong>, then <strong>Save</strong>. Your password is stored in your OS
+  keyring (never in config files or logs).</p>
+<div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+  <span class="note" style="flex:1;min-width:220px">⚖ <strong>Classification</strong> — edit the taxonomy the AI files mail against, and the rules you've taught it.</span>
+  <a href="/profile" class="btn ghost" style="text-decoration:none">Profile &amp; taxonomy →</a>
+  <a href="/rules" class="btn ghost" style="text-decoration:none">Learned rules →</a>
+</div>
 {% if error %}<div class="msg err" role="alert" style="display:block">{{ error }}</div>{% endif %}
 
 <form id="f" method="post" action="/setup/save">

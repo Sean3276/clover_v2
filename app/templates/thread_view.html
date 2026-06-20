@@ -61,7 +61,7 @@
   @media (max-width:640px){ .lrow{flex-wrap:wrap} .lprov{min-width:0} .scrollnav{right:10px;bottom:10px} }
 </style>
 
-<p style="margin:0 0 6px"><a href="/threads" class="note">← all mail</a></p>
+<p style="margin:0 0 6px">{% if back %}<a href="{{ back.url }}" class="note">{{ back.label }}</a> · <a href="/threads" class="note">all mail</a>{% else %}<a href="/threads" class="note">← all mail</a>{% endif %}</p>
 <h1 style="font-size:20px;margin:0 0 4px">{{ thread.subject }}</h1>
 <p class="note">{{ thread.n }} message(s) · {{ thread.participants|join(', ') }}
   · {{ (thread.start or '')[:10] }}{% if thread.n > 1 %} → {{ (thread.end or '')[:10] }}{% endif %}</p>
@@ -69,7 +69,7 @@
 {% if comp %}
 <div class="card comp">
   <div class="compbadges">
-    <span class="leaf" title="Comprehended by {{ comp.model }} · read {{ comp.method }} thread">🍀</span>
+    <span class="leaf{% if stale %} stale{% endif %}" title="Comprehended by {{ comp.model }} · read {{ comp.method }} thread{% if stale %} · OUT OF DATE — new messages since{% endif %}">🍀</span>
     <span class="cbadge dom">{{ comp.classification.domain }}</span>
     <span class="cbadge">{{ comp.classification.category }}</span>
     <span class="cbadge {% if comp.classification.consensus == 'asked' %}warn{% endif %}" title="{{ comp.classification.council }} council ({{ comp.classification.members or '' }} members){% if comp.classification.votes %} · {{ comp.classification.votes }}{% endif %}">{{ comp.classification.consensus }}{% if comp.classification.members %} · {{ comp.classification.members }}-member{% endif %}</span>
@@ -77,6 +77,11 @@
     {% if comp.event %}<span class="cbadge" title="event tag (≤30 chars)">🏷 {{ comp.event }}</span>{% endif %}
     {% if comp.qaqc and comp.qaqc.needs_review %}<span class="cbadge warn" title="QAQC gate flagged this — review against the source">⚠ needs review</span>{% endif %}
   </div>
+  {% if stale %}
+  <p class="note" style="margin:6px 0 0;color:var(--amber)"><span class="leaf stale">🍀</span>
+    <strong>Out of date.</strong> New messages arrived since this was comprehended — re-comprehend to refresh.
+    {% if ai_ready %}<button type="button" class="linkbtn" onclick="comprehend()">↻ Re-comprehend now</button>{% endif %}</p>
+  {% endif %}
   {% if comp.qaqc and comp.qaqc.needs_review and comp.qaqc.issues %}
   <p class="note dim" style="margin:6px 0 0"><strong>QAQC:</strong> {{ comp.qaqc.issues|join('; ') }}</p>
   {% endif %}
@@ -95,8 +100,9 @@
     {% if comp.facts.parties %}<span><b>Parties:</b> {{ comp.facts.parties|join(', ') }}</span>{% endif %}
   </div>
   {% endif %}
+  {% if comp.tags %}<div class="cbadges" style="margin-top:6px">{% for tag in comp.tags %}<span class="cbadge" title="facet tag">🏷 {{ tag }}</span>{% endfor %}</div>{% endif %}
   {% if comp.verified and not comp.verified.facts_ok %}<p class="note dim" style="margin-top:8px">⚠ Some extracted facts weren't found in the thread and were dropped.</p>{% endif %}
-  {% if comp.classification.consensus in ('asked', 'rule', 'resolved') or (comp.qaqc and comp.qaqc.needs_review) %}
+  {% if comp.classification %}   {# always offer Resolve on a comprehended thread (collapsed unless flagged) #}
   <details class="resolvebox" style="margin-top:10px"{% if comp.qaqc and comp.qaqc.needs_review or comp.classification.consensus == 'asked' %} open{% endif %}>
     <summary class="note" style="cursor:pointer">✎ Resolve / reclassify{% if comp.classification.consensus in ('asked',) or (comp.qaqc and comp.qaqc.needs_review) %} — this thread needs your decision{% endif %}</summary>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:8px">

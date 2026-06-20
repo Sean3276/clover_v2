@@ -6,6 +6,20 @@
   .thtools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
   .thtools input{flex:1;min-width:220px}
   .thtools select{width:auto}
+  .comprow{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px}
+  .comprow select,.comprow input[type=date]{width:auto}
+  .comprow input[type=checkbox]{width:auto;flex:none;accent-color:var(--clover);margin:0}
+  /* keep the toggle on one line (it has class "note", which otherwise breaks words mid-word) */
+  .comprow label{margin:0;text-transform:none;letter-spacing:0;white-space:nowrap;overflow-wrap:normal;
+    display:inline-flex;gap:6px;align-items:center;flex:none;cursor:pointer}
+  .comprow #compRunBtn,.comprow #compStopBtn{margin-left:auto}   /* push the action right, clear of the toggle */
+  .ctrack{height:8px;background:var(--track-bg);border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-top:10px}
+  .cfill{height:100%;background:linear-gradient(90deg,var(--clover),var(--cyan));width:0;transition:width .3s ease}
+  .thchips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+  .chip{font-size:12px;font-weight:600;border:1px solid var(--line);border-radius:14px;padding:3px 11px;
+    background:var(--card2);color:var(--sub);cursor:pointer}
+  .chip:hover{border-color:var(--clover);color:var(--ink)}
+  .chip.active{background:var(--clover);color:var(--btn-ink);border-color:var(--clover)}
 </style>
 
 <div class="runhdr">
@@ -16,10 +30,12 @@
       and their share links are built automatically after each archive.</p>
     <p class="note" style="margin:6px 0 0;display:flex;gap:12px;flex-wrap:wrap;align-items:center">
       <span><span class="leaf">🍀</span> comprehended (AI-read)</span>
+      <span><span class="leaf stale">🍀</span> out of date — re-comprehend</span>
+      <span>📎 attachment</span>
+      <span><span style="color:var(--clover)">🔗</span> link fetched · <span style="color:var(--amber)">🔗</span> link to fetch</span>
       <span><span class="cbadge proj">🏗 name</span> project</span>
-      <span><span class="cbadge dom">domain</span> <span class="cbadge">category</span></span>
       <span><span class="cbadge warn">review</span> needs your check</span>
-      <span class="help" tabindex="0" role="note" data-tip="When a conversation is comprehended, its row shows the 🍀 stamp, the project (🏗), its domain + category, and a 'review' chip if the AI council was unsure or the QAQC check flagged it. Open the conversation to read the full comprehension and resolve any 'review'.">?</span></p></div>
+      <span class="help" tabindex="0" role="note" data-tip="Each row: 🍀 comprehended (brown = out of date), 📎 has an attachment, 🔗 has a share link (green = downloaded, amber = still to fetch), 🏗 project, domain + category, and 'review' if the AI council was unsure or QAQC flagged it. Open a conversation to read it and resolve any 'review'.">?</span></p></div>
 </div>
 
 {% if not has_index %}
@@ -31,6 +47,42 @@
   <div id="rebuildMsg" class="msg"></div>
 </div>
 {% else %}
+<div class="card" id="compCard">
+  <div class="runhdr"><div>
+    <h2 style="margin:0;color:var(--ink);text-transform:none;letter-spacing:.01em;font-size:16px">🍀 Comprehend</h2>
+    <p class="note" style="margin:4px 0 0">AI reads whole threads (council classify + QAQC check) and fills projects, facts &amp; contacts.
+      <span id="compCounts"><strong>{{ comp_counts.done }}</strong> done · {{ comp_counts.pending }} new ·
+      <span style="color:var(--amber)">{{ comp_counts.stale }} out&#8209;of&#8209;date</span></span>.</p>
+  </div></div>
+  {% if not ai_ready %}
+  <p class="note dim" style="margin:10px 0 0">AI backend not set up — install the Claude CLI
+    (<code>npm i -g @anthropic-ai/claude-code</code>) and log in, then reload.</p>
+  {% else %}
+  <div class="comprow">
+    <select id="compMode" onchange="compModeChange()" aria-label="What to comprehend">
+      <option value="all">All that need it (new + out&#8209;of&#8209;date)</option>
+      <option value="project">By project…</option>
+      <option value="duration">By date range…</option>
+    </select>
+    <select id="compProject" style="display:none" aria-label="Project">
+      {% for p in projects %}<option value="{{ p.key }}">{{ p.name }} ({{ p.count }})</option>{% endfor %}
+    </select>
+    <span id="compDates" style="display:none;align-items:center;gap:6px">
+      <input type="date" id="compFrom" aria-label="From date"> <span class="note">→</span> <input type="date" id="compTo" aria-label="To date">
+    </span>
+    <label class="note"><input type="checkbox" id="compRedo"> re-do already-comprehended</label>
+    <button id="compRunBtn" type="button" onclick="compRun()">Comprehend</button>
+    <button id="compStopBtn" type="button" class="ghost" onclick="compStop()" style="display:none">⏹ Stop</button>
+  </div>
+  <div id="compProgWrap" style="display:none">
+    <div class="ctrack"><div id="compFill" class="cfill"></div></div>
+    <p class="note" id="compProg" style="margin:6px 0 0"></p>
+    <p class="note dim" id="compProg2" style="margin:2px 0 0"></p>
+    <pre class="log" id="compLog" style="display:none;max-height:120px;margin-top:6px"></pre>
+  </div>
+  <div id="compMsg" class="msg" role="status" aria-live="polite"></div>
+  {% endif %}
+</div>
 {% if link_total %}
 <div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px;padding:12px 16px">
   <span class="note" style="flex:1;min-width:240px">🔗 Share links: {{ link_total }} catalogued —
@@ -41,6 +93,7 @@
     <strong style="color:var(--amber)">{{ link_stats['needs-confirm'] }} large — open the thread to confirm</strong>{% endif %}.<span id="lsLive" class="dim"></span></span>
   <button id="fetchBtn" type="button" onclick="fetchLinks()"{% if not link_stats.get('pending', 0) %} style="display:none"{% endif %} title="Download every not-yet-downloaded link file in your archive (headless browser, runs in the background)">⬇ Download <span id="fetchN">{{ link_stats.get('pending', 0) }}</span> pending</button>
   <button id="stopLinksBtn" type="button" class="ghost" onclick="stopLinks()" title="Halt a running download" style="display:none">⏹ Stop</button>
+  <div id="lsTriage" class="note" style="flex-basis:100%"></div>
 </div>
 {% endif %}
 <details style="margin-top:10px">
@@ -66,17 +119,28 @@
     </select>
     <span id="count" class="note"></span>
   </div>
+  <div class="thchips" id="thchips">
+    <button type="button" class="chip active" data-s="" onclick="setStatus(this,'')">All</button>
+    <button type="button" class="chip" data-s="review" onclick="setStatus(this,'review')">⚠ Needs review</button>
+    <button type="button" class="chip" data-s="uncomprehended" onclick="setStatus(this,'uncomprehended')">Not comprehended</button>
+    <button type="button" class="chip" data-s="stale" onclick="setStatus(this,'stale')">Out of date</button>
+    {% for cat in cats %}<button type="button" class="chip" onclick="setCat('{{ cat }}')" title="Filter to {{ cat }}">{{ cat }}</button>{% endfor %}
+  </div>
   <div id="list" class="thlist">
     {% for t in threads %}
+    {% set c = comps.get(t.thread_id) %}
+    {% set lk = linkstate.get(t.thread_id) %}
+    {% set is_stale = t.thread_id in stale %}
+    {% set needs = c and (c.classification.consensus == 'asked' or (c.qaqc and c.qaqc.needs_review)) %}
     <a class="throw" href="/threads/{{ t.thread_id }}"
        data-n="{{ t.n }}" data-end="{{ t.end or '' }}" data-start="{{ t.start or '' }}"
-       data-q="{{ (t.subject ~ ' ' ~ (t.participants|join(' ')))|lower }}">
+       data-status="{{ 'comprehended' if c else 'uncomprehended' }}{% if needs %} review{% endif %}{% if is_stale %} stale{% endif %}"
+       data-q="{{ (t.subject ~ ' ' ~ (t.participants|join(' ')) ~ ' ' ~ (c.classification.domain if c else '') ~ ' ' ~ (c.classification.category if c else '') ~ ' ' ~ ((c.facts.project if (c and c.facts) else '')) ~ ' ' ~ (c.summary if c else '') ~ ' ' ~ ((c.tags|join(' ')) if c else '') ~ ' ' ~ ('comprehended' if c else 'not comprehended') ~ (' review' if needs else '') ~ (' out of date' if is_stale else ''))|lower }}">
       <div class="thmain">
-        {% set c = comps.get(t.thread_id) %}
-        <span class="thsubj">{% if c %}<span class="leaf" title="Comprehended">🍀</span> {% endif %}{{ t.subject }}</span>
+        <span class="thsubj">{% if c %}{% if t.thread_id in stale %}<span class="leaf stale" title="Comprehended — out of date (thread changed since)">🍀</span>{% else %}<span class="leaf" title="Comprehended (up to date)">🍀</span>{% endif %} {% endif %}{% if t.has_attach %}<span title="Has an attachment">📎</span> {% endif %}{% if lk %}{% if lk.pending %}<span style="color:var(--amber)" title="{{ lk.pending }} share link(s) still to fetch{% if lk.fetched %}, {{ lk.fetched }} downloaded{% endif %} — use ⬇ Download on this page or open the thread">🔗</span> {% elif lk.fetched %}<span style="color:var(--clover)" title="{{ lk.fetched }} share link(s) downloaded">🔗</span> {% endif %}{% endif %}{{ t.subject }}</span>
         {% if c %}
         <span class="thmeta note">{{ c.summary or (c.classification.category ~ ' — comprehended') }}</span>
-        <span class="cbadges">{% if c.facts and c.facts.project %}<span class="cbadge proj">🏗 {{ c.facts.project }}</span>{% endif %}<span class="cbadge dom">{{ c.classification.domain }}</span><span class="cbadge">{{ c.classification.category }}</span>{% if c.classification.consensus == 'asked' or (c.qaqc and c.qaqc.needs_review) %}<span class="cbadge warn">review</span>{% endif %}</span>
+        <span class="cbadges">{% if c.facts and c.facts.project %}<span class="cbadge proj">🏗 {{ c.facts.project }}</span>{% endif %}<span class="cbadge dom">{{ c.classification.domain }}</span><span class="cbadge">{{ c.classification.category }}</span>{% if needs %}<span class="cbadge warn" tabindex="0" title="{% if c.classification.consensus == 'asked' %}The AI council was split and couldn't agree on the category. {% endif %}{% if c.qaqc and c.qaqc.needs_review %}QAQC check flagged: {{ (c.qaqc.issues or ['faithfulness/completeness'])|join('; ') }}. {% endif %}→ Open this conversation and use ‘Resolve / reclassify’ to set the correct domain &amp; category.">review</span>{% endif %}{% if is_stale %}<span class="cbadge warn" title="Comprehended before the thread changed — re-comprehend to update.">OUT OF DATE</span>{% endif %}</span>
         {% else %}
         <span class="thmeta note">{{ t.participants[:3]|join(', ') }}{% if t.participants|length > 3 %} +{{ t.participants|length - 3 }} more{% endif %}</span>
         {% endif %}
@@ -95,12 +159,41 @@
 
 <script>
 const $ = id => document.getElementById(id);
+let _statusFilter = "";
+function setStatus(btn, val){
+  _statusFilter = val;
+  document.querySelectorAll(".chip[data-s]").forEach(b => b.classList.toggle("active", b === btn));
+  apply();
+}
+function setCat(cat){
+  _statusFilter = "";
+  document.querySelectorAll(".chip[data-s]").forEach(b => b.classList.toggle("active", b.dataset.s === ""));
+  if($("filter")) $("filter").value = cat;
+  apply();
+}
+function _initThreadFilters(){
+  const rows = [...document.querySelectorAll(".throw")];           // annotate status chips with counts
+  const cnt = sel => rows.filter(r => (r.dataset.status || "").includes(sel)).length;
+  [["review", "⚠ Needs review"], ["uncomprehended", "Not comprehended"], ["stale", "Out of date"]].forEach(([s, base]) => {
+    const b = document.querySelector('.chip[data-s="' + s + '"]'); const c = cnt(s);
+    if(b) b.textContent = base + (c ? " (" + c + ")" : "");
+  });
+  const p = new URLSearchParams(location.search);
+  if(p.get("category") && $("filter")) $("filter").value = p.get("category");
+  const st = p.get("status");
+  if(st){ const b = document.querySelector('.chip[data-s="' + st + '"]'); if(b){ setStatus(b, st); return; } }
+  apply();
+}
 function apply(){
   const q = ($("filter").value || "").toLowerCase().trim();
   const sort = $("sort").value;
   const rows = [...document.querySelectorAll(".throw")];
   let shown = 0;
-  rows.forEach(r => { const ok = !q || (r.dataset.q || "").includes(q); r.style.display = ok ? "" : "none"; if(ok) shown++; });
+  rows.forEach(r => {
+    const ok = (!q || (r.dataset.q || "").includes(q)) &&
+               (!_statusFilter || (r.dataset.status || "").includes(_statusFilter));
+    r.style.display = ok ? "" : "none"; if(ok) shown++;
+  });
   const vis = rows.filter(r => r.style.display !== "none");
   vis.sort((a,b) => {
     if(sort === "size") return (+b.dataset.n) - (+a.dataset.n);
@@ -111,7 +204,11 @@ function apply(){
   if($("count")) $("count").textContent = shown + " thread(s)";
   if($("empty")) $("empty").style.display = (shown === 0 && q) ? "" : "none";
 }
-function clearFilter(){ if($("filter")){ $("filter").value = ""; apply(); $("filter").focus(); } }
+function clearFilter(){
+  if($("filter")) $("filter").value = "";
+  const all = document.querySelector('.chip[data-s=""]'); if(all) setStatus(all, ""); else apply();
+  if($("filter")) $("filter").focus();
+}
 async function rebuild(){
   const b = $("rebuildBtn"), m = $("rebuildMsg");
   if(b) b.disabled = true;
@@ -154,9 +251,23 @@ async function pollLinks(){
     if(fb){ if(st.pending){ fb.style.display = ""; if(fn) fn.textContent = st.pending; } else { fb.style.display = "none"; } }
     const sb = $("stopLinksBtn"); if(sb) sb.style.display = s.running ? "" : "none";
     const live = $("lsLive");
-    if(s.running){ if(live) live.innerHTML = ' · <span class="clover-spin">🍀</span> downloading…';
-      clearTimeout(_linkPoll); _linkPoll = setTimeout(pollLinks, 3000); }
-    else { if(live) live.textContent = ""; _linkPoll = null; }
+    if(s.running){
+      if(live) live.innerHTML = ' · <span class="clover-spin">🍀</span> downloading ' + (s.done||0) + '/' + (s.batch_total||0) +
+        (s.current ? ' · ' + s.current.slice(0,46) : '') + (s.failed ? ' · ' + s.failed + ' failed' : '');
+      clearTimeout(_linkPoll); _linkPoll = setTimeout(pollLinks, 3000);
+    } else { if(live) live.textContent = ""; _linkPoll = null; }
+    const tri = $("lsTriage");                               // needs-auth / dead triage (actionable)
+    if(tri){
+      const na = s.needs_auth || [], dd = s.dead || [], esc = u => (u||"").replace(/"/g,"&quot;");
+      let h = "";
+      if(na.length) h += "<details style='margin-top:4px'><summary style='cursor:pointer;color:var(--amber)'>🔐 " +
+        ((s.stats||{})['needs-auth'] || na.length) + " need sign-in — open &amp; download manually</summary>" +
+        na.map(x => '<div class="mono" style="font-size:11px">· <a href="' + esc(x.url) + '" target="_blank" rel="noopener noreferrer">' + esc(x.url).slice(0,90) + '</a></div>').join('') + "</details>";
+      if(dd.length) h += "<details style='margin-top:4px'><summary style='cursor:pointer'>💀 " +
+        ((s.stats||{})['dead'] || dd.length) + " dead link(s)</summary>" +
+        dd.map(x => '<div class="mono" style="font-size:11px">· ' + esc(x.url).slice(0,90) + '</div>').join('') + "</details>";
+      tri.innerHTML = h;
+    }
   }catch(e){ _linkPoll = null; }
 }
 async function stopLinks(){
@@ -166,6 +277,64 @@ async function stopLinks(){
     if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }
   }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Stop failed: " + e; } }
 }
-document.addEventListener("DOMContentLoaded", () => { if($("list")) apply(); if($("lsLive")) pollLinks(); });
+// ---- batch comprehension ----
+function compModeChange(){
+  const m = $("compMode").value;
+  $("compProject").style.display = m === "project" ? "" : "none";
+  $("compDates").style.display = m === "duration" ? "inline-flex" : "none";
+}
+async function compRun(){
+  if(!confirm("Comprehend the selected threads now?\n\nThis uses the AI backend (council classify + QAQC check), runs in the background, and you can Stop it anytime.")) return;
+  const mode = $("compMode").value, fd = new FormData();
+  fd.append("mode", mode);
+  if(mode === "project") fd.append("project_key", $("compProject").value || "");
+  if(mode === "duration"){ fd.append("date_from", $("compFrom").value || ""); fd.append("date_to", $("compTo").value || ""); }
+  if($("compRedo").checked) fd.append("redo", "1");
+  const m = $("compMsg"); m.className = "msg ok"; m.textContent = "Starting…";
+  try{
+    const res = await (await fetch("/comprehend/run", {method:"POST", body:fd})).json();
+    m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message;
+    if(res.ok) pollComp();
+  }catch(e){ m.className = "msg err"; m.textContent = "Failed: " + e; }
+}
+async function compStop(){
+  try{ const res = await (await fetch("/comprehend/stop", {method:"POST"})).json();
+       const m = $("compMsg"); m.className = "msg ok"; m.textContent = res.message; }catch(e){}
+}
+let _compPoll = null, _compSawRun = false;
+async function pollComp(){
+  try{
+    const s = await (await fetch("/comprehend/status")).json();
+    if($("compRunBtn")) $("compRunBtn").style.display = s.running ? "none" : "";
+    if($("compStopBtn")) $("compStopBtn").style.display = s.running ? "" : "none";
+    if($("compProgWrap")) $("compProgWrap").style.display = (s.running || s.total) ? "" : "none";
+    if(s.total && $("compFill")){
+      $("compFill").style.width = Math.round(100 * s.done / s.total) + "%";
+      const beat = s.running ? '<span class="clover-spin">🍀</span> ' : (s.done >= s.total ? '✓ ' : '⏹ ');
+      $("compProg").innerHTML = beat + s.done + " / " + s.total +
+        (s.running && s.current ? " · now: " + s.current.slice(0,70) : "");
+      const eta = s.eta_seconds == null ? "" : (s.eta_seconds < 90 ? Math.round(s.eta_seconds) + "s"
+                  : Math.round(s.eta_seconds/60) + "m");
+      const bits = [];
+      if(s.last_done) bits.push("last done: " + s.last_done.slice(0,50));
+      if(s.errors) bits.push("⚠ " + s.errors + " errored");
+      if(s.running && s.rate_per_min) bits.push(s.rate_per_min + "/min");
+      if(s.running && eta) bits.push("ETA " + eta);
+      if($("compProg2")) $("compProg2").textContent = bits.join(" · ");
+      const lg = $("compLog");
+      if(lg && s.log && s.log.length){ lg.style.display = ""; lg.textContent = s.log.join("\n"); lg.scrollTop = lg.scrollHeight; }
+    }
+    if(s.counts && $("compCounts"))
+      $("compCounts").innerHTML = "<strong>" + s.counts.done + "</strong> done · " + s.counts.pending +
+        " new · <span style='color:var(--amber)'>" + s.counts.stale + " out‑of‑date</span>";
+    if(s.running){ _compSawRun = true; clearTimeout(_compPoll); _compPoll = setTimeout(pollComp, 2500); }
+    else {
+      _compPoll = null;
+      if(s.message){ const m = $("compMsg"); m.className = "msg ok"; m.textContent = s.message; }
+      if(_compSawRun){ _compSawRun = false; setTimeout(() => location.reload(), 1200); }   // refresh clovers
+    }
+  }catch(e){ _compPoll = null; }
+}
+document.addEventListener("DOMContentLoaded", () => { if($("list")) _initThreadFilters(); if($("lsLive")) pollLinks(); if($("compMode")) pollComp(); });
 </script>
 {% endblock %}

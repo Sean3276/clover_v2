@@ -338,7 +338,8 @@ def mark_confirmed(archive_path, message_id: str, url: str) -> None:
 
 
 def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=60,
-                confirm_over_mb=1024, only_message_ids=None, log=print, should_stop=lambda: False) -> dict:
+                confirm_over_mb=1024, only_message_ids=None, log=print, should_stop=lambda: False,
+                progress=lambda **k: None) -> dict:
     """Download up to `limit` pending links into _linkfiles/<message-id>/, updating each record's
     status (downloaded | needs-confirm | dead | needs-auth | error). Re-runnable (only touches 'pending').
 
@@ -370,10 +371,13 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
                and (only_message_ids is None or r.get("message_id") in only_message_ids)]
     updates = {}
     done = reused = confirm = dead = auth = 0
-    for r in pending[:limit]:
+    batch = pending[:limit]
+    for i, r in enumerate(batch):
         if should_stop():
             break
         mid, url, prov, ok = r.get("message_id"), r.get("url"), r.get("provider"), bool(r.get("confirmed"))
+        progress(done=done, total=len(batch), current=str(url)[:80], provider=prov,
+                 failed=dead + auth, i=i)
         if url in done_files:                            # already have this exact link — reuse, no transfer
             updates[(mid, url)] = {"status": "downloaded", "file": done_files[url]}
             reused += 1

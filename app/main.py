@@ -6,6 +6,9 @@ Run from .clover_v2_github:
 """
 from __future__ import annotations
 
+import csv
+import io
+import re
 import shutil
 import threading
 import time
@@ -17,11 +20,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.templating import Jinja2Templates
 
 from clover import archive
+from clover import companies as companiesmod
 from clover import compose as composemod
 from clover import comprehend as compmod
 from clover import contacts as contactsmod
 from clover import config as cfgmod
 from clover import linkshares as lsmod
+from clover import models as modelsmod
 from clover import projects as projmod
 from clover import rules as rulesmod
 from clover import sender as sendermod
@@ -29,7 +34,7 @@ from clover import threads as threadmod
 from clover.comprehenders import get_comprehender
 from clover.errors import friendly_conn_error
 from clover.paths import auto_clover_root, ensure_runtime
-from clover.profiles import get_profile
+from clover.profiles import get_profile, effective_profile, from_dict as _profile_from_dict
 from clover.sources import SUITE, get_source
 
 _THREAD_CSP = ('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
@@ -44,6 +49,9 @@ _THREAD_STYLE = ("<style>html{overflow-x:hidden}body{margin:0;padding:10px;backg
 BASE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 app = FastAPI(title="Clover v2 — Phase 1")
+
+from app.dev import router as _dev_router   # developer-only control panel (/dev), separate module
+app.include_router(_dev_router)
 
 _lock = threading.Lock()
 # live run state — per-folder progress drives the dashboard
@@ -89,7 +97,9 @@ def _list_folders(cfg: dict, pw: str, attempts: int = 3):
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return RedirectResponse("/setup")
+    cfg = cfgmod.load_config()
+    configured = bool((_imap_conn(cfg) or {}).get("host")) or (_archive_dir(cfg) / "threads.jsonl").exists()
+    return RedirectResponse("/threads" if configured else "/setup")   # returning user -> views; first-run -> Settings
 
 
 # ------------------------------------------------------------------ Setup
@@ -203,6 +213,10 @@ def _run_archive_bg(folders: list[str], limit: int | None, filters: dict, auto_l
             except Exception as e:
                 _log(f"Thread index rebuild failed: {type(e).__name__}: {e}")
             _maybe_autorun_comprehension(cfg)       # comprehend the new threads (budget-capped)
+            try:                                    # refresh the contacts directory (signatures + AI)
+                contactsmod.rebuild(_archive_dir(cfg))
+            except Exception as e:
+                _log(f"Contacts refresh failed: {type(e).__name__}: {e}")
         # Cataloguing share links always runs after new mail; the tickbox adds downloading on top.
         do_fetch = auto_links and not _status.get("stop")
         if saved_new or do_fetch:
@@ -316,17 +330,39 @@ def _comp_cfg(cfg: dict) -> dict:
     return c
 
 
+def _profile(cfg: dict):
+    """Active classification profile — an operator-edited override if present, else the shipped preset."""
+    return effective_profile(cfg)
+
+
 def _backend_available(cfg: dict) -> bool:
-    if _comp_cfg(cfg)["backend"] == "claude-cli":
+    am = modelsmod.active_model(cfg)
+    backend = am["backend"] if am else _comp_cfg(cfg)["backend"]
+    if backend == "claude-cli":
         return bool(shutil.which("claude"))
     return True
 
 
 def _comprehender(cfg: dict):
-    c = _comp_cfg(cfg)
-    if c["backend"] == "claude-cli":
-        return get_comprehender("claude-cli", model=c.get("model", "sonnet"))
-    return get_comprehender(c["backend"])
+    """Build the active comprehender — from the developer model registry if set, else legacy config."""
+    am = modelsmod.active_model(cfg)
+    backend = am["backend"] if am else _comp_cfg(cfg)["backend"]
+    model = (am.get("model") if am else _comp_cfg(cfg).get("model")) or "sonnet"
+    if backend == "claude-cli":
+        return get_comprehender("claude-cli", model=model)
+    return get_comprehender(backend)
+
+
+def _record_usage(backend) -> None:
+    """Attribute a run's actual token usage to the active model in the registry."""
+    toks = getattr(backend, "tokens", 0)
+    if not toks:
+        return
+    cfg = cfgmod.load_config()
+    am = modelsmod.active_model(cfg)
+    if am:
+        modelsmod.add_usage(cfg, am["id"], toks, getattr(backend, "cost", 0.0))
+        cfgmod.save_config(cfg)
 
 
 def _comprehension_allowed(cfg: dict) -> bool:
@@ -346,13 +382,21 @@ def _maybe_autorun_comprehension(cfg: dict) -> None:
         return
     _log("Comprehending new threads…")
     try:
+        backend = _comprehender(cfg)
         out = compmod.run_comprehension(
-            _archive_dir(cfg), backend=_comprehender(cfg), profile=get_profile(c.get("profile")),
-            budget_tokens=int(c.get("budget_tokens", 200000)), log=_log,
+            _archive_dir(cfg), backend=backend, profile=_profile(cfg),
+            budget_tokens=10 ** 12, log=_log,    # not token-capped (that caused the silent 1/68 stall)
+            limit=int(c.get("autorun_limit", 100)),   # bounded by COUNT instead — explicit, never silent
             should_stop=lambda: _status.get("stop", False),
             allowed=lambda: _comprehension_allowed(cfg),
+            include_stale=False,    # autorun stays cheap: only NEW threads; stale ones go brown for a manual refresh
         )
-        _log(f"Comprehension: {out['done']} done, {out['pending']} pending.")
+        _record_usage(backend)
+        if out["pending"]:
+            _log(f"Comprehension: {out['done']} done, {out['pending']} still pending "
+                 f"(autorun caps at {int(c.get('autorun_limit', 100))}/run — use the Comprehend panel for the rest).")
+        else:
+            _log(f"Comprehension: {out['done']} done, all caught up.")
     except Exception as e:
         _log(f"Comprehension autorun failed: {type(e).__name__}: {e}")
 
@@ -361,16 +405,45 @@ def _maybe_autorun_comprehension(cfg: dict) -> None:
 def threads_page(request: Request):
     cfg = cfgmod.load_config()
     arch = _archive_dir(cfg)
-    comps = {r["thread_id"]: r for r in compmod.read_comprehensions(arch) if r.get("thread_id")}
-    link_stats = {}
+    threads = threadmod.read_threads(arch)
+    by_root = compmod.latest_by_root(arch)                # link by stable root_id (thread_id changes on new msgs)
+    comps = {t["thread_id"]: by_root[t["root_id"]] for t in threads if t.get("root_id") in by_root}
+    stale = {t["thread_id"] for t in threads
+             if t.get("root_id") in by_root and compmod.is_stale(t, by_root[t["root_id"]])}
+    # per-thread share-link state (for the 🔗 fetched/pending icon)
+    mid2t, path2t = {}, {}
+    for t in threads:
+        for mm in t.get("members", []):
+            if mm.get("message_id"):
+                mid2t[mm["message_id"]] = t["thread_id"]
+            for loc in (mm.get("locations") or []):
+                if loc.get("path"):
+                    path2t[loc["path"].replace("\\", "/")] = t["thread_id"]
+    linkstate, link_stats = {}, {}
     for r in lsmod.read_link_shares(arch):
         s = r.get("status", "pending")
         link_stats[s] = link_stats.get(s, 0) + 1
+        tid = mid2t.get(r.get("message_id")) or path2t.get((r.get("eml") or "").replace("\\", "/"))
+        if not tid:
+            continue
+        st = linkstate.setdefault(tid, {"total": 0, "fetched": 0, "pending": 0})
+        st["total"] += 1
+        if s == "downloaded":
+            st["fetched"] += 1
+        elif s in ("pending", "needs-auth", "needs-confirm"):
+            st["pending"] += 1
     return templates.TemplateResponse(request, "threads_list.html", {
         "cfg": cfg,
-        "threads": threadmod.read_threads(arch),
+        "threads": threads,
         "has_index": (arch / "threads.jsonl").exists(),
-        "comps": comps,
+        "comps": comps, "stale": stale, "linkstate": linkstate,
+        "cats": sorted({(r.get("classification") or {}).get("category") for r in comps.values()
+                        if (r.get("classification") or {}).get("category")}),
+        "comp_counts": {"done": len(comps), "stale": len(stale),
+                        "pending": sum(1 for t in threads if t.get("root_id") not in by_root),
+                        "total": len(threads)},
+        "ai_ready": _backend_available(cfg),
+        "projects": projmod.list_projects(arch),
         "link_stats": link_stats,
         "link_total": sum(link_stats.values()),
     })
@@ -386,17 +459,121 @@ def projects_page(request: Request):
 @app.get("/projects/{key}", response_class=HTMLResponse)
 def project_detail(request: Request, key: str):
     cfg = cfgmod.load_config()
-    p = projmod.get_project(_archive_dir(cfg), key)
+    arch = _archive_dir(cfg)
+    p = projmod.get_project(arch, key)
     if not p:
         return RedirectResponse("/projects", status_code=303)
-    return templates.TemplateResponse(request, "project_detail.html", {"cfg": cfg, "project": p})
+    return templates.TemplateResponse(request, "project_detail.html", {
+        "cfg": cfg, "project": p,
+        "contacts": companiesmod.project_contacts(arch, key),
+        "firms": companiesmod.project_companies(arch, key)})
+
+
+@app.get("/companies")
+def companies_page():
+    return RedirectResponse("/contacts", status_code=308)   # folded into the company-grouped Contacts page
 
 
 @app.get("/contacts", response_class=HTMLResponse)
 def contacts_page(request: Request):
     cfg = cfgmod.load_config()
-    return templates.TemplateResponse(request, "contacts.html",
-                                      {"cfg": cfg, "contacts": contactsmod.consolidate(_archive_dir(cfg))})
+    arch = _archive_dir(cfg)
+    data = companiesmod.list_companies(arch)
+    return templates.TemplateResponse(request, "contacts.html", {
+        "cfg": cfg, "companies": data["companies"],
+        "individuals": data["individuals"], "individuals_count": data["individuals_count"],
+        "qaqc": companiesmod.qaqc(arch)})
+
+
+def _csv_response(rows: list, header: list, filename: str) -> Response:
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(header)
+    w.writerows(rows)
+    return Response(buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.get("/contacts/export.csv")
+def contacts_export():
+    """GreenBook → CSV (the secretary/analyst's core need): every contact with its firm + code."""
+    data = companiesmod.list_companies(_archive_dir(cfgmod.load_config()))
+    rows = []
+    for co in data["companies"]:
+        for p in co["people"]:
+            rows.append([co["name"], co["code"], p.get("name", ""), p.get("position", ""),
+                         p.get("phone", ""), p["email"], p.get("count", "")])
+    for p in data["individuals"]:
+        rows.append(["(individual)", "", p.get("name", ""), p.get("position", ""),
+                     p.get("phone", ""), p["email"], p.get("count", "")])
+    return _csv_response(rows, ["Company", "Code", "Name", "Position", "Phone", "Email", "Mails"], "greenbook.csv")
+
+
+@app.get("/projects/{key}/people.csv")
+def project_people_export(key: str):
+    arch = _archive_dir(cfgmod.load_config())
+    rows = [[c.get("name", ""), c.get("company", ""), c.get("position", ""), c.get("phone", ""),
+             c["email"], c.get("count", "")] for c in companiesmod.project_contacts(arch, key)]
+    safe = re.sub(r"[^A-Za-z0-9]+", "-", key).strip("-") or "project"
+    return _csv_response(rows, ["Name", "Company", "Position", "Phone", "Email", "Mails"], f"{safe}-people.csv")
+
+
+@app.post("/contacts/rebuild")
+def contacts_rebuild():
+    """Full deterministic pass — read each sender's own signature, derive domain firms, auto-merge typos.
+    Runs in FastAPI's threadpool (plain def handler), so the event loop stays free while it reads .eml."""
+    cfg = cfgmod.load_config()
+    try:
+        people = contactsmod.rebuild(_archive_dir(cfg))
+        merged = sum(len(p.get("aliases") or []) for p in people)
+        firms = len(companiesmod.list_companies(_archive_dir(cfg))["companies"])
+        msg = f"{len(people)} people across {firms} companies."
+        if merged:
+            msg += f" {merged} duplicate address(es) auto-merged."
+        return JSONResponse({"ok": True, "message": msg})
+    except Exception as e:
+        return JSONResponse({"ok": False, "message": f"{type(e).__name__}: {e}"})
+
+
+@app.post("/contacts/code")
+def contacts_set_code(key: str = Form(...), code: str = Form("")):
+    """Operator override of a firm's company code (e.g. GCC → 4C); blank clears it back to auto.
+    Rejects a code already in use by another company (codes must be unique)."""
+    arch = _archive_dir(cfgmod.load_config())
+    if code.strip():
+        taken = companiesmod.code_in_use(arch, code, exclude_key=key.strip())
+        if taken:
+            return JSONResponse({"ok": False, "taken_by": taken,
+                                 "message": f"Code “{code.strip().upper()}” is not available — already used by {taken}."})
+    stored = companiesmod.set_code(arch, key.strip(), code)
+    return JSONResponse({"ok": True, "code": stored})
+
+
+@app.post("/contacts/name")
+def contacts_set_name(key: str = Form(...), name: str = Form("")):
+    """Operator override of a firm's display name (fill in a domain-only firm / fix a wrong one)."""
+    stored = companiesmod.set_name(_archive_dir(cfgmod.load_config()), key.strip(), name)
+    return JSONResponse({"ok": True, "name": stored})
+
+
+@app.post("/contacts/merge")
+def contacts_merge(from_key: str = Form(...), into_code: str = Form(...)):
+    """Fold one firm into another (operator) — target identified by its company code. Persisted; survives Refresh."""
+    arch = _archive_dir(cfgmod.load_config())
+    target = (into_code or "").strip().upper()
+    dest = next((c for c in companiesmod.list_companies(arch)["companies"] if (c["code"] or "").upper() == target), None)
+    if not dest:
+        return JSONResponse({"ok": False, "message": f"No firm has code “{target}”. Use the code shown on the target card."})
+    if dest["key"] == from_key.strip():
+        return JSONResponse({"ok": False, "message": "That's the same firm."})
+    ok = companiesmod.set_merge(arch, from_key.strip(), dest["key"])
+    return JSONResponse({"ok": ok, "message": f"Merged into {dest['name']}." if ok else "Couldn't merge (would create a loop)."})
+
+
+@app.post("/contacts/unmerge")
+def contacts_unmerge(key: str = Form(...)):
+    ok = companiesmod.unmerge(_archive_dir(cfgmod.load_config()), key.strip())
+    return JSONResponse({"ok": ok, "message": "Un-merged." if ok else "Nothing to un-merge."})
 
 
 @app.post("/threads/{thread_id}/resolve")
@@ -407,11 +584,12 @@ def resolve_thread(thread_id: str, domain: str = Form(...), category: str = Form
     cfg = cfgmod.load_config()
     arch = _archive_dir(cfg)
     domain, category = domain.strip(), category.strip()
-    prof = get_profile(_comp_cfg(cfg).get("profile"))     # reject anything outside the active taxonomy
+    prof = _profile(cfg)     # reject anything outside the active taxonomy
     if domain not in prof.domain_names() or category not in prof.categories(domain):
         return JSONResponse({"ok": False, "message": f"Invalid domain/category for this profile."}, status_code=400)
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    if not compmod.resolve_comprehension(arch, thread_id, domain, category, ts):
+    root_id = (threadmod.get_thread(arch, thread_id) or {}).get("root_id", "")
+    if not compmod.resolve_comprehension(arch, thread_id, domain, category, ts, root_id=root_id):
         return JSONResponse({"ok": False, "message": "This thread isn't comprehended yet."}, status_code=404)
     msg = f"Classification set to {domain.strip()} / {category.strip()}."
     if rule_type.strip() and rule_match.strip():
@@ -436,6 +614,67 @@ def rules_delete(index: int = Form(...)):
                          "Rule not found — the list may have changed; reload."})
 
 
+# ---- classification profile (taxonomy the council decides against) ---------------------------------
+@app.get("/profile", response_class=HTMLResponse)
+def profile_page(request: Request):
+    cfg = cfgmod.load_config()
+    prof = _profile(cfg)
+    taxonomy = "\n".join(f"{d}: {', '.join(prof.categories(d))}" for d in prof.domain_names())
+    precedence = "\n".join(f"{', '.join(r.get('if_any', []))} => {r.get('then', '')}" for r in prof.precedence)
+    facets = "\n".join(f"{f}: {', '.join(prof.facet_values(f))}" for f in prof.facet_names())
+    customised = bool((cfg.get("comprehension") or {}).get("profile_def"))
+    return templates.TemplateResponse(request, "profile.html", {
+        "cfg": cfg, "prof": prof, "taxonomy": taxonomy, "precedence": precedence, "facets": facets,
+        "all_categories": prof.all_categories(), "customised": customised,
+        "rules": rulesmod.read_rules(_archive_dir(cfg))})
+
+
+def _parse_named_lists(text: str) -> dict:
+    """Parse 'Name: a, b, c' lines into {Name: [a,b,c]} (used for taxonomy domains + facets)."""
+    out: dict = {}
+    for line in (text or "").splitlines():
+        if ":" not in line:
+            continue
+        name, vals = line.split(":", 1)
+        vl = [v.strip() for v in vals.split(",") if v.strip()]
+        if name.strip() and vl:
+            out[name.strip()] = vl
+    return out
+
+
+@app.post("/profile/save")
+def profile_save(description: str = Form(""), taxonomy: str = Form(""),
+                 safety_net: str = Form(""), precedence: str = Form(""), facets: str = Form("")):
+    cfg = cfgmod.load_config()
+    domains = _parse_named_lists(taxonomy)
+    facet_def = _parse_named_lists(facets)
+    prec = []
+    for line in precedence.splitlines():
+        if "=>" not in line:
+            continue
+        kws, then = line.split("=>", 1)
+        kl = [k.strip() for k in kws.split(",") if k.strip()]
+        if kl and then.strip():
+            prec.append({"if_any": kl, "then": then.strip()})
+    pdef = {"name": _comp_cfg(cfg).get("profile", "custom"), "description": description.strip(),
+            "domains": domains, "safety_net": safety_net.strip(), "precedence": prec, "facets": facet_def}
+    try:
+        _profile_from_dict(pdef)                          # validate (raises if no usable taxonomy)
+    except Exception as e:
+        return JSONResponse({"ok": False, "message": f"Couldn't save: {e}"}, status_code=400)
+    cfg.setdefault("comprehension", {})["profile_def"] = pdef
+    cfgmod.save_config(cfg)
+    return JSONResponse({"ok": True, "message": "Profile saved. New comprehensions use it; re-comprehend to reclassify existing threads."})
+
+
+@app.post("/profile/reset")
+def profile_reset():
+    cfg = cfgmod.load_config()
+    (cfg.get("comprehension") or {}).pop("profile_def", None)
+    cfgmod.save_config(cfg)
+    return JSONResponse({"ok": True, "message": "Reset to the default profile."})
+
+
 @app.post("/threads/rebuild")
 def threads_rebuild():
     cfg = cfgmod.load_config()
@@ -456,12 +695,21 @@ def _wrap_srcdoc(body_html: str) -> str:
 
 @app.get("/threads/link-status")     # defined BEFORE /threads/{thread_id} so it isn't captured as an id
 def link_status():
-    """Live link-task state + status counts, for the Mail page to poll during a background download."""
+    """Live link-task state + status counts + a needs-auth/dead triage list, for the Mail page to poll."""
     stats = {}
+    needs_auth, dead = [], []
     for r in lsmod.read_link_shares(_archive_dir(cfgmod.load_config())):
         s = r.get("status", "pending")
         stats[s] = stats.get(s, 0) + 1
-    return JSONResponse({"running": _linktask.get("running", False), "stats": stats, "total": sum(stats.values())})
+        if s == "needs-auth" and len(needs_auth) < 50:
+            needs_auth.append({"url": r.get("url"), "provider": r.get("provider")})
+        elif s == "dead" and len(dead) < 50:
+            dead.append({"url": r.get("url"), "provider": r.get("provider")})
+    return JSONResponse({"running": _linktask.get("running", False), "stats": stats,
+                         "total": sum(stats.values()),
+                         "current": _linktask.get("current", ""), "done": _linktask.get("done", 0),
+                         "batch_total": _linktask.get("total", 0), "failed": _linktask.get("failed", 0),
+                         "needs_auth": needs_auth, "dead": dead})
 
 
 @app.get("/threads/{thread_id}", response_class=HTMLResponse)
@@ -480,11 +728,14 @@ def thread_view(request: Request, thread_id: str):
     link_saved = [r for r in tlinks if r.get("status") == "downloaded" and r.get("file")]
     link_pending = sum(1 for r in tlinks if r.get("status") == "pending")
     link_needs_confirm = sum(1 for r in tlinks if r.get("status") == "needs-confirm")
-    _prof = get_profile(_comp_cfg(cfg).get("profile"))   # taxonomy for the Resolve selects
+    _prof = _profile(cfg)   # taxonomy for the Resolve selects
+    comp = compmod.comp_for_thread(arch, t)              # match by stable root_id (survives re-stitching)
+    frm = request.query_params.get("from", "")           # came from a project? offer a back-to-project link
+    back = {"url": frm, "label": "← back to project"} if frm.startswith("/projects/") else None
     # render only the lightweight header list from threads.jsonl; bodies load on demand below
     return templates.TemplateResponse(request, "thread_view.html", {
-        "cfg": cfg, "thread": t,
-        "comp": compmod.get_comprehension(arch, thread_id),
+        "cfg": cfg, "thread": t, "back": back,
+        "comp": comp, "stale": compmod.is_stale(t, comp),
         "ai_ready": _backend_available(cfg),
         "link_saved": link_saved, "link_pending": link_pending,
         "link_needs_confirm": link_needs_confirm,
@@ -508,12 +759,136 @@ def thread_comprehend(thread_id: str):
         return JSONResponse({"ok": False, "message": "Thread not found."})
     c = _comp_cfg(cfg)
     try:
-        rec = compmod.comprehend_thread(arch, t, _comprehender(cfg), get_profile(c.get("profile")),
-                                        model=c.get("model", "?"))
+        backend = _comprehender(cfg)
+        rec = compmod.comprehend_thread(arch, t, backend, _profile(cfg),
+                                        model=getattr(backend, "model", c.get("model", "?")))
         compmod.save_comprehension(arch, rec)
+        _record_usage(backend)
         return JSONResponse({"ok": True, "message": "Comprehended.", "classification": rec["classification"]})
     except Exception as e:
         return JSONResponse({"ok": False, "message": f"{type(e).__name__}: {e}"})
+
+
+# ---- batch comprehension (select by project / date range; runs in the background) -------------------
+_comptask = {"running": False, "stop": False, "done": 0, "total": 0, "current": "", "message": "",
+             "errors": 0, "last_done": "", "started_at": None, "log": []}
+
+
+def _selection_ids(arch, mode: str, project_key: str, date_from: str, date_to: str):
+    """Resolve a UI scope to a set of thread_ids, or None for 'everything that needs it'."""
+    if mode == "project" and project_key:
+        p = projmod.get_project(arch, project_key)
+        return {t.get("thread_id") for t in (p or {}).get("threads", [])} if p else set()
+    if mode == "duration":
+        df, dt = _parse_date(date_from), _parse_date(date_to)
+        ids = set()
+        for t in threadmod.read_threads(arch):
+            day = (t.get("end") or t.get("start") or "")[:10]
+            try:
+                d = date.fromisoformat(day)
+            except ValueError:
+                continue
+            if (df and d < df) or (dt and d > dt):
+                continue
+            ids.add(t.get("thread_id"))
+        return ids
+    return None   # 'all'
+
+
+def _start_comp_task(cfg: dict, only, redo: bool) -> bool:
+    with _lock:
+        if _comptask["running"]:
+            return False
+        _comptask.update({"running": True, "stop": False, "done": 0, "total": 0, "current": "",
+                          "errors": 0, "last_done": "", "message": "", "started_at": time.time(), "log": []})
+
+    def runner():
+        try:
+            def prog(done=0, total=0, current="", errors=0, last_done=""):
+                _comptask.update({"done": done, "total": total, "current": current,
+                                  "errors": errors, "last_done": last_done})
+
+            def clog(line):                              # comp-specific recent log (for the live panel) + global log
+                _comptask["log"].append(str(line)); del _comptask["log"][:-15]
+                _log(line)
+
+            backend = _comprehender(cfg)
+            out = compmod.run_comprehension(
+                _archive_dir(cfg), backend=backend, profile=_profile(cfg),
+                budget_tokens=10 ** 12, log=clog,    # MANUAL run: do the whole selection the user chose (Stop to halt)
+                should_stop=lambda: _comptask.get("stop", False),
+                allowed=lambda: _comprehension_allowed(cfg),
+                only=only, redo=redo, include_stale=True, progress=prog)
+            _record_usage(backend)
+            _comptask["tokens"] = getattr(backend, "tokens", 0)
+            _comptask["message"] = (f"Comprehended {out['done']} of {out['total']} thread(s)"
+                                    + (f" · {out['errors']} errored" if out.get("errors") else "")
+                                    + (f" · {out['needs_review']} need review" if out.get("needs_review") else "")
+                                    + (" — stopped." if _comptask.get("stop") else ".")
+                                    + (f" ~{getattr(backend, 'tokens', 0):,} tokens." if getattr(backend, 'tokens', 0) else ""))
+            try:
+                contactsmod.rebuild(_archive_dir(cfg))   # new AI titles/phones may enrich the directory
+            except Exception as e:
+                _log(f"Contacts refresh after comprehension failed: {type(e).__name__}: {e}")
+        except Exception as e:
+            _comptask["message"] = f"{type(e).__name__}: {e}"
+            _log(f"comprehend task error: {type(e).__name__}: {e}")
+        finally:
+            with _lock:
+                _comptask["running"] = False
+    threading.Thread(target=runner, daemon=True).start()
+    return True
+
+
+@app.post("/comprehend/run")
+def comprehend_run(mode: str = Form("all"), project_key: str = Form(""),
+                   date_from: str = Form(""), date_to: str = Form(""), redo: str = Form("")):
+    cfg = cfgmod.load_config()
+    if not _comprehension_allowed(cfg):
+        return JSONResponse({"ok": False, "message": "Comprehension isn't enabled for your plan."})
+    if not _backend_available(cfg):
+        return JSONResponse({"ok": False, "message":
+                             "AI backend not set up — install the Claude CLI "
+                             "(npm i -g @anthropic-ai/claude-code) and log in."})
+    arch = _archive_dir(cfg)
+    do_redo = redo.strip().lower() in ("1", "true", "on", "yes")
+    only = _selection_ids(arch, mode.strip(), project_key.strip(), date_from, date_to)
+    todo = compmod.select_threads(arch, only=only, redo=do_redo, include_stale=True)
+    if not todo:
+        return JSONResponse({"ok": False, "message": "Nothing to comprehend in that selection — all up to date."})
+    if not _start_comp_task(cfg, only, do_redo):
+        return JSONResponse({"ok": False, "message": "A comprehension run is already in progress."})
+    return JSONResponse({"ok": True, "total": len(todo),
+                         "message": f"Comprehending {len(todo)} thread(s) in the background…"})
+
+
+@app.get("/comprehend/status")
+def comprehend_status():
+    cfg = cfgmod.load_config()
+    arch = _archive_dir(cfg)
+    threads = threadmod.read_threads(arch)
+    by_root = compmod.latest_by_root(arch)
+    done = sum(1 for t in threads if t.get("root_id") in by_root)
+    stale = sum(1 for t in threads if t.get("root_id") in by_root and compmod.is_stale(t, by_root[t["root_id"]]))
+    ct = _comptask
+    elapsed = (time.time() - ct["started_at"]) if ct.get("started_at") else 0
+    rate = (ct.get("done", 0) / elapsed) if (elapsed > 0 and ct.get("done")) else 0   # threads/sec
+    remaining = max(0, ct.get("total", 0) - ct.get("done", 0))
+    return JSONResponse({
+        "running": ct.get("running", False), "done": ct.get("done", 0),
+        "total": ct.get("total", 0), "current": ct.get("current", ""),
+        "errors": ct.get("errors", 0), "last_done": ct.get("last_done", ""),
+        "rate_per_min": round(rate * 60, 1), "eta_seconds": (round(remaining / rate) if rate > 0 else None),
+        "message": ct.get("message", ""), "log": ct.get("log", [])[-8:],
+        "counts": {"done": done, "stale": stale,
+                   "pending": sum(1 for t in threads if t.get("root_id") not in by_root),
+                   "total": len(threads)}})
+
+
+@app.post("/comprehend/stop")
+def comprehend_stop():
+    _comptask["stop"] = True
+    return JSONResponse({"ok": True, "message": "Stopping after the current thread…"})
 
 
 @app.get("/threads/{thread_id}/msg/{idx}", response_class=HTMLResponse)
@@ -539,7 +914,11 @@ def thread_message(request: Request, thread_id: str, idx: int):
                                        "sending_enabled": _sending_enabled(cfg)})
 
 
-_linktask = {"running": False, "stop": False}   # ONE link task (harvest OR fetch) at a time
+_linktask = {"running": False, "stop": False, "current": "", "done": 0, "total": 0, "failed": 0, "phase": ""}
+
+
+def _linkprog(done=0, total=0, current="", provider="", failed=0, **_):
+    _linktask.update({"done": done, "total": total, "current": current, "failed": failed, "phase": "fetching"})
 
 
 def _start_link_task(target) -> bool:
@@ -570,7 +949,7 @@ def _auto_link_task(arch, do_harvest=True, do_fetch=False):
     if do_fetch:
         while not _linktask.get("stop"):
             r = lsmod.fetch_links(arch, limit=50, headless=True, log=_log,
-                                  should_stop=lambda: _linktask.get("stop", False))
+                                  should_stop=lambda: _linktask.get("stop", False), progress=_linkprog)
             if r.get("remaining", 0) <= 0:
                 break
 
@@ -589,7 +968,7 @@ def fetch_links_route(limit: int = Form(100)):
     cfg = cfgmod.load_config()
     if not _start_link_task(lambda: lsmod.fetch_links(
             _archive_dir(cfg), limit=limit, headless=True, log=_log,
-            should_stop=lambda: _linktask.get("stop", False))):
+            should_stop=lambda: _linktask.get("stop", False), progress=_linkprog)):
         return JSONResponse({"ok": False, "message": "A link task (harvest or fetch) is already running."})
     return JSONResponse({"ok": True, "message":
                          "Fetching link files in the background (headless browser). "

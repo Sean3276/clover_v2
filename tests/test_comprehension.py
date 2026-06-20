@@ -269,3 +269,215 @@ def test_comprehend_route_blocks_when_backend_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_backend_available", lambda c: False)
     r = TestClient(m.app).post(f"/threads/{t['thread_id']}/comprehend")
     assert r.json()["ok"] is False and "Claude CLI" in r.json()["message"]
+
+
+# ---------------------------------------------------------------- staleness + batch
+def _add_msg(tmp, key, mid, irt, text="more"):
+    _eml(tmp, "INBOX", key, mid, irt=irt, text=text)
+    th.build_threads(tmp, log=lambda *_: None)
+    return th.read_threads(tmp)[0]
+
+
+def test_record_stores_source_and_is_stale_on_new_message(tmp_path):
+    t = _one_thread(tmp_path)
+    rec = cp.comprehend_thread(tmp_path, t, StubComprehender(), get_profile())
+    cp.save_comprehension(tmp_path, rec)
+    assert rec["source"]["n"] == t["n"]
+    assert cp.is_stale(t, rec) is False
+    t2 = _add_msg(tmp_path, "3", "c@x", "b@x")          # a new message arrives in the thread
+    assert cp.is_stale(t2, rec) is True
+
+
+def test_is_stale_legacy_record_without_source_is_not_stale(tmp_path):
+    t = _one_thread(tmp_path)
+    assert cp.is_stale(t, {"thread_id": t["thread_id"]}) is False   # no source -> can't tell -> not stale
+    assert cp.is_stale(t, None) is False
+
+
+def test_select_threads_pending_stale_redo_only(tmp_path):
+    t = _one_thread(tmp_path)
+    assert len(cp.select_threads(tmp_path)) == 1                    # pending
+    cp.run_comprehension(tmp_path, backend=StubComprehender(), profile=get_profile())
+    assert cp.select_threads(tmp_path) == []                        # nothing needs it
+    t2 = _add_msg(tmp_path, "3", "c@x", "b@x")                      # -> stale
+    assert [s["thread_id"] for s in cp.select_threads(tmp_path)] == [t2["thread_id"]]
+    assert cp.select_threads(tmp_path, include_stale=False) == []   # stale excluded when asked
+    assert len(cp.select_threads(tmp_path, redo=True)) == 1         # redo forces it
+    assert cp.select_threads(tmp_path, only=set()) == []            # empty selection
+
+
+def test_run_comprehension_only_progress_and_redo(tmp_path):
+    t = _one_thread(tmp_path)
+    calls = []
+    out = cp.run_comprehension(tmp_path, backend=StubComprehender(), profile=get_profile(),
+                               only={t["thread_id"]}, progress=lambda **k: calls.append(k))
+    assert out["done"] == 1 and out["total"] == 1 and out["pending"] == 0
+    assert any(c.get("total") == 1 for c in calls)                  # progress was reported
+    assert cp.run_comprehension(tmp_path, backend=StubComprehender(), profile=get_profile())["total"] == 0
+    assert cp.run_comprehension(tmp_path, backend=StubComprehender(), profile=get_profile(), redo=True)["done"] == 1
+
+
+def test_batch_comprehend_routes_and_brown_clover(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import time
+    import app.main as m
+    _one_thread(tmp_path)
+    cfg = {"auth": {"imap": {}}, "archive_path": str(tmp_path),
+           "comprehension": {"backend": "stub", "profile": "construction"}}
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: dict(cfg))
+    client = TestClient(m.app)
+
+    r = client.post("/comprehend/run", data={"mode": "all"})
+    assert r.json()["ok"] is True and r.json()["total"] == 1
+    for _ in range(100):
+        s = client.get("/comprehend/status").json()
+        if not s["running"]:
+            break
+        time.sleep(0.05)
+    assert s["counts"]["done"] == 1 and s["counts"]["pending"] == 0
+
+    _add_msg(tmp_path, "3", "c@x", "b@x")                           # make it stale
+    body = client.get("/threads").text
+    assert "leaf stale" in body                                     # brown clover renders
+    assert client.get("/comprehend/status").json()["counts"]["stale"] == 1
+    assert client.post("/comprehend/stop").json()["ok"] is True
+
+
+def test_comprehend_run_empty_selection(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import app.main as m
+    _one_thread(tmp_path)
+    cfg = {"auth": {"imap": {}}, "archive_path": str(tmp_path),
+           "comprehension": {"backend": "stub", "profile": "construction"}}
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: dict(cfg))
+    r = TestClient(m.app).post("/comprehend/run", data={"mode": "project", "project_key": "nope"})
+    assert r.json()["ok"] is False and "Nothing to comprehend" in r.json()["message"]
+
+
+# ---------------------------------------------------------------- mail-row icons (attachment / link)
+def test_thread_attachment_and_mail_icons(tmp_path, monkeypatch):
+    import json as _json
+    from email.message import EmailMessage
+    from starlette.testclient import TestClient
+    import app.main as m
+
+    msg = EmailMessage()
+    msg["Message-ID"] = "<att1>"; msg["From"] = "a@x.com"; msg["To"] = "b@x.com"
+    msg["Subject"] = "Report"; msg["Date"] = "Thu, 01 Jan 2026 00:00:00 +0000"
+    msg.set_content("see attached")
+    msg.add_attachment(b"%PDF-1", maintype="application", subtype="pdf", filename="r.pdf")
+    (tmp_path / "INBOX").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "INBOX" / "1.eml").write_bytes(msg.as_bytes())
+    (tmp_path / "_index.jsonl").write_text(_json.dumps(
+        {"id": "att1", "folder": "INBOX", "key": "1", "path": "INBOX/1.eml",
+         "date": msg["Date"], "from": "a@x.com", "subject": "Report"}) + "\n", encoding="utf-8")
+    th.build_threads(tmp_path, log=lambda *_: None)
+    t = th.read_threads(tmp_path)[0]
+    assert t["has_attach"] is True                       # multipart/mixed detected
+
+    (tmp_path / "link_shares.jsonl").write_text(_json.dumps(
+        {"message_id": "att1", "eml": "INBOX/1.eml", "url": "http://x", "provider": "p",
+         "status": "pending", "file": None}) + "\n", encoding="utf-8")
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: {"auth": {"imap": {}}, "archive_path": str(tmp_path)})
+    body = TestClient(m.app).get("/threads").text
+    assert "📎" in body and "🔗" in body and "still to fetch" in body
+
+
+def test_review_badge_tooltip_explains_action(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import app.main as m
+    t = _one_thread(tmp_path)
+    cp.save_comprehension(tmp_path, {"thread_id": t["thread_id"], "root_id": t["root_id"],
+                                     "subject": "s", "summary": "x", "source": {"n": t["n"], "end": t["end"]},
+                                     "classification": {"domain": "Project", "category": "Commercial",
+                                                        "consensus": "asked"},
+                                     "facts": {}})
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: {"auth": {"imap": {}}, "archive_path": str(tmp_path),
+                                                          "comprehension": {"profile": "construction"}})
+    body = TestClient(m.app).get("/threads").text
+    assert "Resolve / reclassify" in body and "council was split" in body
+
+
+# ---------------------------------------------------------------- budget / limit / progress (P0)
+def test_large_attachment_does_not_budget_stall(tmp_path):
+    import json as _json
+    from email.message import EmailMessage
+    def mk(key, mid, attach_mb=0):
+        m = EmailMessage(); m["Message-ID"] = f"<{mid}>"; m["From"] = "a@x.com"
+        m["Subject"] = "Hi"; m["Date"] = "Thu, 01 Jan 2026 00:00:00 +0000"; m.set_content("body")
+        if attach_mb:
+            m.add_attachment(b"x" * (attach_mb * 1024 * 1024), maintype="application",
+                             subtype="octet-stream", filename="big.bin")
+        (tmp_path / "INBOX").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "INBOX" / f"{key}.eml").write_bytes(m.as_bytes())
+        with (tmp_path / "_index.jsonl").open("a", encoding="utf-8") as f:
+            f.write(_json.dumps({"id": mid, "folder": "INBOX", "key": key,
+                                 "path": f"INBOX/{key}.eml", "date": m["Date"], "from": "a@x.com"}) + "\n")
+    mk("1", "m1", attach_mb=3); mk("2", "m2"); mk("3", "m3")          # 3MB attachment on the first
+    th.build_threads(tmp_path, log=lambda *_: None)
+    out = cp.run_comprehension(tmp_path, backend=StubComprehender(), profile=get_profile())  # default 200k budget
+    assert out["done"] == 3 and out["errors"] == 0                   # NOT stalled after 1 by the attachment
+
+
+def test_run_comprehension_limit_caps_count_and_reports_backlog(tmp_path):
+    for i in range(5):
+        _eml(tmp_path, "INBOX", str(i), f"m{i}", text="hi")
+    th.build_threads(tmp_path, log=lambda *_: None)
+    out = cp.run_comprehension(tmp_path, backend=StubComprehender(), profile=get_profile(), limit=2)
+    assert out["done"] == 2 and out["total"] == 2 and out["pending"] == 3 and out["backlog"] == 5
+
+
+def test_run_comprehension_progress_reports_errors_and_heartbeat(tmp_path):
+    _one_thread(tmp_path)
+    seen = []
+    cp.run_comprehension(tmp_path, backend=StubComprehender(), profile=get_profile(),
+                         progress=lambda **k: seen.append(k))
+    assert seen and "errors" in seen[-1] and "last_done" in seen[-1]
+
+
+def test_mail_list_has_filter_chips_and_status(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import app.main as m
+    t = _one_thread(tmp_path)
+    cp.save_comprehension(tmp_path, {"thread_id": t["thread_id"], "root_id": t["root_id"], "subject": "s",
+                                     "summary": "x", "source": {"n": t["n"], "end": t["end"]},
+                                     "classification": {"domain": "Project", "category": "Safety", "consensus": "unanimous"},
+                                     "facts": {}})
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: {"auth": {"imap": {}}, "archive_path": str(tmp_path),
+                                                          "comprehension": {"profile": "construction"}})
+    body = TestClient(m.app).get("/threads").text
+    assert 'class="chip"' in body and "Needs review" in body and 'data-status="comprehended"' in body and ">Safety<" in body
+
+
+# ---------------------------------------------------------------- faceted tags (P1#7)
+def test_clean_tags_validates_against_vocab():
+    out = cp._clean_tags(["Discipline: M&E", "Artifact: RFI", "Made Up: Nonsense", "Discipline: m&e"], get_profile())
+    assert out == ["Discipline: M&E", "Artifact: RFI"]      # invalid dropped, case-normalised, deduped
+
+
+def test_clean_tags_empty_without_facets():
+    from clover.profiles import Profile
+    p = Profile(name="x", description="", domains={"D": ["A"]}, safety_net="A")
+    assert cp._clean_tags(["Anything: Goes"], p) == []       # no facets defined -> no tags
+
+
+def test_comprehend_thread_extracts_validated_tags(tmp_path):
+    t = _one_thread(tmp_path)
+    rec = cp.comprehend_thread(tmp_path, t, StubComprehender(), get_profile(), qaqc=False)
+    assert rec["tags"] == ["Discipline: M&E", "Artifact: RFI"]   # stub's bogus 'Made Up: Nonsense' dropped
+
+
+def test_thread_view_and_mail_show_tags(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import app.main as m
+    t = _one_thread(tmp_path)
+    cp.save_comprehension(tmp_path, {"thread_id": t["thread_id"], "root_id": t["root_id"], "subject": "s",
+                                     "summary": "x", "source": {"n": t["n"], "end": t["end"]}, "facts": {},
+                                     "tags": ["Artifact: RFI"],
+                                     "classification": {"domain": "Project", "category": "Operation",
+                                                        "consensus": "unanimous"}})
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: {"auth": {"imap": {}}, "archive_path": str(tmp_path),
+                                                          "comprehension": {"profile": "construction"}})
+    c = TestClient(m.app)
+    assert "artifact: rfi" in c.get("/threads").text                         # searchable in the Mail filter
+    assert "🏷 Artifact: RFI" in c.get("/threads/" + t["thread_id"]).text     # badge on the thread

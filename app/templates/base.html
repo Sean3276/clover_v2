@@ -46,6 +46,7 @@
   header a{color:var(--sub);text-decoration:none;font-size:14px}
   header a:hover{color:var(--ink)}
   header a.active{color:var(--clover);font-weight:600}
+  .mainnav{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
   header .right{margin-left:auto;font-size:11px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
   .themetoggle{background:transparent;border:1px solid var(--line);color:var(--ink);border-radius:8px;
     padding:4px 9px;font-size:14px;line-height:1;cursor:pointer}
@@ -84,6 +85,7 @@
   th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
   th{background:var(--th-bg);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--sub)}
   td a{color:var(--clover-d)}
+  .colemail{text-align:right}            /* email column right-aligned (GreenBook / project people) */
   .note{font-size:12px;color:var(--sub)} .dim{color:var(--dim)}
   code{background:var(--code-bg);border:1px solid var(--line);padding:1px 6px;border-radius:5px;
     font-family:ui-monospace,Consolas,monospace;font-size:12.5px;color:var(--cyan)}
@@ -114,8 +116,10 @@
   .cbadge.warn{background:rgba(240,178,74,.16);color:var(--amber);border-color:rgba(240,178,74,.34)}
   .cbadge.proj{background:rgba(43,212,196,.12);color:var(--cyan);border-color:rgba(43,212,196,.3)}
   .leaf{font-size:13px;line-height:1}
+  .leaf.stale{filter:sepia(1) saturate(2.4) hue-rotate(-28deg) brightness(.82)}   /* green clover → brown = comprehension out of date */
   .linkbtn{background:none;border:0;color:var(--clover);font:inherit;font-weight:600;padding:0;cursor:pointer}
   .linkbtn:hover{text-decoration:underline;filter:none;background:none}
+  .runhdr{display:flex;align-items:center;gap:12px;justify-content:space-between}   /* page title + action */
   /* visible keyboard focus for every interactive element */
   a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,
   [tabindex]:focus-visible,.help:focus-visible{outline:2px solid var(--clover);outline-offset:2px}
@@ -138,6 +142,7 @@
     button,.btn{min-height:42px}            /* comfortable touch targets */
     .help{width:20px;height:20px}
     .scrollnav button{width:44px;height:44px}
+    .runhdr{flex-direction:column;align-items:flex-start;gap:8px}
   }
 </style>
 </head>
@@ -145,13 +150,14 @@
 <a href="#main" class="skip">Skip to content</a>
 <header>
   <span class="logo">🍀 Clover<span class="v"> v2</span></span>
-  <a href="/setup" class="{% block nav_setup %}{% endblock %}">Setup</a>
-  <a href="/archive" class="{% block nav_archive %}{% endblock %}">Archive</a>
-  <a href="/threads" class="{% block nav_threads %}{% endblock %}">Mail</a>
-  <a href="/projects" class="{% block nav_projects %}{% endblock %}">Projects</a>
-  <a href="/contacts" class="{% block nav_contacts %}{% endblock %}">Contacts</a>
-  <span class="right">control room</span>
-  <button id="themeBtn" class="themetoggle" type="button" onclick="toggleTheme()" aria-label="Toggle light/dark theme" title="Toggle light / dark">☀️</button>
+  <nav class="mainnav" aria-label="Main">
+    <a href="/threads" class="{% block nav_threads %}{% endblock %}">Mail</a>
+    <a href="/projects" class="{% block nav_projects %}{% endblock %}">Projects</a>
+    <a href="/contacts" class="{% block nav_contacts %}{% endblock %}">GreenBook</a>
+    <a href="/archive" class="{% block nav_archive %}{% endblock %}">Archive</a>
+    <a href="/setup" class="{% block nav_setup %}{% endblock %}">Settings</a>
+  </nav>
+  <button id="themeBtn" class="themetoggle" type="button" style="margin-left:auto" onclick="toggleTheme()" aria-label="Toggle light/dark theme" title="Toggle light / dark">☀️</button>
 </header>
 <main id="main">{% block body %}{% endblock %}</main>
 <script>
@@ -171,6 +177,7 @@
     setThemeIcon();
   }
   setThemeIcon();
+  document.querySelectorAll(".mainnav a.active").forEach(a => a.setAttribute("aria-current", "page"));
 </script>
 </body>
 </html>

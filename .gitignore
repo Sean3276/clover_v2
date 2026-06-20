@@ -23,3 +23,8 @@ logs/
 Thumbs.db
 .idea/
 .vscode/
+
+# stray page dumps / debug artifacts (curl -o, agents) — real UI lives in app/templates/
+/*.html
+_sigdump.json
+_root.html

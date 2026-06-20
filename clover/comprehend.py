@@ -29,7 +29,8 @@ _DISTILL_SCHEMA = {"abstract": "str", "summary": "str", "event": "str (<=30 char
                    "facts": {"project": "str", "parties": ["str"], "refs": ["str"],
                              "dates": ["str"], "amounts": ["str"]},
                    "contacts": [{"name": "str", "position": "str", "company": "str",
-                                 "phone": "str", "email": "str"}]}
+                                 "phone": "str", "email": "str"}],
+                   "tags": ['"Facet: Value" strings, only from the listed facet vocabularies']}
 _CLASSIFY_SCHEMA = {"domain": "str", "category": "str", "confidence": "number 0..1",
                     "dispute": "bool", "dissent": "str", "votes": "str"}
 _QA_SCHEMA = {"passed": "bool", "faithfulness": "number 0..1", "completeness": "number 0..1",
@@ -99,6 +100,49 @@ def comprehended_ids(archive) -> set:
     return {r.get("thread_id") for r in read_comprehensions(archive) if r.get("thread_id")}
 
 
+def latest_by_thread(archive) -> dict:
+    """{thread_id: latest record} — last write wins, matching get_comprehension."""
+    out = {}
+    for r in read_comprehensions(archive):
+        if r.get("thread_id"):
+            out[r["thread_id"]] = r
+    return out
+
+
+def latest_by_root(archive) -> dict:
+    """{root_id: latest record}. root_id is the thread's STABLE identity — thread_id is a hash of the
+    member message-ids and so changes whenever a message is added, which would orphan the comprehension.
+    Linking by root_id lets a re-stitched thread find its prior comprehension (and be judged stale)."""
+    out = {}
+    for r in read_comprehensions(archive):
+        if r.get("root_id"):
+            out[r["root_id"]] = r
+    return out
+
+
+def comp_for_thread(archive, thread: dict) -> dict | None:
+    """Latest comprehension for a thread, matched by stable root_id (falls back to thread_id for
+    legacy records that predate root linkage)."""
+    rec = latest_by_root(archive).get(thread.get("root_id"))
+    return rec if rec else get_comprehension(archive, thread.get("thread_id"))
+
+
+def thread_sig(thread: dict) -> dict:
+    """The thread's identity for staleness: message count + latest-message date."""
+    return {"n": thread.get("n"), "end": thread.get("end") or ""}
+
+
+def is_stale(thread: dict, rec: dict | None) -> bool:
+    """True if the thread changed since it was comprehended (a newer message arrived / count grew).
+    Legacy records with no stored signature can't be judged, so they're treated as current (no nag)."""
+    if not rec:
+        return False
+    src = rec.get("source")
+    if not src:
+        return False
+    return (src.get("n") != thread.get("n")) or ((src.get("end") or "") != (thread.get("end") or ""))
+
+
 def get_comprehension(archive, thread_id: str) -> dict | None:
     found = None
     for r in read_comprehensions(archive):       # latest record wins (re-comprehend supersedes)
@@ -118,14 +162,16 @@ def save_comprehension(archive, record: dict) -> None:
     _append(archive, record)
 
 
-def resolve_comprehension(archive, thread_id: str, domain: str, category: str, ts: str = "") -> bool:
+def resolve_comprehension(archive, thread_id: str, domain: str, category: str, ts: str = "",
+                          root_id: str = "") -> bool:
     """Operator override of a flagged thread's classification: set domain/category, consensus=resolved,
-    clear needs_review. Rewrites the latest record for that thread in place. Returns False if absent."""
+    clear needs_review. Rewrites the latest record for that thread in place. Returns False if absent.
+    Matches by thread_id, falling back to the stable root_id (a re-stitched thread has a new thread_id)."""
     recs = read_comprehensions(archive)
     idx = None
     for i, r in enumerate(recs):
-        if r.get("thread_id") == thread_id:
-            idx = i                                  # latest record for the thread
+        if r.get("thread_id") == thread_id or (root_id and r.get("root_id") == root_id):
+            idx = i                                  # latest matching record
     if idx is None:
         return False
     c = recs[idx].setdefault("classification", {})
@@ -143,12 +189,14 @@ def resolve_comprehension(archive, thread_id: str, domain: str, category: str, t
 
 
 def estimate_thread_tokens(archive, thread: dict) -> int:
-    """Cheap pre-call estimate from .eml byte size (no body read). Conservative (overestimates)."""
+    """Cheap pre-call estimate from .eml byte size (no body read). Each message is capped at 200 KB so a
+    huge ATTACHMENT (base64 in the .eml) can't inflate the estimate to hundreds of millions of tokens and
+    trip the budget after one thread — only the text actually sent to the model matters here."""
     total = 0
     for m in thread.get("members", []):
         for loc in (m.get("locations") or [])[:1]:
             try:
-                total += (Path(archive) / loc["path"]).stat().st_size
+                total += min((Path(archive) / loc["path"]).stat().st_size, 200_000)
             except Exception:
                 pass
     return max(1, total // 4)
@@ -169,7 +217,14 @@ def _refine_prompt(thread, running, chunk):
             + "\n\nNEXT MESSAGES:\n" + "\n\n----\n\n".join(chunk))
 
 
-def _distill_prompt(comprehension):
+def _distill_prompt(comprehension, profile: Profile | None = None):
+    tagblock = ""
+    if profile and profile.facets:
+        vocab = "\n".join(f"  {f}: {', '.join(profile.facet_values(f))}" for f in profile.facet_names())
+        tagblock = ("\n\nAlso assign TAGS — for each facet below, pick the value(s) that CLEARLY apply to this "
+                    "thread (a thread can have several facets or none). Output each as a \"Facet: Value\" "
+                    "string, using ONLY these exact values; omit a facet if unsure — do not invent values.\n"
+                    "FACETS:\n" + vocab)
     return ("From this thread comprehension produce: an accurate abstract paragraph; a one-line "
             "summary; an event tag of AT MOST 30 characters; and facts grounded ONLY in the "
             "comprehension. For each fact give the BARE value EXACTLY as it appears in the thread "
@@ -177,7 +232,7 @@ def _distill_prompt(comprehension):
             "party or project name) — do NOT add descriptions, deadlines, or commentary to a fact "
             "value, and do not invent. Also extract CONTACTS seen in the thread (especially email "
             "signatures): for each person give name, position, company, phone, email — leave a field "
-            "empty if unknown, and don't invent.\n\nCOMPREHENSION:\n" + comprehension)
+            "empty if unknown, and don't invent." + tagblock + "\n\nCOMPREHENSION:\n" + comprehension)
 
 
 def _classify_prompt(profile: Profile, comprehension, full: bool, members: int):
@@ -306,6 +361,26 @@ def _clean_contacts(raw) -> list[dict]:
     return out
 
 
+def _clean_tags(raw, profile: Profile | None) -> list[str]:
+    """Keep only AI-emitted tags that match the profile's facet vocabulary (deterministic verification).
+    Accepts 'Facet: Value' strings or {facet,value}; returns canonical 'Facet: Value', deduped."""
+    if not profile or not profile.facets:
+        return []
+    valid = {(f.lower(), v.lower()): f"{f}: {v}"
+             for f in profile.facet_names() for v in profile.facet_values(f)}
+    out, seen = [], set()
+    for t in (raw or []):
+        if isinstance(t, dict):
+            fac, val = str(t.get("facet") or "").strip(), str(t.get("value") or "").strip()
+        else:
+            parts = str(t).split(":", 1)
+            fac, val = (parts[0].strip(), parts[1].strip()) if len(parts) == 2 else ("", "")
+        canon = valid.get((fac.lower(), val.lower()))
+        if canon and canon not in seen:
+            out.append(canon); seen.add(canon)
+    return out
+
+
 # ---------------------------------------------------------------- pipeline
 def _qa_prompt(comprehension, thread_text):
     return ("You are a strict QA reviewer. Compare the COMPREHENSION against the SOURCE thread. "
@@ -327,7 +402,7 @@ def _build_once(archive, thread, backend, profile, max_chars, model):
         comprehension = _refine(backend, thread, msgs, max_chars)
     comprehension = (comprehension if isinstance(comprehension, str) else str(comprehension)).strip()
 
-    distilled = backend.generate("distill", _distill_prompt(comprehension), schema=_DISTILL_SCHEMA) or {}
+    distilled = backend.generate("distill", _distill_prompt(comprehension, profile), schema=_DISTILL_SCHEMA) or {}
     facts, dropped = _verify_facts(distilled.get("facts") or {}, full)
     ruled = rulesmod.match(archive, text=full, project=facts.get("project", ""),
                            senders=[m.get("from", "") for m in thread.get("members", [])])
@@ -340,12 +415,14 @@ def _build_once(archive, thread, backend, profile, max_chars, model):
     rec = {
         "thread_id": thread.get("thread_id"), "root_id": thread.get("root_id"),
         "subject": thread.get("subject"),
+        "source": thread_sig(thread),                    # thread state when comprehended (staleness check)
         "comprehension": comprehension,
         "abstract": str(distilled.get("abstract") or "").strip(),
         "summary": str(distilled.get("summary") or "").strip(),
         "event": str(distilled.get("event") or "").strip()[:30],
         "facts": facts,
         "contacts": _clean_contacts(distilled.get("contacts")),
+        "tags": _clean_tags(distilled.get("tags"), profile),
         "classification": classification,
         "method": method, "model": model, "profile": profile.name,
         "verified": {"facts_ok": not dropped, "dropped_facts": dropped,
@@ -382,22 +459,46 @@ def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Pro
     return rec
 
 
+def select_threads(archive, *, only=None, redo=False, include_stale=True) -> list[dict]:
+    """Which threads a run would process: never-comprehended (always), stale (when include_stale),
+    and everything (when redo). `only` restricts to a set of thread_ids (e.g. one project / date range)."""
+    done = latest_by_root(archive)               # link by stable root_id (thread_id changes on new msgs)
+    threads = read_threads(archive)
+    if only is not None:
+        only = set(only)
+        threads = [t for t in threads if t.get("thread_id") in only]
+    todo = []
+    for t in threads:
+        rec = done.get(t.get("root_id"))
+        if rec is None or redo or (include_stale and is_stale(t, rec)):
+            todo.append(t)
+    return todo
+
+
 def run_comprehension(archive, *, backend: Comprehender, profile: Profile | None = None,
                       budget_tokens: int = 200_000, log=print,
-                      should_stop=lambda: False, allowed=lambda: True) -> dict:
-    """Comprehend not-yet-done threads (recent first) within a token-estimate budget. Idempotent,
-    resumable. `allowed()` is the policy gate (subscription/tier plugs in here later)."""
+                      should_stop=lambda: False, allowed=lambda: True,
+                      only=None, redo: bool = False, include_stale: bool = True,
+                      limit: int | None = None, progress=lambda **k: None) -> dict:
+    """Comprehend the threads that need it within a token-estimate budget. Idempotent, resumable.
+    Processes never-comprehended threads, plus stale ones (changed since comprehension) when
+    `include_stale`, plus everything when `redo`. `only` restricts to a set of thread_ids (one
+    project, a date range). `allowed()` is the policy gate (subscription/tier plugs in here later)."""
     archive = Path(archive)
     profile = profile or get_profile()
     if not allowed():
         log("Comprehension blocked by policy gate.")
-        return {"done": 0, "pending": 0, "spent": 0, "blocked": True}
-    done_ids = comprehended_ids(archive)
-    todo = [t for t in read_threads(archive) if t.get("thread_id") not in done_ids]
-    spent = done = 0
+        return {"done": 0, "pending": 0, "spent": 0, "total": 0, "blocked": True}
+    backlog = select_threads(archive, only=only, redo=redo, include_stale=include_stale)
+    todo = backlog[:limit] if limit else backlog
+    total = len(todo)
+    spent = done = errors = needs = 0
+    last_done = ""
     for t in todo:
         if should_stop():
             break
+        progress(done=done, total=total, current=(t.get("subject") or t.get("thread_id") or ""),
+                 errors=errors, last_done=last_done)
         est = estimate_thread_tokens(archive, t)
         if done > 0 and spent + est > budget_tokens:
             log(f"Budget reached (~{spent} est. tokens) — stopping; re-run to continue.")
@@ -407,9 +508,16 @@ def run_comprehension(archive, *, backend: Comprehender, profile: Profile | None
             _append(archive, rec)
             spent += est
             done += 1
+            last_done = t.get("subject") or t.get("thread_id") or ""
             c = rec["classification"]
-            flag = " ⚠ NEEDS-REVIEW" if rec.get("qaqc", {}).get("needs_review") else ""
-            log(f"  ✓ {t.get('thread_id')} [{t.get('n')} msgs] -> {c['domain']}/{c['category']} ({c['consensus']}){flag}")
+            nr = rec.get("qaqc", {}).get("needs_review")
+            needs += 1 if nr else 0
+            log(f"  ✓ {t.get('thread_id')} [{t.get('n')} msgs] -> {c['domain']}/{c['category']} ({c['consensus']})"
+                + (" ⚠ NEEDS-REVIEW" if nr else ""))
         except Exception as e:
+            errors += 1
             log(f"  ! {t.get('thread_id')}: {type(e).__name__}: {e}")
-    return {"done": done, "pending": len(todo) - done, "spent": spent, "blocked": False}
+    progress(done=done, total=total, current="", errors=errors, last_done=last_done)
+    return {"done": done, "pending": len(backlog) - done, "total": total, "backlog": len(backlog),
+            "errors": errors, "needs_review": needs, "spent": spent, "last_done": last_done,
+            "tokens": getattr(backend, "tokens", 0), "cost": getattr(backend, "cost", 0.0), "blocked": False}

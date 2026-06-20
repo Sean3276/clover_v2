@@ -221,3 +221,27 @@ def test_links_for_member_matches_by_path_for_headerless(tmp_path):
     assert ls.links_for_message(tmp_path, "path::INBOX/9.eml") == []                 # id-only lookup misses
     got = ls.links_for_member(tmp_path, "path::INBOX/9.eml", [{"path": "INBOX/9.eml"}])
     assert len(got) == 1 and got[0]["url"].endswith("h.pdf")                         # path fallback finds it
+
+
+def test_fetch_links_reports_progress(tmp_path):
+    for i in range(3):
+        _eml(tmp_path, "INBOX", str(i), f"m{i}@x", f"https://www.dropbox.com/s/x/f{i}.pdf")
+    ls.harvest(tmp_path, log=lambda *_: None)
+    seen = []
+    ls.fetch_links(tmp_path, fetcher=lambda u, p: ("downloaded", "f.pdf", b"x"),
+                   log=lambda *_: None, progress=lambda **k: seen.append(k))
+    assert len(seen) == 3 and "current" in seen[0] and seen[0]["total"] == 3
+
+
+def test_link_status_route_exposes_triage(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import app.main as m
+    _eml(tmp_path, "INBOX", "1", "a@x", "https://drive.google.com/file/d/DEAD/view")
+    _eml(tmp_path, "INBOX", "2", "b@x", "https://contoso.sharepoint.com/:b:/x/abc")
+    ls.harvest(tmp_path, log=lambda *_: None)
+    ls.fetch_links(tmp_path, log=lambda *_: None,
+                   fetcher=lambda u, p: ("dead", None, None) if "drive" in u else ("needs-auth", None, None))
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: {"auth": {"imap": {}}, "archive_path": str(tmp_path)})
+    s = TestClient(m.app).get("/threads/link-status").json()
+    assert s["stats"].get("dead") == 1 and s["stats"].get("needs-auth") == 1
+    assert len(s["needs_auth"]) == 1 and len(s["dead"]) == 1

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Developer · Clover v2{% endblock %}
+{% block body %}
+<style>
+  .devbanner{background:rgba(240,178,74,.14);border:1px solid var(--amber);border-radius:10px;
+    padding:10px 14px;color:var(--amber);font-size:13px;font-weight:600;margin-bottom:6px}
+  .mtable td .bar{height:6px;background:var(--track-bg);border:1px solid var(--line);border-radius:5px;overflow:hidden;margin-top:4px}
+  .mtable td .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--clover),var(--cyan))}
+  .mtable .act{display:flex;gap:6px;flex-wrap:wrap}
+  .pill.on{background:rgba(52,210,123,.16);color:var(--clover-d);border:1px solid rgba(52,210,123,.4)}
+  .pill.off{background:rgba(120,120,120,.12);color:var(--dim);border:1px solid var(--line)}
+</style>
+
+<div class="runhdr"><div>
+  <h1>🛠 Developer controls</h1>
+  <p class="devbanner">Internal panel — not part of the end-user app. Reachable at <code>/dev</code> only;
+    hide it with <code>CLOVER_DEV=0</code>.</p>
+  <p class="note">Register multiple comprehension AI models, give each a token budget, watch tokens used /
+    left, and switch the <strong>active</strong> model the pipeline uses. Token usage is recorded from each
+    model's actual reported usage after every comprehension run.</p>
+</div></div>
+
+<div class="card">
+  <h2>Comprehension models</h2>
+  {% if not models %}
+  <p class="note dim">No models registered — the app uses the legacy backend{% if legacy %} (model “{{ legacy }}”){% endif %}. Add one below to track tokens and switch models.</p>
+  {% else %}
+  <div class="tablewrap"><table class="mtable">
+    <tr><th>Active</th><th>Label</th><th>Backend</th><th>Model</th><th>Tokens used / budget</th><th>Left</th><th>State</th><th>Actions</th></tr>
+    {% for m in models %}
+    <tr>
+      <td>{% if m.active %}<span class="pill on">● active</span>{% else %}<button type="button" class="linkbtn" onclick="act('{{ m.id }}')">set active</button>{% endif %}</td>
+      <td><strong>{{ m.label }}</strong></td>
+      <td class="mono">{{ m.backend }}</td>
+      <td class="mono">{{ m.model or '—' }}</td>
+      <td>{{ "{:,}".format(m.tokens_used or 0) }}{% if m.token_budget %} / {{ "{:,}".format(m.token_budget) }}
+        <span class="bar"><i style="width:{{ [100, (100 * (m.tokens_used or 0) // m.token_budget)]|min }}%"></i></span>{% else %} <span class="note">(untracked)</span>{% endif %}</td>
+      <td class="mono">{% if m.left is none %}∞{% else %}{{ "{:,}".format(m.left) }}{% endif %}</td>
+      <td>{% if m.enabled %}<span class="pill on">on</span>{% else %}<span class="pill off">off</span>{% endif %}</td>
+      <td><div class="act">
+        <button type="button" class="linkbtn" onclick='edit({{ m|tojson }})'>edit</button>
+        <button type="button" class="linkbtn" onclick="resetUsage('{{ m.id }}')">reset usage</button>
+        <button type="button" class="linkbtn" style="color:var(--red)" onclick="del('{{ m.id }}','{{ m.label }}')">delete</button>
+      </div></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+  <div id="devMsg" class="msg" role="status" aria-live="polite"></div>
+</div>
+
+<div class="card">
+  <h2 id="formTitle">Add a model</h2>
+  <form id="mform" onsubmit="return false">
+    <input type="hidden" id="mid">
+    <div class="row3">
+      <div><label for="mlabel">Label</label><input id="mlabel" placeholder="e.g. Sonnet (CLI)"></div>
+      <div><label for="mbackend">Backend</label>
+        <select id="mbackend"><option value="claude-cli">claude-cli</option><option value="stub">stub</option></select></div>
+      <div><label for="mmodel">Model</label><input id="mmodel" placeholder="sonnet / opus / haiku"></div>
+    </div>
+    <div class="row">
+      <div><label for="mbudget">Token budget (0 = untracked / unlimited)</label><input id="mbudget" type="number" min="0" value="0"></div>
+      <div><label for="menabled">Enabled</label>
+        <select id="menabled"><option value="on">yes</option><option value="">no</option></select></div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:16px">
+      <button type="button" onclick="saveModel()">Save model</button>
+      <button type="button" class="ghost" onclick="resetForm()">Clear</button>
+    </div>
+  </form>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+function msg(ok, t){ const m = $("devMsg"); m.className = "msg " + (ok ? "ok" : "err"); m.textContent = t; }
+async function post(url, data){
+  const fd = new FormData(); for(const k in data) fd.append(k, data[k]);
+  return (await fetch(url, {method:"POST", body:fd})).json();
+}
+async function saveModel(){
+  const r = await post("/dev/models/save", {
+    id: $("mid").value, label: $("mlabel").value, backend: $("mbackend").value,
+    model: $("mmodel").value, token_budget: $("mbudget").value || 0, enabled: $("menabled").value});
+  msg(r.ok, r.message); if(r.ok) setTimeout(() => location.reload(), 700);
+}
+function edit(m){
+  $("formTitle").textContent = "Edit model";
+  $("mid").value = m.id; $("mlabel").value = m.label; $("mbackend").value = m.backend;
+  $("mmodel").value = m.model || ""; $("mbudget").value = m.token_budget || 0;
+  $("menabled").value = m.enabled ? "on" : "";
+  window.scrollTo({top: document.body.scrollHeight, behavior: "smooth"});
+}
+function resetForm(){ $("formTitle").textContent = "Add a model"; $("mform").reset(); $("mid").value = ""; }
+async function act(id){ const r = await post("/dev/models/activate", {id}); msg(r.ok, r.message); if(r.ok) setTimeout(() => location.reload(), 500); }
+async function resetUsage(id){ if(!confirm("Reset recorded token usage for this model?")) return;
+  const r = await post("/dev/models/reset-usage", {id}); msg(r.ok, r.message); if(r.ok) setTimeout(() => location.reload(), 500); }
+async function del(id, label){ if(!confirm("Delete model “" + label + "”?")) return;
+  const r = await post("/dev/models/delete", {id}); msg(r.ok, r.message); if(r.ok) setTimeout(() => location.reload(), 500); }
+</script>
+{% endblock %}

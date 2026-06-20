@@ -1,38 +1,221 @@
 {% extends "base.html" %}
-{% block title %}Contacts · Clover v2{% endblock %}
+{% block title %}GreenBook · Clover v2{% endblock %}
 {% block nav_contacts %}active{% endblock %}
 {% block body %}
-<h1>Contacts</h1>
-<p class="note">Everyone in your archive — names &amp; emails from message headers, enriched with
-  position / company / phone from <strong>comprehended</strong> signatures. Comprehend more mail to fill in details.</p>
-{% if not contacts %}
+<style>
+  .ctop{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+  .co{margin-top:14px}
+  .cohdr{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .cohdr h2{margin:0;color:var(--ink);text-transform:none;letter-spacing:.01em;font-size:16px}
+  .cohdr h2.unverified{font-family:var(--mono);font-size:14px;color:var(--sub);font-weight:600}
+  .utag{font-size:10px;color:var(--amber);border:1px solid var(--line);border-radius:5px;padding:1px 6px;text-transform:uppercase;letter-spacing:.05em}
+  .editname{background:none;border:0;color:var(--clover);cursor:pointer;font-size:14px;padding:2px 4px;line-height:1}
+  .editname:hover{filter:brightness(1.25)}
+  .codebox{width:6.5em;text-transform:uppercase;font-family:var(--mono);font-weight:700;font-size:12px;
+    padding:3px 7px;border:1px dashed var(--line);border-radius:6px;background:var(--input-bg);color:var(--cyan)}
+  .codebox:focus{border-style:solid}
+  .codelbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+  .coprojs{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 2px;align-items:center}
+  .alias{font-size:11px;color:var(--dim)}
+  .azbar{display:flex;flex-wrap:wrap;gap:3px;align-items:center}
+  .azbtn{min-width:25px;text-align:center;padding:3px 6px;border:1px solid var(--line);border-radius:6px;
+    background:var(--card2);color:var(--sub);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--mono)}
+  .azbtn:hover{border-color:var(--clover);color:var(--ink)}
+  .azbtn.active{background:var(--clover);color:var(--btn-ink);border-color:var(--clover)}
+  .azbtn.off{opacity:.28;pointer-events:none}
+  .cobody>summary{cursor:pointer;color:var(--clover);font-size:12px;font-weight:600;margin-top:8px;list-style:none;
+    display:inline-flex;align-items:center;gap:6px}
+  .cobody>summary::-webkit-details-marker{display:none}
+  .cobody>summary::before{content:"▸";font-size:11px;transition:transform .12s}
+  .cobody[open]>summary::before{transform:rotate(90deg)}
+  .cobody>summary:hover{filter:brightness(1.2)}
+</style>
+
+<div class="runhdr">
+  <div class="ctop" style="width:100%">
+    <div>
+      <h1>📒 GreenBook</h1>
+      <p class="note" style="max-width:64ch">Everyone in your archive, <strong>grouped by company</strong> — your
+        green book. A person's firm is taken from their <strong>email domain</strong>; the name, title and phone
+        come from their latest signature (read deterministically, no AI). Each firm has a
+        <strong>company code</strong> Clover generates — <strong>click it to rename</strong> (e.g. GCC → 4C).
+        <span class="help" tabindex="0" role="note" data-tip="Identity is by email domain, so everyone at one firm groups together even when they sign inconsistently. Codes are auto-made from the full name and saved when you edit them. Typo'd / duplicate addresses of the same person are auto-merged. 'Worked together on' lists the projects the firm appears on.">?</span></p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+      <button id="rebuildBtn" type="button" class="ghost" onclick="rebuildContacts()"
+              title="Re-read each sender's latest signature and re-derive firms, codes and merges">↻ Refresh from signatures</button>
+      <a href="/contacts/export.csv" class="btn ghost" style="text-decoration:none" title="Download the whole green book as CSV">⬇ Export CSV</a>
+      <span id="rebuildMsg" class="msg" role="status" aria-live="polite" style="margin:0"></span>
+    </div>
+  </div>
+</div>
+
+{% if not companies and not individuals %}
 <div class="card"><p class="note dim" style="margin:0">No contacts yet — archive some mail first.</p></div>
 {% else %}
 <div class="card">
-  <input id="cfilter" type="text" placeholder="Filter by name, email, company…" aria-label="Filter contacts" oninput="cfilter()" style="margin-bottom:12px">
-  <div class="tablewrap">
-  <table id="ctable">
-    <tr><th>Name</th><th>Position</th><th>Company</th><th>Phone</th><th>Email</th><th>Mails</th></tr>
-    {% for c in contacts %}
-    <tr data-q="{{ (c.name ~ ' ' ~ c.email ~ ' ' ~ c.company ~ ' ' ~ c.position)|lower }}">
-      <td>{{ c.name or '—' }}</td><td>{{ c.position or '' }}</td><td>{{ c.company or '' }}</td>
-      <td class="mono">{{ c.phone or '' }}</td><td class="mono">{{ c.email }}</td><td>{{ c.count or '' }}</td>
-    </tr>
-    {% endfor %}
-  </table>
+  <div class="azbar" role="toolbar" aria-label="Jump to companies by first letter">
+    <button type="button" class="azbtn active" data-l="*" onclick="byLetter('*')">All</button>
+    {% for L in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" %}<button type="button" class="azbtn" data-l="{{ L }}" onclick="byLetter('{{ L }}')">{{ L }}</button>{% endfor %}
+    <button type="button" class="azbtn" data-l="#" onclick="byLetter('#')" title="Names starting with a number or symbol">#</button>
   </div>
-  <p id="cempty" class="note dim" style="display:none;margin-top:8px">No contacts match.</p>
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px">
+    <input id="cfilter" type="text" placeholder="Filter by company, person, email, code…" aria-label="Filter contacts" oninput="applyContacts()" style="flex:1;min-width:220px;margin:0">
+    <button type="button" class="linkbtn" onclick="expandAll(true)">Expand all</button>
+    <button type="button" class="linkbtn" onclick="expandAll(false)">Collapse all</button>
+    <span class="note">{{ companies|length }} compan{{ 'y' if companies|length == 1 else 'ies' }}{% if individuals_count %} · {{ individuals_count }} individual(s){% endif %}</span>
+  </div>
+  {% if qaqc %}
+  <details class="qaqc" style="margin-top:12px">
+    <summary style="cursor:pointer;color:var(--amber);font-weight:600;font-size:13px">⚠ Quality review — {{ qaqc|length }} item(s) to check</summary>
+    <p class="note" style="margin:6px 0 4px">Automation's self-check. Fix with the ✎ (name) or code box on the firm.</p>
+    <ul style="margin:4px 0 0;padding-left:18px">
+      {% for q in qaqc %}<li class="note"><span class="cbadge warn">{{ q.type }}</span> {{ q.detail }}</li>{% endfor %}
+    </ul>
+  </details>
+  {% else %}
+  <p class="note dim" style="margin:10px 0 0">✓ Quality review: no duplicate codes, odd names, or likely-duplicate firms detected.</p>
+  {% endif %}
 </div>
+
+{% for co in companies %}
+<div class="card co" data-letter="{{ co.name[:1]|upper }}" data-q="{{ (co.name ~ ' ' ~ co.code ~ ' ' ~ (co.projects|join(' ')) ~ ' ' ~ (co.people|map(attribute='name')|join(' ')) ~ ' ' ~ (co.people|map(attribute='email')|join(' ')))|lower }}">
+  <div class="cohdr">
+    {% if co.unverified %}<h2 class="unverified" title="Company name not detected from signatures — this is the email domain. Click ✎ to set the real name.">{{ co.domain }}</h2>
+    <span class="utag">name not detected</span>
+    {% else %}<h2>{{ co.name }}</h2>{% endif %}
+    <button type="button" class="editname" title="Set / correct the company name" data-key="{{ co.key }}" data-name="{{ co.name }}" onclick="editName(this)">✎</button>
+    <button type="button" class="editname" title="Merge this firm into another (give the target's code)" data-key="{{ co.key }}" data-name="{{ co.name }}" onclick="mergeFirm(this)">⛙</button>
+    <span class="codelbl">code</span>
+    <input class="codebox" value="{{ co.code }}" data-key="{{ co.key }}" maxlength="8"
+           aria-label="Company code" title="Click to rename this firm's code (must be unique)"
+           onfocus="this.dataset.prev=this.value" onchange="saveCode(this)">
+    <span class="note" style="margin-left:auto">{{ co.count }} {{ 'person' if co.count == 1 else 'people' }}</span>
+  </div>
+  {% if co.projects %}
+  <div class="coprojs">
+    <span class="note">Worked together on:</span>
+    {% for pn in co.projects %}<span class="cbadge proj">🏗 {{ pn }}</span>{% endfor %}
+  </div>
+  {% endif %}
+  <details class="cobody">
+    <summary>{{ co.count }} {{ 'person' if co.count == 1 else 'people' }}</summary>
+    <div class="tablewrap" style="margin-top:8px">
+    <table>
+      <tr><th>Name</th><th>Position</th><th>Phone</th><th class="colemail">Email</th><th>Mails</th></tr>
+      {% for c in co.people %}
+      <tr>
+        <td>{{ c.name or '—' }}</td><td>{{ c.position or '' }}</td>
+        <td class="mono">{{ c.phone or '' }}</td>
+        <td class="mono colemail">{{ c.email }}{% if c.aliases %}<br><span class="alias">also: {{ c.aliases|join(', ') }}</span>{% endif %}</td>
+        <td>{{ c.count or '' }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+  </details>
+</div>
+{% endfor %}
+
+{% if individuals %}
+<div class="card co" data-indiv="1" data-q="individuals no company {{ (individuals|map(attribute='name')|join(' ') ~ ' ' ~ individuals|map(attribute='email')|join(' '))|lower }}">
+  <div class="cohdr"><h2>Individuals</h2>
+    <span class="note" style="margin-left:auto">{{ individuals|length }} · no company (personal / free-mail addresses)</span></div>
+  <details class="cobody">
+    <summary>{{ individuals|length }} people</summary>
+    <div class="tablewrap" style="margin-top:8px">
+    <table>
+      <tr><th>Name</th><th>Position</th><th>Phone</th><th class="colemail">Email</th><th>Mails</th></tr>
+      {% for c in individuals %}
+      <tr><td>{{ c.name or '—' }}</td><td>{{ c.position or '' }}</td><td class="mono">{{ c.phone or '' }}</td>
+        <td class="mono colemail">{{ c.email }}</td><td>{{ c.count or '' }}</td></tr>
+      {% endfor %}
+    </table>
+    </div>
+  </details>
+</div>
+{% endif %}
+<p id="coempty" class="note dim" style="display:none">No contacts match.</p>
+
 <script>
-function cfilter(){
+let _activeLetter = '*';
+function _cardLetter(card){
+  if(card.dataset.indiv) return null;                 // Individuals: only on "All"
+  const c = (card.dataset.letter || '').toUpperCase();
+  return (c >= 'A' && c <= 'Z') ? c : '#';
+}
+function byLetter(L){
+  _activeLetter = L;
+  document.querySelectorAll('.azbtn').forEach(b => b.classList.toggle('active', b.dataset.l === L));
+  applyContacts();
+}
+function applyContacts(){
   const q = (document.getElementById('cfilter').value || '').toLowerCase().trim();
   let shown = 0;
-  document.querySelectorAll('#ctable tr[data-q]').forEach(r => {
-    const ok = !q || (r.dataset.q || '').includes(q);
-    r.style.display = ok ? '' : 'none'; if(ok) shown++;
+  document.querySelectorAll('.co[data-q]').forEach(card => {
+    const cl = _cardLetter(card);
+    const okLetter = _activeLetter === '*' ? true : (cl === _activeLetter);
+    const okText = !q || (card.dataset.q || '').includes(q);
+    const ok = okLetter && okText;
+    card.style.display = ok ? '' : 'none'; if(ok) shown++;
   });
-  document.getElementById('cempty').style.display = shown ? 'none' : '';
+  const e = document.getElementById('coempty'); if(e) e.style.display = shown ? 'none' : '';
 }
+function expandAll(open){
+  document.querySelectorAll('.cobody').forEach(d => { d.open = open; });
+}
+function _initAZ(){                                    // dim letters with no companies
+  const present = new Set();
+  document.querySelectorAll('.co[data-letter]').forEach(c => { const l = _cardLetter(c); if(l) present.add(l); });
+  document.querySelectorAll('.azbtn').forEach(b => {
+    if(b.dataset.l !== '*' && !present.has(b.dataset.l)) b.classList.add('off');
+  });
+}
+async function editName(btn){
+  const v = prompt('Company name for this firm (leave blank to clear):', btn.dataset.name || '');
+  if(v === null) return;
+  try{
+    const fd = new FormData(); fd.append('key', btn.dataset.key); fd.append('name', v.trim());
+    const res = await (await fetch('/contacts/name', {method:'POST', body:fd})).json();
+    if(res.ok) location.reload();
+  }catch(e){ alert('Could not save name: ' + e); }
+}
+async function mergeFirm(btn){
+  const code = prompt('Merge “' + (btn.dataset.name || '') + '” INTO which firm?\nType the target firm\'s CODE (shown on its card):', '');
+  if(!code) return;
+  try{
+    const fd = new FormData(); fd.append('from_key', btn.dataset.key); fd.append('into_code', code.trim());
+    const res = await (await fetch('/contacts/merge', {method:'POST', body:fd})).json();
+    if(res.ok) location.reload(); else alert(res.message || 'Merge failed.');
+  }catch(e){ alert('Merge failed: ' + e); }
+}
+async function saveCode(inp){
+  const code = inp.value.trim().toUpperCase(); inp.value = code;
+  try{
+    const fd = new FormData(); fd.append('key', inp.dataset.key); fd.append('code', code);
+    const res = await (await fetch('/contacts/code', {method:'POST', body:fd})).json();
+    if(res.ok){
+      inp.style.borderColor = 'var(--clover)';
+      if(res.code) inp.value = res.code;
+      setTimeout(() => { inp.style.borderColor = ''; }, 1200);
+    } else {
+      inp.value = inp.dataset.prev || '';          // revert the rejected (duplicate) code
+      inp.style.borderColor = 'var(--red)';
+      alert(res.message || 'Code not available.');
+      setTimeout(() => { inp.style.borderColor = ''; }, 1200);
+    }
+  }catch(e){ inp.style.borderColor = 'var(--red)'; }
+}
+async function rebuildContacts(){
+  const b = document.getElementById('rebuildBtn'), m = document.getElementById('rebuildMsg');
+  b.disabled = true; m.className = 'msg ok'; m.textContent = 'Reading signatures… (may take a moment)';
+  try{
+    const res = await (await fetch('/contacts/rebuild', {method:'POST'})).json();
+    m.className = 'msg ' + (res.ok ? 'ok' : 'err'); m.textContent = res.message;
+    if(res.ok) setTimeout(() => location.reload(), 900); else b.disabled = false;
+  }catch(e){ m.className = 'msg err'; m.textContent = 'Refresh failed: ' + e; b.disabled = false; }
+}
+document.addEventListener('DOMContentLoaded', _initAZ);
 </script>
 {% endif %}
 {% endblock %}

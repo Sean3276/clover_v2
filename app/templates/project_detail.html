@@ -5,9 +5,11 @@
 <p style="margin:0 0 6px"><a href="/projects" class="note">← all projects</a></p>
 <h1>🏗 {{ project.name }}</h1>
 <p class="note">{{ project.count }} conversation(s){% if project.categories %} · {{ project.categories[:5]|join(' · ') }}{% endif %}</p>
-<div class="thlist" style="margin-top:14px">
+
+<h2 style="margin-top:20px">Conversations</h2>
+<div class="thlist">
   {% for t in project.threads %}
-  <a class="throw" href="/threads/{{ t.thread_id }}">
+  <a class="throw" href="/threads/{{ t.thread_id }}?from=/projects/{{ project.key|urlencode }}">
     <div class="thmain">
       <span class="thsubj">{{ t.subject }}</span>
       <span class="thmeta note">{{ t.summary or t.category or '' }}</span>
@@ -16,4 +18,32 @@
   </a>
   {% endfor %}
 </div>
+
+{% if firms %}
+<h2 style="margin-top:24px">Firms involved
+  <span class="help" tabindex="0" role="note" data-tip="The companies whose people appear on this project's conversations — who worked together. Deterministic, from email domains; no AI needed.">?</span></h2>
+<div class="coprojs" style="display:flex;gap:6px;flex-wrap:wrap">
+  {% for f in firms %}<span class="cbadge proj" title="{{ f.name }}">{% if f.code %}{{ f.code }} · {% endif %}{{ f.name }} ({{ f.count }})</span>{% endfor %}
+</div>
+{% endif %}
+
+<h2 style="margin-top:24px">People on this project
+  <span class="help" tabindex="0" role="note" data-tip="Everyone who appears on this project's conversations (sender or recipient), with company / title / phone from the Contacts directory. Grouped by company.">?</span>
+  {% if contacts %}<a href="/projects/{{ project.key|urlencode }}/people.csv" class="note" style="font-weight:600;margin-left:8px">⬇ CSV</a>{% endif %}</h2>
+{% if contacts %}
+<div class="tablewrap">
+  <table>
+    <tr><th>Name</th><th>Company</th><th>Position</th><th>Phone</th><th class="colemail">Email</th></tr>
+    {% for c in contacts %}
+    <tr>
+      <td>{{ c.name or '—' }}</td><td>{{ c.company or '' }}</td><td>{{ c.position or '' }}</td>
+      <td class="mono">{{ c.phone or '' }}</td>
+      <td class="mono colemail">{{ c.email }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% else %}
+<p class="note dim">No participants resolved — build the thread index on the <a href="/threads">Mail</a> tab.</p>
+{% endif %}
 {% endblock %}

@@ -176,6 +176,8 @@ def build_threads(archive_path, log=print) -> dict:
         loc = {"folder": row.get("folder", "?"), "path": rel}
         if loc not in m["locations"]:            # cross-folder dup -> one member, many locations
             m["locations"].append(loc)
+        if "multipart/mixed" in str(h.get("Content-Type", "") or "").lower():
+            m["attach"] = True                   # header-only attachment hint (mixed = a file is attached)
         dsu.find(node)
         for ref in _ids_in(h.get("In-Reply-To")) + _ids_in(h.get("References")):
             dsu.union(node, ref)
@@ -198,6 +200,7 @@ def build_threads(archive_path, log=print) -> dict:
             "n": len(mem),
             "start": dates[0] if dates else None,
             "end": dates[-1] if dates else None,
+            "has_attach": any(r.get("attach") for r in mem),
             "participants": _participants(mem),
             "members": [{"message_id": r["message_id"], "date": r["date"], "from": r["from"],
                          "subject": r["subject"], "locations": r["locations"]} for r in mem],

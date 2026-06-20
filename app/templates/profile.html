@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Profile · Clover v2{% endblock %}
+{% block nav_setup %}active{% endblock %}
+{% block body %}
+<p style="margin:0 0 6px"><a href="/setup" class="note">← Settings</a></p>
+<style>
+  .pfield{margin-top:16px}
+  .pfield textarea{width:100%;min-height:120px;font-family:var(--mono);font-size:13px;padding:10px 12px;
+    border:1px solid var(--line);border-radius:8px;background:var(--input-bg);color:var(--ink);line-height:1.6}
+  .pfield .hint{font-size:12px;color:var(--dim);margin:4px 0 0}
+  .rulerow{display:flex;justify-content:space-between;gap:12px;padding:8px 11px;border:1px solid var(--line);
+    border-radius:8px;background:var(--card2);margin-top:6px;font-size:13px}
+</style>
+
+<div class="runhdr">
+  <div>
+    <h1>🧭 Profile &amp; classification</h1>
+    <p class="note" style="max-width:70ch">This is the <strong>taxonomy the AI council decides against</strong> when it
+      comprehends a thread — the domains, their categories, the high-stakes safety-net, and deterministic precedence
+      rules. Edit it to fit how <em>you</em> file mail. Changes apply to new comprehensions;
+      <strong>re-comprehend</strong> on the <a href="/threads">Mail</a> tab to reclassify existing threads.
+      {% if customised %}<span class="cbadge" style="margin-left:6px">customised</span>{% else %}<span class="cbadge">default preset</span>{% endif %}</p>
+  </div>
+</div>
+
+<div class="card">
+  <form id="pform" onsubmit="return false">
+    <label for="pdesc">Description</label>
+    <input id="pdesc" type="text" value="{{ prof.description }}" placeholder="How this profile files mail">
+
+    <div class="pfield">
+      <label for="ptax">Domains &amp; categories</label>
+      <textarea id="ptax" spellcheck="false">{{ taxonomy }}</textarea>
+      <p class="hint">One domain per line as <code>Domain: Category, Category, …</code> — e.g.
+        <code>Project: Commercial, Design &amp; Technical, Operation, Quality, Safety</code></p>
+    </div>
+
+    <div class="pfield">
+      <label for="psafe">Safety-net category (the costliest to miss)</label>
+      <input id="psafe" type="text" value="{{ prof.safety_net }}" list="catlist" style="max-width:340px">
+      <datalist id="catlist">{% for c in all_categories %}<option value="{{ c }}">{% endfor %}</datalist>
+      <p class="hint">When the council is in genuine doubt, it falls back to this. Must be one of the categories above.</p>
+    </div>
+
+    <div class="pfield">
+      <label for="pprec">Precedence rules (deterministic tie-breakers)</label>
+      <textarea id="pprec" spellcheck="false">{{ precedence }}</textarea>
+      <p class="hint">One rule per line as <code>keyword, keyword, … =&gt; Category</code>. The first rule whose
+        keyword appears in the thread wins, overriding the council — e.g. <code>variation order, VO, EOT, claim =&gt; Commercial</code></p>
+    </div>
+
+    <div class="pfield">
+      <label for="pfacets">Facet tags (orthogonal — the AI tags each thread; you filter by any combination)</label>
+      <textarea id="pfacets" spellcheck="false">{{ facets }}</textarea>
+      <p class="hint">One facet per line as <code>Facet: Value, Value, …</code> — e.g.
+        <code>Discipline: Architecture, Structural, M&amp;E, Authority</code> /
+        <code>Authority: BCA, URA, SCDF, LTA, PUB</code>. The AI assigns only these values (never invents);
+        threads can carry several facets or none. These power the Mail tag search.</p>
+    </div>
+
+    <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap">
+      <button type="button" onclick="saveProfile()">Save profile</button>
+      <button type="button" class="ghost" onclick="resetProfile()">Reset to default</button>
+      <span id="pmsg" class="msg" role="status" aria-live="polite" style="margin:0"></span>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Learned classification rules
+    <span class="help" tabindex="0" role="note" data-tip="When you resolve a flagged thread on the Mail tab you can save a rule (keyword / sender / project → category). Those rules classify matching threads deterministically, with no AI council. Manage them here.">?</span></h2>
+  {% if rules %}
+  {% for r in rules %}
+  <div class="rulerow">
+    <span><span class="cbadge">{{ r.type }}</span> <code>{{ r.match }}</code> → <strong>{{ r.category }}</strong>{% if r.domain %} <span class="note">({{ r.domain }})</span>{% endif %}</span>
+    <a href="/rules" class="note">manage →</a>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="note dim" style="margin:6px 0 0">No learned rules yet. Resolve a flagged thread on the
+    <a href="/threads">Mail</a> tab and tick “save as a rule” to add one. <a href="/rules">Rules page →</a></p>
+  {% endif %}
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+async function saveProfile(){
+  const m = $("pmsg"); m.className = "msg ok"; m.textContent = "Saving…";
+  const fd = new FormData();
+  fd.append("description", $("pdesc").value);
+  fd.append("taxonomy", $("ptax").value);
+  fd.append("safety_net", $("psafe").value);
+  fd.append("precedence", $("pprec").value);
+  fd.append("facets", $("pfacets").value);
+  try{
+    const res = await (await fetch("/profile/save", {method:"POST", body:fd})).json();
+    m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message;
+    if(res.ok) setTimeout(() => location.reload(), 1200);
+  }catch(e){ m.className = "msg err"; m.textContent = "Failed: " + e; }
+}
+async function resetProfile(){
+  if(!confirm("Reset the classification profile back to the shipped default?")) return;
+  const m = $("pmsg");
+  try{
+    const res = await (await fetch("/profile/reset", {method:"POST"})).json();
+    m.className = "msg ok"; m.textContent = res.message;
+    setTimeout(() => location.reload(), 900);
+  }catch(e){ m.className = "msg err"; m.textContent = "Failed: " + e; }
+}
+</script>
+{% endblock %}

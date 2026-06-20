@@ -58,12 +58,16 @@ class StubComprehender(Comprehender):
 
     name = "stub"
 
-    def __init__(self, responses: dict | None = None):
+    def __init__(self, responses: dict | None = None, model: str = "stub"):
         self.responses = responses or {}
         self.calls: list = []
+        self.model = model
+        self.tokens = 0
+        self.cost = 0.0
 
     def generate(self, task: str, prompt: str, schema: dict | None = None):
         self.calls.append(task)
+        self.tokens += max(1, len(prompt) // 4)          # rough, so usage accrual is testable
         if task in self.responses:
             r = self.responses[task]
             return r(prompt) if callable(r) else r
@@ -72,7 +76,8 @@ class StubComprehender(Comprehender):
         if task == "distill":
             return {"abstract": "Stub abstract.", "summary": "Stub one-liner.",
                     "event": "stub event",
-                    "facts": {"project": "", "parties": [], "refs": [], "dates": [], "amounts": []}}
+                    "facts": {"project": "", "parties": [], "refs": [], "dates": [], "amounts": []},
+                    "tags": ["Discipline: M&E", "Artifact: RFI", "Made Up: Nonsense"]}
         if task in ("classify", "classify_full"):
             return {"domain": "Project", "category": "Commercial", "confidence": 0.9,
                     "dispute": False, "dissent": ""}
@@ -91,6 +96,8 @@ class ClaudeCliComprehender(Comprehender):
     def __init__(self, model: str = "sonnet", timeout: int = 180):
         self.model = model
         self.timeout = timeout
+        self.tokens = 0           # actual tokens consumed (from the CLI usage envelope)
+        self.cost = 0.0           # USD, if the CLI reports it
 
     def generate(self, task: str, prompt: str, schema: dict | None = None):
         import shutil
@@ -111,8 +118,12 @@ class ClaudeCliComprehender(Comprehender):
         if proc.returncode != 0:
             raise RuntimeError(f"claude CLI failed ({proc.returncode}): {proc.stderr.strip()[:200]}")
         try:
-            env = json.loads(proc.stdout)        # CLI envelope: {"result": "...", ...}
+            env = json.loads(proc.stdout)        # CLI envelope: {"result": "...", "usage": {...}, ...}
             text = env.get("result", proc.stdout)
+            u = env.get("usage") or {}
+            self.tokens += sum(int(v) for k, v in u.items()
+                               if isinstance(v, (int, float)) and "token" in k.lower())
+            self.cost += float(env.get("total_cost_usd") or 0)
         except Exception:
             text = proc.stdout
         return _parse_json(text) if schema else text
