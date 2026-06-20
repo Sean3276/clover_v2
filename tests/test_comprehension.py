@@ -188,6 +188,33 @@ def test_floor_does_not_duplicate_amount_in_other_format(tmp_path):
     assert rec["facts"]["amounts"] == ["1250000"]          # not duplicated as 'SGD 1250000'
 
 
+def test_attachment_content_reaches_the_floor(tmp_path):
+    # a reference lives ONLY in an xlsx attachment; the AI sees nothing -> floor backfills it from the attachment
+    import io
+    import json as _json
+    import openpyxl
+    from email.message import EmailMessage
+    m = EmailMessage()
+    m["Message-ID"] = "<1>"; m["From"] = "a@x.com"; m["Subject"] = "S"
+    m["Date"] = "Thu, 01 Jan 2026 00:00:00 +0000"
+    m.set_content("Please see the attached schedule.")
+    wb = openpyxl.Workbook(); ws = wb.active; ws.append(["Item", "Ref"]); ws.append(["Door", "RFI-99"])
+    buf = io.BytesIO(); wb.save(buf)
+    m.add_attachment(buf.getvalue(), maintype="application",
+                     subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename="schedule.xlsx")
+    (tmp_path / "INBOX").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "INBOX" / "1.eml").write_bytes(m.as_bytes())
+    (tmp_path / "_index.jsonl").write_text(_json.dumps(
+        {"id": "1", "folder": "INBOX", "key": "1", "path": "INBOX/1.eml", "date": m["Date"], "from": "a@x.com"}) + "\n",
+        encoding="utf-8")
+    th.build_threads(tmp_path, log=lambda *_: None)
+    t = th.read_threads(tmp_path)[0]
+    stub = StubComprehender(responses={"distill": {"abstract": "a", "summary": "s", "event": "e",
+        "facts": {"project": "", "parties": [], "refs": [], "dates": [], "amounts": []}}})
+    rec = cp.comprehend_thread(tmp_path, t, stub, get_profile())
+    assert "RFI-99" in rec["facts"]["refs"]                 # the ref was inside the attachment
+
+
 def test_distill_verification_flags_unfaithful_abstract(tmp_path):
     # step 8 (ii)-(iv) vs (i): a drifting abstract flags the task even when the comprehension itself passes
     stub = StubComprehender(responses={"verify_distill": {

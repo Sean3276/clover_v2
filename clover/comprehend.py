@@ -17,7 +17,8 @@ from pathlib import Path
 from . import rules as rulesmod
 from .comprehenders import Comprehender
 from .profiles import Profile, get_profile
-from .threads import read_threads, render_message
+from . import attachments as attmod
+from .threads import get_attachment, read_threads, render_message
 
 _TAG = re.compile(r"(?s)<[^>]+>")
 _STYLE = re.compile(r"(?is)<(script|style)\b.*?</\1>")
@@ -63,6 +64,45 @@ def _block_text(block: dict) -> str:
     return _WS.sub(" ", unescape(h)).strip()
 
 
+def _attachment_text(archive, location: dict, atts: list) -> str:
+    """Extract text from a message's attachments so their content is comprehended too — LOUD on
+    anything unread (image/OCR-needed, unsupported, parse error), never silently skipped."""
+    import os
+    import tempfile
+    parts = []
+    for a in atts:
+        name = a.get("name") or "attachment"
+        if a.get("img"):
+            parts.append(f"[attachment NOT read: {name} — image, needs OCR (not enabled)]")
+            continue
+        try:
+            got = get_attachment(archive, location, a.get("i", 0))
+        except Exception:
+            got = None
+        if not got:
+            continue
+        fname, _ctype, data = got
+        tmp = None
+        try:
+            fd, tmp = tempfile.mkstemp(suffix=Path(fname or name).suffix)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(data or b"")
+            r = attmod.extract_attachment(tmp)
+        except Exception as e:
+            r = {"ok": False, "text": "", "note": f"{type(e).__name__}"}
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+        if r.get("ok") and r.get("text"):
+            parts.append(f"[attachment: {fname or name}]\n{r['text']}")
+        else:
+            parts.append(f"[attachment NOT read: {fname or name} — {r.get('note', '')}]")
+    return "\n\n".join(parts)
+
+
 def _thread_messages(archive, thread: dict) -> list[str]:
     out = []
     for m in thread.get("members", []):
@@ -73,7 +113,11 @@ def _thread_messages(archive, thread: dict) -> list[str]:
             b = render_message(archive, locs[0])
         except Exception:
             continue
-        out.append(f"From: {b.get('from','')}  Date: {b.get('date','')}\n{_block_text(b)}")
+        text = f"From: {b.get('from','')}  Date: {b.get('date','')}\n{_block_text(b)}"
+        att = _attachment_text(archive, locs[0], b.get("attachments") or [])
+        if att:
+            text += "\n\n" + att
+        out.append(text)
     return out
 
 
