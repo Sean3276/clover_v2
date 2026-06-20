@@ -253,15 +253,22 @@ def estimate_thread_tokens(archive, thread: dict) -> int:
 # ---------------------------------------------------------------- prompts
 def _comprehend_prompt(thread, text):
     return (f"You are reading an email thread (subject: {thread.get('subject','')}). Produce a "
-            "faithful, chronological comprehension of the WHOLE thread: who wrote, what was "
-            "asked / decided / changed, and the current state. Base everything strictly on the "
-            "text — do not invent. The thread may mix English and Chinese.\n\nTHREAD:\n" + text)
+            "faithful, chronological comprehension of the WHOLE thread. Going message by message in "
+            "order, capture who wrote and what they asked / decided / committed / changed, and list "
+            "EVERY deadline, amount, and reference number explicitly — never summarise these away. "
+            "Then give the CURRENT status of each matter, applying supersession (a later message "
+            "overrides an earlier one) and correct polarity (respect conditionals like 'only if…' and "
+            "negations like 'not approved'). Note any referenced attachment. Base everything STRICTLY "
+            "on the text — invent nothing. The thread may mix English and Chinese; keep both "
+            "verbatim.\n\nTHREAD:\n" + text)
 
 
 def _refine_prompt(thread, running, chunk):
     return ("Continue a faithful chronological comprehension of this email thread. Below is the "
-            "comprehension so far, then the next messages — update it to include them, accurately, "
-            "without inventing.\n\nSO FAR:\n" + (running or "(none yet)")
+            "comprehension so far, then the next messages — update it to include them accurately, "
+            "inventing nothing. Carry forward EVERY still-open item (a pending request, an unmet "
+            "deadline, a held amount, an unanswered reference) — do not drop or summarise away an "
+            "earlier open item just because newer messages arrived.\n\nSO FAR:\n" + (running or "(none yet)")
             + "\n\nNEXT MESSAGES:\n" + "\n\n----\n\n".join(chunk))
 
 
@@ -274,13 +281,14 @@ def _distill_prompt(comprehension, profile: Profile | None = None):
                     "string, using ONLY these exact values; omit a facet if unsure — do not invent values.\n"
                     "FACETS:\n" + vocab)
     return ("From this thread comprehension produce: an accurate abstract paragraph; a one-line "
-            "summary; an event tag of AT MOST 30 characters; and facts grounded ONLY in the "
-            "comprehension. For each fact give the BARE value EXACTLY as it appears in the thread "
-            "(a date like '14 March 2025', an amount like 'S$878,000', a reference like 'EOT-05', a "
-            "party or project name) — do NOT add descriptions, deadlines, or commentary to a fact "
-            "value, and do not invent. Also extract CONTACTS seen in the thread (especially email "
-            "signatures): for each person give name, position, company, phone, email — leave a field "
-            "empty if unknown, and don't invent." + tagblock + "\n\nCOMPREHENSION:\n" + comprehension)
+            "summary; an event tag of AT MOST 30 characters; and FACTS grounded ONLY in the "
+            "comprehension. For facts, list EVERY reference number, EVERY date, EVERY amount, EVERY "
+            "party, and the project — do NOT summarise or omit any. Give each fact's BARE value "
+            "EXACTLY as it appears (a date like '14 March 2025', an amount like 'S$878,000', a "
+            "reference like 'EOT-05') with no added description, deadline, or commentary, and invent "
+            "nothing. Also extract CONTACTS seen in the thread (especially email signatures): for each "
+            "person give name, position, company, phone, email — leave a field empty if unknown, and "
+            "don't invent." + tagblock + "\n\nCOMPREHENSION:\n" + comprehension)
 
 
 def _classify_prompt(profile: Profile, comprehension, full: bool, members: int):
@@ -431,12 +439,14 @@ def _clean_tags(raw, profile: Profile | None) -> list[str]:
 
 # ---------------------------------------------------------------- pipeline
 def _qa_prompt(comprehension, thread_text):
-    return ("You are a strict QA reviewer. Compare the COMPREHENSION against the SOURCE thread. "
-            "Check FAITHFULNESS (every statement is supported by the source — nothing fabricated, "
-            "misattributed or distorted) and COMPLETENESS (no MATERIAL point omitted — a decision, "
-            "request, commitment, deadline, amount or change). Set passed=true ONLY if both hold; give "
-            "faithfulness and completeness each 0..1; list specific issues if any.\n\n"
-            "COMPREHENSION:\n" + comprehension + "\n\nSOURCE:\n" + thread_text)
+    return ("You are a strict QA reviewer — assume a defect exists and try to find it. Compare the "
+            "COMPREHENSION against the SOURCE thread. Check FAITHFULNESS (every statement is supported "
+            "by the source — nothing fabricated, misattributed, or distorted) and COMPLETENESS (no "
+            "material point omitted — a decision, request, commitment, deadline, amount, or change, AND "
+            "every reference number / date / amount that appears in the source). Also check the CURRENT "
+            "status is right: latest message wins, and conditionals / negations are not flipped. Set "
+            "passed=true ONLY if all hold; give faithfulness and completeness each 0..1; list specific "
+            "issues if any.\n\nCOMPREHENSION:\n" + comprehension + "\n\nSOURCE:\n" + thread_text)
 
 
 def _distill_qa_prompt(comprehension, abstract, summary, event):
