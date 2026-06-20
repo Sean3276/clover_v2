@@ -13,7 +13,8 @@ import re
 
 # ── reference numbers: RFI-12, NCR 07, SOI-018, CR-59, VO09, EOT-5, MCI-18 ──────────
 # Prefix is UPPERCASE 2–6 letters (the convention for project codes); lowercase variants
-# are a known floor gap to refine against gold. Digits are kept verbatim (SOI-018 ≠ SOI-18).
+# are a known floor gap to refine against gold. Leading zeros are stripped so the same real
+# reference written two ways collapses to one (MCI-018 == MCI-18, SOI-018 == SOI-18).
 _REF = re.compile(r"\b([A-Z]{2,6})[-/ ]?(\d{1,6})\b")
 # common letter+digit tokens that are NOT reference numbers — notably currency codes, which
 # otherwise mis-read "SGD 1,000" -> "SGD-1". (Amounts are handled by extract_amounts.)
@@ -22,13 +23,13 @@ _REF_STOP = {"ISO", "COVID", "MP", "H", "CO",
 
 
 def extract_refs(text: str) -> list[str]:
-    """Canonical ``PREFIX-DIGITS`` (uppercase prefix, separator normalised, digits verbatim)."""
+    """Canonical ``PREFIX-N`` (uppercase prefix, separator normalised, leading zeros stripped)."""
     out: dict[str, None] = {}
     for m in _REF.finditer(text or ""):
         prefix = m.group(1).upper()
         if prefix in _REF_STOP:
             continue
-        out[f"{prefix}-{m.group(2)}"] = None
+        out[f"{prefix}-{int(m.group(2))}"] = None          # leading zeros stripped: MCI-018 == MCI-18
     return list(out)
 
 

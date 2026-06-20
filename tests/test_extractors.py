@@ -3,12 +3,12 @@ from clover.eval import extractors as ex
 
 def test_refs_canonical_case_and_separator():
     r = ex.extract_refs("Re: RFI-12 and NCR 07, also SOI-018 / CR-59 (VO09). EOT-5 raised.")
-    assert set(r) == {"RFI-12", "NCR-07", "SOI-018", "CR-59", "VO-09", "EOT-5"}
+    assert set(r) == {"RFI-12", "NCR-7", "SOI-18", "CR-59", "VO-9", "EOT-5"}   # leading zeros stripped
 
 
-def test_refs_keep_leading_zeros_and_skip_stopwords():
-    assert ex.extract_refs("doc SOI-018 per ISO9001") == ["SOI-018"]      # ISO* is stop-listed
-    assert ex.extract_refs("rfi 12") == []                                # lowercase prefix = known floor gap
+def test_refs_strip_leading_zeros_and_skip_stopwords():
+    assert ex.extract_refs("doc SOI-018 and SOI-18 per ISO9001") == ["SOI-18"]  # same ref collapses; ISO* skipped
+    assert ex.extract_refs("rfi 12") == []                                       # lowercase prefix = known floor gap
 
 
 def test_refs_do_not_swallow_currency_amounts():
