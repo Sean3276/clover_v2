@@ -10,6 +10,15 @@
 > target is **zero-touch** (user imports mail → returns next day to finished gold-grade output).
 > **Build order:** per-stage reliability + the eval harness first, then the orchestration /
 > multi-tenant layer at the post–Phase-4 split.
+> **Generic / industry-agnostic:** the engine is domain-neutral — **construction is only the seed
+> profile**, not the product. The taxonomy/profile is config; Clover ships a generic default,
+> comprehends any field out of the box (general comprehension + universal facts: dates/amounts/
+> parties/refs), and **learns the user's domain from their own emails** — onboarding calibration
+> (user role/industry inputs + corrections on a sample of their mail = a per-user gold), learned
+> classification rules, and per-user reference conventions. A new user in any field (law, medical,
+> software, logistics, …) starts usable and sharpens with use. To do: ship the generic default
+> profile, move the last construction examples out of prompts/finder into config, and let the
+> calibration learn each user's reference conventions.
 
 ## How many phases?
 
