@@ -63,14 +63,16 @@ def test_profile_routes_show_save_reset(tmp_path, monkeypatch):
     assert "profile_def" not in store["cfg"]["comprehension"]
 
 
-def test_settings_links_to_profile_and_rules(tmp_path, monkeypatch):
+def test_account_under_mail_and_classification_under_hub(tmp_path, monkeypatch):
     from starlette.testclient import TestClient
     import app.main as m
     monkeypatch.setattr(m.cfgmod, "load_config", lambda: {"auth": {"imap": {}}, "archive_path": str(tmp_path)})
-    body = TestClient(m.app).get("/setup").text
-    assert ">Settings<" in body                          # Setup renamed to Settings in nav
-    assert 'href="/profile"' in body and 'href="/rules"' in body   # classification folded under Settings
-    assert ">Profile<" not in body                       # no standalone Profile nav tab
+    c = TestClient(m.app)
+    setup = c.get("/setup").text                         # /setup is now the 'Account' page under Mail
+    assert ">Mail<" in setup and "Account" in setup
+    assert ">Settings<" not in setup                     # the Settings tab is retired
+    hub = c.get("/projects").text                        # classification (profile + rules) folded under Hub
+    assert 'href="/profile"' in hub and 'href="/rules"' in hub
 
 
 def test_facets_roundtrip_and_effective():

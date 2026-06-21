@@ -47,6 +47,12 @@
   header a:hover{color:var(--ink)}
   header a.active{color:var(--clover);font-weight:600}
   .mainnav{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+  /* per-tab sub-navigation (folds the old separate pages under their parent tab) */
+  .subnav{display:flex;gap:6px;margin:0 0 18px;flex-wrap:wrap}
+  .subnav a{font-size:13px;color:var(--sub);text-decoration:none;padding:5px 13px;border:1px solid var(--line);
+    border-radius:18px;background:var(--card2)}
+  .subnav a:hover{color:var(--ink);border-color:var(--clover)}
+  .subnav a.on{color:var(--clover-d);border-color:var(--clover);background:rgba(52,210,123,.12);font-weight:600}
   header .right{margin-left:auto;font-size:11px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
   .themetoggle{background:transparent;border:1px solid var(--line);color:var(--ink);border-radius:8px;
     padding:4px 9px;font-size:14px;line-height:1;cursor:pointer}
@@ -151,12 +157,10 @@
 <header>
   <span class="logo">🍀 Clover<span class="v"> v2</span></span>
   <nav class="mainnav" aria-label="Main">
-    <a href="/threads" class="{% block nav_threads %}{% endblock %}">Mail</a>
-    <a href="/todo" class="{% block nav_todo %}{% endblock %}">Need&nbsp;You</a>
-    <a href="/projects" class="{% block nav_projects %}{% endblock %}">Projects</a>
-    <a href="/contacts" class="{% block nav_contacts %}{% endblock %}">GreenBook</a>
-    <a href="/archive" class="{% block nav_archive %}{% endblock %}">Archive</a>
-    <a href="/setup" class="{% block nav_setup %}{% endblock %}">Settings</a>
+    <a href="/threads" class="{% block nav_mail %}{% endblock %}">Mail</a>
+    <a href="/projects" class="{% block nav_hub %}{% endblock %}">Hub</a>
+    <a href="/todo" class="{% block nav_matters %}{% endblock %}">Matters</a>
+    <a href="/contacts" class="{% block nav_rolodex %}{% endblock %}">Rolodex</a>
   </nav>
   <button id="themeBtn" class="themetoggle" type="button" style="margin-left:auto" onclick="toggleTheme()" aria-label="Toggle light/dark theme" title="Toggle light / dark theme">☀️</button>
 </header>

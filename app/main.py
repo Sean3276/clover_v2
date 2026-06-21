@@ -26,6 +26,7 @@ from clover import comprehend as compmod
 from clover import contacts as contactsmod
 from clover import config as cfgmod
 from clover import linkshares as lsmod
+from clover import matters as mattersmod
 from clover import models as modelsmod
 from clover import projects as projmod
 from clover import rules as rulesmod
@@ -447,6 +448,8 @@ def _maybe_autorun_comprehension(cfg: dict) -> None:
 def threads_page(request: Request):
     cfg = cfgmod.load_config()
     arch = _archive_dir(cfg)
+    if not (arch / "threads.jsonl").exists():    # adaptive onboarding: no mail yet -> start on Import
+        return RedirectResponse("/archive", status_code=303)
     threads = threadmod.read_threads(arch)
     by_root = compmod.latest_by_root(arch)                # link by stable root_id (thread_id changes on new msgs)
     comps = {t["thread_id"]: by_root[t["root_id"]] for t in threads if t.get("root_id") in by_root}
@@ -500,14 +503,82 @@ def todo_page(request: Request):
     cfg = cfgmod.load_config()
     arch = _archive_dir(cfg)
     today = date.today().isoformat()
-    items = todomod.needyou_items(arch, today)
-    overdue = sum(1 for i in items if i["overdue"])
-    soon = sum(1 for i in items if i["days_left"] is not None and 0 <= i["days_left"] <= 7)
-    undated = sum(1 for i in items if i["days_left"] is None)
+    recs = list(compmod.latest_by_root(arch).values())
+    store = mattersmod.read_store(arch)
+    focus = mattersmod.focus(recs, today, store)            # Focus: ONLY the matters you ★-selected
+    happ = mattersmod.happenings(recs, today, store)        # Happenings: everything else (same display)
+    overdue = sum(1 for i in focus if i["overdue"])
+    soon = sum(1 for i in focus if i["days_left"] is not None and 0 <= i["days_left"] <= 7)
+    layout = store.get("layout") or {}
+    domains = sorted({i["domain"] for i in focus + happ if i["domain"]})
+    categories = sorted({i["category"] for i in focus + happ if i["category"]})
     return templates.TemplateResponse(request, "todo.html", {
-        "cfg": cfg, "items": items, "today": today,
-        "counts": {"total": len(items), "overdue": overdue, "soon": soon, "undated": undated},
+        "cfg": cfg, "items": focus, "happenings": happ, "today": today,
+        "keywords": store.get("keywords") or [], "themes": store.get("themes") or [],
+        "sort": layout.get("sort") or "expiry", "gauge_on": bool(layout.get("gauge")),
+        "tags_on": layout.get("tags") or mattersmod.DEFAULT_TAGS, "all_tags": mattersmod.AVAILABLE_TAGS,
+        "domains": domains, "categories": categories,
+        "counts": {"total": len(focus), "overdue": overdue, "soon": soon,
+                   "undated": sum(1 for i in focus if i["days_left"] is None),
+                   "happenings": len(happ), "suggested": sum(1 for h in happ if h.get("suggested")),
+                   "issues": sum(1 for h in happ if h["needs_review"])},
     })
+
+
+@app.post("/matters/layout")
+def matters_layout(sort: str = Form("expiry"), tags: str = Form("domain,category"), gauge: int = Form(0)):
+    """Persist the operator's preferred Matters layout (sort key, which fact-tags show, urgency gauge on/off)."""
+    layout = {"sort": (sort or "expiry").strip(),
+              "tags": [t.strip() for t in tags.split(",") if t.strip()],
+              "gauge": bool(int(gauge or 0))}
+    mattersmod.set_layout(_archive_dir(cfgmod.load_config()), layout)
+    return JSONResponse({"ok": True, **layout})
+
+
+@app.post("/matters/themes/refresh")
+def matters_themes_refresh():
+    """Ask the AI to (re)infer focus themes from the matters the operator has starred (the fuzzy layer)."""
+    cfg = cfgmod.load_config()
+    if not _backend_available(cfg):
+        return JSONResponse({"ok": False, "message": "AI backend not set up — can't infer themes."})
+    arch = _archive_dir(cfg)
+    recs = list(compmod.latest_by_root(arch).values())
+    try:
+        themes = mattersmod.infer_themes(recs, date.today().isoformat(), _comprehender(cfg),
+                                         mattersmod.read_store(arch))
+        mattersmod.set_themes(arch, themes)
+        return JSONResponse({"ok": True, "count": len(themes), "themes": themes})
+    except Exception as e:
+        return JSONResponse({"ok": False, "message": str(e) if isinstance(e, RuntimeError) else f"{type(e).__name__}: {e}"})
+
+
+@app.post("/matters/pin")
+def matters_pin(key: str = Form(...), on: int = Form(1)):
+    """Pin/unpin an item to Focus. Pinning teaches the focus-keyword learner from that item."""
+    arch = _archive_dir(cfgmod.load_config())
+    on = bool(int(on))
+    mattersmod.set_pin(arch, key, on)
+    if on:
+        recs = list(compmod.latest_by_root(arch).values())
+        item = mattersmod.find_item(recs, date.today().isoformat(), key)
+        if item:
+            mattersmod.learn_from_pin(arch, item)
+    return JSONResponse({"ok": True, "pinned": on})
+
+
+@app.post("/matters/importance")
+def matters_importance(key: str = Form(...), level: str = Form("")):
+    """Operator override of an item's priority: 'high' (important) / 'normal' / '' to clear."""
+    mattersmod.set_importance(_archive_dir(cfgmod.load_config()), key, level.strip())
+    return JSONResponse({"ok": True})
+
+
+@app.post("/matters/keywords")
+def matters_keywords(terms: str = Form("")):
+    """Replace the learned focus-keywords with an operator-edited comma-separated list."""
+    kws = [{"term": t.strip(), "weight": 5} for t in terms.split(",") if t.strip()]
+    mattersmod.set_keywords(_archive_dir(cfgmod.load_config()), kws)
+    return JSONResponse({"ok": True, "count": len(kws)})
 
 
 @app.get("/projects", response_class=HTMLResponse)

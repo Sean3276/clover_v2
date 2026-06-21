@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Mail · Clover v2{% endblock %}
-{% block nav_threads %}active{% endblock %}
+{% block nav_mail %}active{% endblock %}
 {% block body %}
+{% set active = 'conversations' %}{% include '_subnav_mail.html' %}
 <style>
   .thtools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
   .thtools input{flex:1;min-width:220px}
@@ -107,7 +108,7 @@
 <div id="rebuildMsg" class="msg" role="status" aria-live="polite"></div>
 
 {% if not threads %}
-<div class="card"><p class="note dim" style="margin:0">No conversations yet. Archive mail on the <a href="/archive">Archive</a> tab, then they'll appear here automatically.</p></div>
+<div class="card"><p class="note dim" style="margin:0">No conversations yet. Import mail on the <a href="/archive">Import</a> tab, then they'll appear here automatically.</p></div>
 {% else %}
 <div class="card">
   <div class="thtools">

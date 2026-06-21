@@ -1,8 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Projects · Clover v2{% endblock %}
-{% block nav_projects %}active{% endblock %}
+{% block title %}Hub · Clover v2{% endblock %}
+{% block nav_hub %}active{% endblock %}
 {% block body %}
-<h1>Projects</h1>
+{% set active = 'projects' %}{% include '_subnav_hub.html' %}
+<h1>Hub</h1>
 <p class="note">Projects detected from <strong>comprehended</strong> conversations — grouped by the project
   name each thread is about. Comprehend more mail to see more here.</p>
 {% if not projects %}

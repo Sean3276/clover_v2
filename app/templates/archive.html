@@ -1,7 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Archive · Clover v2{% endblock %}
-{% block nav_archive %}active{% endblock %}
+{% block title %}Import · Clover v2{% endblock %}
+{% block nav_mail %}active{% endblock %}
 {% block body %}
+{% set active = 'import' %}{% include '_subnav_mail.html' %}
 <style>
   .mono{font-family:var(--mono)}
   .top{display:flex;gap:26px;align-items:center;flex-wrap:wrap}
@@ -61,7 +62,7 @@
 </style>
 
 <div class="runhdr">
-  <div><h1>Archive monitor</h1>
+  <div><h1>Import</h1>
     <p class="note">Mailbox <code>{{ cfg.auth.imap.user or "not set" }}</code> · Destination <code>{{ cfg.archive_path }}</code></p>
     <p class="note dim" style="margin:4px 0 0"><strong>Step 2 — download your mail.</strong> Select folders, optionally filter, then Archive. <span class="help" tabindex="0" role="note" data-tip="Read-only: nothing on the server is moved, deleted, or marked read. It auto-resumes if the connection drops, and skips anything already archived.">?</span></p>
     <p id="sessionLine" class="note dim" style="margin:4px 0 0"></p></div>
@@ -75,19 +76,22 @@
     <li><span class="fnum">1</span><div><b>Download your mail</b><br>
       <span class="note">Saves new messages as <code>.eml</code> from the folders you tick. Read-only on the
       server — nothing is moved, deleted, or marked read — and it auto-resumes if the connection drops,
-      skipping anything already archived.</span></div></li>
+      skipping anything already imported.</span></div></li>
     <li><span class="fnum">2</span><div><b>Re-stitch threads</b><br>
       <span class="note">Rebuilds the conversation index so replies and forwards group into one thread.</span></div></li>
-    <li><span class="fnum">3</span><div><b>Comprehend new threads</b> <span class="opt">auto · budget-capped</span><br>
-      <span class="note">The AI reads each new thread into a summary, key facts, and cited to-dos. Controlled in
-      <a href="/dev">/dev</a> (model, parallelism, timeout); skipped if auto-comprehend is off.</span></div></li>
-    <li><span class="fnum">4</span><div><b>Refresh the GreenBook</b><br>
+    <li><span class="fnum">3</span><div><b>Fetch share links &amp; attachments</b> <span class="opt">download is optional</span><br>
+      <span class="note">Catalogues the share links in new mail, and — if you tick <b>“download share links”</b>
+      below — downloads the files (SharePoint/OneDrive, Drive, Dropbox, WeTransfer, Box) <b>first</b>, so the
+      next step can read them. Very large files pause for your confirmation in <a href="/threads">Mail</a>.</span></div></li>
+    <li><span class="fnum">4</span><div><b>Comprehend each thread</b> <span class="opt">auto · budget-capped</span><br>
+      <span class="note">The AI reads each new thread — <b>including downloaded attachments</b> — into one place.
+      This single step produces the <b>category</b> (→ <a href="/projects">Hub</a> grouping &amp; project),
+      the people on it (→ <a href="/contacts">Rolodex</a>), and your to-dos &amp; flagged issues
+      (→ <a href="/todo">Matters</a>). Tune model/speed/timeout in <a href="/dev">/dev</a>; skipped if
+      auto-comprehend is off.</span></div></li>
+    <li><span class="fnum">5</span><div><b>Refresh the Rolodex</b><br>
       <span class="note">Pulls names, titles, and phone numbers from email signatures into your
       <a href="/contacts">contacts</a> directory.</span></div></li>
-    <li><span class="fnum">5</span><div><b>Catalogue share links &amp; attachments</b> <span class="opt">download is optional</span><br>
-      <span class="note">Always lists the share links found in new mail. If you tick <b>“download share links”</b>
-      below, it also fetches the files (SharePoint/OneDrive, Drive, Dropbox, WeTransfer, Box) — very large
-      files pause for your confirmation in <a href="/threads">Mail</a>.</span></div></li>
   </ol>
 </details>
 

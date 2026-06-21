@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Classification rules · Clover v2{% endblock %}
-{% block nav_setup %}active{% endblock %}
+{% block nav_hub %}active{% endblock %}
 {% block body %}
-<p style="margin:0 0 6px"><a href="/setup" class="note">← Settings</a></p>
+{% set active = 'rules' %}{% include '_subnav_hub.html' %}
 <h1>Classification rules</h1>
 <p class="note">Rules you taught Clover when resolving threads. A matching rule classifies a thread
   <strong>directly</strong> (no AI council); if rules conflict, the newest one wins. Delete a rule to stop applying it.</p>

@@ -1,8 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Settings · Clover v2{% endblock %}
-{% block nav_setup %}active{% endblock %}
+{% block title %}Account · Clover v2{% endblock %}
+{% block nav_mail %}active{% endblock %}
 {% block body %}
-<h1>Settings</h1>
+{% set active = 'account' %}{% include '_subnav_mail.html' %}
+<h1>Account &amp; connection</h1>
 <p class="note"><strong>Connect your mailbox</strong> (IMAP), then tune how Clover classifies your mail. Enter your provider's
   IMAP details, click <strong>Test IMAP</strong>, then <strong>Save</strong>. Your password is stored in your OS
   keyring (never in config files or logs).</p>

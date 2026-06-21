@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ thread.subject }} · Mail{% endblock %}
-{% block nav_threads %}active{% endblock %}
+{% block nav_mail %}active{% endblock %}
 {% block body %}
 <style>
   .msgs{display:flex;flex-direction:column;gap:8px}
@@ -126,7 +126,7 @@
     {% for a in comp.actions %}
     <div class="act{% if a.is_mine %} mine{% endif %}{% if a.status == 'done' %} done{% endif %}">
       <div class="actmain">
-        {% if a.is_mine %}<span class="pill you{% if a.is_mine_confidence == 'low' %} guess{% endif %}" title="{% if a.is_mine_confidence == 'low' %}owner inferred from dominant sender — verify{% else %}this obligation is yours{% endif %}">Need you{% if a.is_mine_confidence == 'low' %}?{% endif %}</span>{% endif %}
+        {% if a.is_mine %}<span class="pill you{% if a.is_mine_confidence == 'low' %} guess{% endif %}" title="{% if a.is_mine_confidence == 'low' %}owner inferred from dominant sender — verify{% else %}this obligation is yours{% endif %}">Yours{% if a.is_mine_confidence == 'low' %}?{% endif %}</span>{% endif %}
         {% if a.priority == 'high' %}<span class="pill hi">high</span>{% endif %}
         {% if a.implied %}<span class="pill imp" title="implied / cross-message obligation">implied</span>{% endif %}
         <span class="acttext">{{ a.action }}{% if a.about %} <span class="note">— {{ a.about }}</span>{% endif %}</span>
