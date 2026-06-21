@@ -15,7 +15,7 @@ import re
 # Prefix is UPPERCASE 2–6 letters (the convention for project codes); lowercase variants
 # are a known floor gap to refine against gold. Leading zeros are stripped so the same real
 # reference written two ways collapses to one (MCI-018 == MCI-18, SOI-018 == SOI-18).
-_REF = re.compile(r"\b([A-Z]{2,6})[-/ ]?(\d{1,6})\b")
+_REF = re.compile(r"\b([A-Z]{2,6})[-/ ]?(\d{1,6}(?:\.\d{1,3})?)([A-Za-z])?\b")   # rev suffix + sub-part: VO-09A, CLAUSE-14.2
 # common letter+digit tokens that are NOT reference numbers — notably currency codes, which
 # otherwise mis-read "SGD 1,000" -> "SGD-1". (Amounts are handled by extract_amounts.)
 _REF_STOP = {"ISO", "COVID", "MP", "H", "CO",
@@ -27,20 +27,32 @@ _REF_NO = re.compile(r"\b([A-Z]{2,6})\s+[Nn]o\.?\s*(\d{1,6})\b")
 # invoice no. 88, vo-9) without the false positives of a bare lowercase-prefix match.
 _REF_NOUN = re.compile(
     r"\b(invoice|inv|po|rfi|rfq|rfp|ncr|cr|eot|vo|co|wo|tq|cvi|mci|soi|ipc|dwg|drawing|"
-    r"clause|section|ticket|tender|claim|quotation|contract|ref)\b"
-    r"\s*(?:no\.?|number|#|:)?\s*[-/]?\s*(\d{1,6})\b", re.I)
+    r"clause|section|ticket|tender|claim|quotation|contract|ref|"
+    r"version|rev|round|job|sprint)\b"        # creative-version / software / recruiting identifiers
+    r"\s*(?:no\.?|number|#|:)?\s*[-/]?\s*(\d{1,6}(?:\.\d{1,3})?)([A-Za-z])?\b", re.I)
+_REF_V = re.compile(r"\bv(\d{1,3})\b", re.I)   # bare creative version 'v2'/'v3' -> V-2/V-3 (bounded)
 
 
 def extract_refs(text: str) -> list[str]:
-    """Canonical ``PREFIX-N`` (prefix upper-cased, separator normalised, leading zeros stripped).
-    Catches UPPERCASE prefix codes AND noun-anchored lowercase/word/#-forms (rfi 12, PO #4471)."""
+    """Canonical ``PREFIX-N`` (prefix upper-cased, separator normalised, leading zeros stripped),
+    keeping a trailing revision letter distinct (VO-09A != VO-9). Catches UPPERCASE prefix codes AND
+    noun-anchored lowercase/word/#-forms (rfi 12, PO #4471)."""
     out: dict[str, None] = {}
     for rx in (_REF, _REF_NO, _REF_NOUN):
         for m in rx.finditer(text or ""):
             prefix = m.group(1).upper()
             if prefix in _REF_STOP:
                 continue
-            out[f"{prefix}-{int(m.group(2))}"] = None      # leading zeros stripped: MCI-018 == MCI-18
+            suf = m.group(3).upper() if rx.groups >= 3 and m.group(3) else ""
+            numstr = m.group(2)
+            if "." in numstr:                              # keep a sub-part: clause 14.2 -> CLAUSE-14.2
+                ip, dp = numstr.split(".", 1)
+                val = f"{int(ip)}.{dp}"
+            else:
+                val = str(int(numstr))                     # leading zeros stripped: MCI-018 == MCI-18
+            out[f"{prefix}-{val}{suf}"] = None
+    for m in _REF_V.finditer(text or ""):              # bare 'v3' creative-version refs
+        out[f"V-{int(m.group(1))}"] = None
     return list(out)
 
 
@@ -54,6 +66,7 @@ _DATE_ISO = re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b")
 _DATE_DMY = re.compile(r"\b(\d{1,2})\s*[-/ ]?\s*([A-Za-z]{3,9})\.?,?\s*(\d{4})\b")   # 14 Mar 2025
 _DATE_MDY = re.compile(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})\b")             # March 5, 2025
 _DATE_NUM = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")                            # 03/04/2025 (day-first)
+_DATE_SLASH_ISO = re.compile(r"\b(\d{4})/(\d{1,2})/(\d{1,2})\b")                      # 2025/3/14 (year-first)
 _DATE_DOT = re.compile(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b")                          # 15.06.2026 (day-first)
 _DATE_CJK = re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日")             # 2025年3月14日
 
@@ -103,8 +116,14 @@ def extract_dates(text: str) -> list[str]:
             mo = _MON.get(m.group(1).lower())
             if mo:
                 add(_iso(m.group(3), mo, m.group(2)))
+        for m in _DATE_SLASH_ISO.finditer(line):               # 2025/3/14 -> ISO
+            add(_iso(m.group(1), m.group(2), m.group(3)))
         for m in _DATE_NUM.finditer(line):
-            add(_iso(m.group(3), m.group(2), m.group(1)))      # day-first: D/M/Y
+            a1, a2 = int(m.group(1)), int(m.group(2))
+            if a2 > 12 and a1 <= 12:                            # month-first (US): 3/14/2025
+                add(_iso(m.group(3), a1, a2))
+            else:                                              # day-first default: D/M/Y
+                add(_iso(m.group(3), a2, a1))
         for m in _DATE_DOT.finditer(line):
             add(_iso(m.group(3), m.group(2), m.group(1)))      # day-first: D.M.Y
     return sorted(out)
@@ -127,6 +146,7 @@ _AMT_CJK_PRE = re.compile(r"(人民币|港币|新台币|新币|RMB|¥)\s*(\d[\d,
 _AMT_CJK_SUF = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*([千万亿])?\s*(元|圆)")
 _CUR_CJK = {"人民币": "CNY", "rmb": "CNY", "¥": "CNY", "港币": "HKD", "新台币": "TWD", "新币": "SGD"}
 _CN_MULT = {"千": 1e3, "万": 1e4, "亿": 1e8}
+_ASCII_MULT_AFTER = re.compile(r"\s?(million|billion|thousand|mn|bn|m|k)\b", re.I)
 
 
 def _num_str(n: float) -> str:
@@ -154,6 +174,10 @@ def extract_amounts(text: str) -> list[dict]:
         num *= _MULT.get((m.group(3) or "").lower(), 1)
         add(cur, num)
     for m in _AMT_CJK_PRE.finditer(text):
+        # skip when an ASCII multiplier follows and no CJK multiplier was captured — the Latin _AMT
+        # loop already read 'RMB 1.2m' = 1.2e6; re-matching here would emit a phantom bare 1.2.
+        if not m.group(3) and _ASCII_MULT_AFTER.match(text[m.end():]):
+            continue
         cur = _CUR_CJK.get(m.group(1).lower() if m.group(1).isascii() else m.group(1), "CNY")
         add(cur, float(m.group(2).replace(",", "")) * _CN_MULT.get(m.group(3) or "", 1))
     for m in _AMT_CJK_SUF.finditer(text):

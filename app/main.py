@@ -330,6 +330,16 @@ def _comp_cfg(cfg: dict) -> dict:
     return c
 
 
+def _operator(cfg: dict) -> str:
+    """The mailbox owner's identity/role/aliases (comma-separated) so is_mine/direction resolve. Uses
+    comprehension.operator if set, else falls back to the configured IMAP account address."""
+    op = str(_comp_cfg(cfg).get("operator") or "").strip()
+    if op:
+        return op
+    imap = ((cfg or {}).get("auth") or {}).get("imap") or {}
+    return str(imap.get("user") or imap.get("username") or imap.get("email") or "").strip()
+
+
 def _profile(cfg: dict):
     """Active classification profile — an operator-edited override if present, else the shipped preset."""
     return effective_profile(cfg)
@@ -384,7 +394,7 @@ def _maybe_autorun_comprehension(cfg: dict) -> None:
     try:
         backend = _comprehender(cfg)
         out = compmod.run_comprehension(
-            _archive_dir(cfg), backend=backend, profile=_profile(cfg),
+            _archive_dir(cfg), backend=backend, profile=_profile(cfg), operator=_operator(cfg),
             budget_tokens=10 ** 12, log=_log,    # not token-capped (that caused the silent 1/68 stall)
             limit=int(c.get("autorun_limit", 100)),   # bounded by COUNT instead — explicit, never silent
             should_stop=lambda: _status.get("stop", False),
@@ -761,7 +771,7 @@ def thread_comprehend(thread_id: str):
     c = _comp_cfg(cfg)
     try:
         backend = _comprehender(cfg)
-        rec = compmod.comprehend_thread(arch, t, backend, _profile(cfg),
+        rec = compmod.comprehend_thread(arch, t, backend, _profile(cfg), operator=_operator(cfg),
                                         model=getattr(backend, "model", c.get("model", "?")))
         compmod.save_comprehension(arch, rec)
         _record_usage(backend)
@@ -815,7 +825,7 @@ def _start_comp_task(cfg: dict, only, redo: bool) -> bool:
 
             backend = _comprehender(cfg)
             out = compmod.run_comprehension(
-                _archive_dir(cfg), backend=backend, profile=_profile(cfg),
+                _archive_dir(cfg), backend=backend, profile=_profile(cfg), operator=_operator(cfg),
                 budget_tokens=10 ** 12, log=clog,    # MANUAL run: do the whole selection the user chose (Stop to halt)
                 should_stop=lambda: _comptask.get("stop", False),
                 allowed=lambda: _comprehension_allowed(cfg),

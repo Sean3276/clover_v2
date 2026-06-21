@@ -540,12 +540,20 @@ def _event_date(comprehension: str, anchor: str) -> str:
     words = [w for w in re.findall(r"[a-z一-鿿]{2,}", (anchor or "").lower()) if w not in _EV_STOP]
     if not words:
         return ""
+    anchored = False
     for line in (comprehension or "").splitlines():
         low = line.lower()
         if any(w in low for w in words):
+            anchored = True
             ds = extract_dates(line)
             if ds:
-                return ds[0]
+                return ds[0]                              # date co-located with the anchor word
+    # anchor mentioned but its date is on another line: if the whole thread has exactly ONE date,
+    # it is unambiguously the anchor's date; more than one -> can't disambiguate -> leave pending.
+    if anchored:
+        all_dates = extract_dates(comprehension or "")
+        if len(all_dates) == 1:
+            return all_dates[0]
     return ""
 
 
@@ -559,6 +567,11 @@ _SENSITIVITY = {
     "medical record": "personal-data", "patient": "personal-data", "diagnosis": "personal-data",
     "date of birth": "personal-data", "nric": "personal-data", "passport no": "personal-data",
     "national id": "personal-data", "身份证": "personal-data", "病历": "personal-data",
+    "dob": "personal-data", "mrn": "personal-data", "accession": "personal-data",
+    "member id": "personal-data", "policy no": "personal-data", "medical record no": "personal-data",
+    "phi": "personal-data", "protected health information": "personal-data", "hipaa": "personal-data",
+    "prior authorization": "personal-data", "prior auth": "personal-data", "subscriber id": "personal-data",
+    "explanation of benefits": "personal-data",
 }
 
 
@@ -573,6 +586,28 @@ def _sensitivity(text: str) -> list[str]:
     return out
 
 
+_NOYEAR_DMY = re.compile(r"\b(\d{1,2})\s+([A-Za-z]{3,9})\b")     # 14 March
+_NOYEAR_MDY = re.compile(r"\b([A-Za-z]{3,9})\s+(\d{1,2})\b")     # March 14
+
+
+def _resolve_no_year(due_raw: str, anchor_iso: str) -> str:
+    """A month+day deadline with NO year ('by 14 March') -> ISO, inferring the year from the citing
+    message's send-date (anchor_iso). '' if no month-day or no anchor."""
+    if not anchor_iso:
+        return ""
+    from .eval.extractors import _MON, _iso
+    y = anchor_iso[:4]
+    for rx, dgrp, mgrp in ((_NOYEAR_DMY, 1, 2), (_NOYEAR_MDY, 2, 1)):
+        m = rx.search(due_raw or "")
+        if m:
+            mo = _MON.get(m.group(mgrp).lower())
+            if mo:
+                iso = _iso(y, mo, m.group(dgrp))
+                if iso:
+                    return iso
+    return ""
+
+
 def _tok_in(tok: str, s: str) -> bool:
     """Whole-token containment (so 'ann@x.com' does NOT match inside 'joann@x.com'). Boundaries are
     non email/word chars, so emails/domains match exactly, not as substrings."""
@@ -580,7 +615,7 @@ def _tok_in(tok: str, s: str) -> bool:
 
 
 def _clean_actions(raw, date_map: dict | None = None, operator: str = "",
-                   comprehension: str = "") -> list[dict]:
+                   comprehension: str = "", source_text: str = "") -> list[dict]:
     """Normalize the model's to-do items to a stable shape and resolve their deadline deterministically:
     an absolute date in due_raw -> ISO due_canonical; a RELATIVE deadline (Net-30, 'within 14 days') is
     resolved against the SOURCE message's sent-date — business/working-day phrasings skip weekends but
@@ -593,7 +628,9 @@ def _clean_actions(raw, date_map: dict | None = None, operator: str = "",
     from .eval import deadlines as _dl
     date_map = date_map or {}
     valid_tags = set(date_map)
-    comp_norm = _norm(comprehension)
+    # a quote may be copied from the comprehension OR (verbatim) from the source thread — verify against
+    # both, so a legit implied/cross-message action quoting the original isn't mislabeled a fabrication.
+    comp_norm = (_norm(comprehension) + " " + _norm(source_text)).strip()
     # operator identities/roles/aliases are comma/semicolon/newline separated so multi-word roles
     # ('the Contractor') and short CJK aliases ('我方') stay intact as whole match tokens.
     optokens = [t.strip() for t in re.split(r"[,;\n]+", (operator or "").lower()) if len(t.strip()) >= 2]
@@ -612,9 +649,11 @@ def _clean_actions(raw, date_map: dict | None = None, operator: str = "",
         source = [t for t in raw_tags if t in valid_tags] if valid_tags else raw_tags
         if valid_tags and raw_tags and len(source) < len(raw_tags):
             confidence = "review"
-        # quote verification: the proving snippet must actually appear in the comprehension
+        # quote verification: each proving snippet must appear in the comprehension. Implied/cross-message
+        # actions carry per-leg snippets joined by '||' — verify each leg, not the contiguous join.
         quote = str(a.get("quote") or "").strip()
-        quote_unverified = bool(quote) and bool(comp_norm) and _norm(quote) not in comp_norm
+        legs = [lg.strip() for lg in quote.split("||") if lg.strip()]
+        quote_unverified = bool(legs) and bool(comp_norm) and any(_norm(lg) not in comp_norm for lg in legs)
         if quote_unverified:
             confidence = "review"
         due_raw = str(a.get("due_raw") or "").strip()
@@ -635,7 +674,17 @@ def _clean_actions(raw, date_map: dict | None = None, operator: str = "",
                 else:                                     # NEVER anchor a statutory clock to the email date
                     due_canonical, due_pending = "", True
                     due_basis = f"anchor date not in thread — verify ({r0.get('anchor') or 'event'})"
-            else:                                         # within / net -> now/receipt -> source msg date
+            elif r0.get("kind") == "net":                 # Net-N runs from the INVOICE date, not the email
+                ev = _event_date(comprehension, "invoice receipt dated issued")
+                if ev:
+                    resolved = _dl.resolve(r0, ev)
+                    due_canonical, due_pending = (resolved or ""), (resolved is None)
+                    if resolved:
+                        due_basis = "Net-term from invoice date (verify)"
+                else:
+                    due_canonical, due_pending = "", True
+                    due_basis = "Net-term — confirm invoice date"
+            else:                                         # within -> now/receipt -> source msg date
                 anchor = next((date_map.get(t) for t in source if date_map.get(t)), "")
                 resolved = _dl.resolve(r0, anchor) if anchor else None
                 due_canonical = resolved or ""
@@ -645,8 +694,12 @@ def _clean_actions(raw, date_map: dict | None = None, operator: str = "",
                     due_pending, due_basis = True, "business-day estimate (holidays not applied — verify)"
                 else:
                     due_pending = resolved is None
-        else:
-            due_canonical, due_pending = "", False
+        else:                                             # no absolute/relative date: try a no-year month-day
+            ny = _resolve_no_year(due_raw, next((date_map.get(t) for t in source if date_map.get(t)), ""))
+            if ny:
+                due_canonical, due_pending, due_basis = ny, False, "year inferred from message date"
+            else:
+                due_canonical, due_pending = "", False
         is_mine = a.get("is_mine")
         if not isinstance(is_mine, bool):
             is_mine = None
@@ -660,11 +713,21 @@ def _clean_actions(raw, date_map: dict | None = None, operator: str = "",
             elif cp_match and not owner_match:
                 is_mine, direction = False, "outbound"    # a counterparty owes it
             # both or neither -> ambiguous: leave the AI's value untouched
+        # a deadline left pending BECAUSE its anchor date is missing is a time-bar / deemed-admission
+        # risk — escalate so the operator is pushed to find the anchor, not left with a quiet pending.
+        priority = str(a.get("priority") or "normal").strip().lower() or "normal"
+        if due_pending and ("anchor" in due_basis or "confirm invoice" in due_basis) and priority != "high":
+            priority = "high"
+        status = str(a.get("status") or "open").strip().lower() or "open"
+        if status not in {"open", "done", "blocked", "superseded", "partial"}:
+            status = "open"                               # clamp to the closed set
+        if status in {"done", "superseded"} and not source:   # a terminal call must name its cause [Mn]
+            confidence = "review"
         owner_history = []
         for h in (a.get("owner_history") or []):
             if isinstance(h, dict) and str(h.get("owner") or "").strip():
-                owner_history.append({"owner": str(h["owner"]).strip(),
-                                      "source": ",".join(_msg_tags(h.get("source")))})
+                hsrc = [t for t in _msg_tags(h.get("source")) if not valid_tags or t in valid_tags]
+                owner_history.append({"owner": str(h["owner"]).strip(), "source": ",".join(hsrc)})
         out.append({
             "action": action,
             "about": str(a.get("about") or "").strip(),
@@ -677,8 +740,8 @@ def _clean_actions(raw, date_map: dict | None = None, operator: str = "",
             "due_pending": due_pending,
             "due_basis": due_basis,
             "refs": [str(r).strip() for r in (a.get("refs") or []) if str(r).strip()],
-            "status": str(a.get("status") or "open").strip().lower() or "open",
-            "priority": str(a.get("priority") or "normal").strip().lower() or "normal",
+            "status": status,
+            "priority": priority,
             "source": source,
             "quote": quote,
             "quote_unverified": quote_unverified,
@@ -765,6 +828,11 @@ def _build_once(archive, thread, backend, profile, max_chars, model, operator: s
                             schema=_FACTS_SCHEMA) or {}
     facts, fact_sources, contacts_raw = _facts_from_registrar(fraw)
     facts, dropped = _verify_facts(facts, full)
+    # range-check fact citations against the real [Mn] universe (drop out-of-range tags, like actions)
+    date_map = _msg_date_map(archive, thread)
+    _valid = set(date_map)
+    for _s in fact_sources:
+        _s["cite"] = ",".join(t for t in _msg_tags(_s.get("cite", "")) if not _valid or t in _valid)
     # Deterministic floor backfill (recall fix): add every catchable ref/date/amount the AI dropped
     # but a rule finds in the SOURCE. Body-only (strip each message's [Mn] From:/Date: header line) so
     # the email's own send-date is never injected as a content fact. Backfilled atoms are grounded by
@@ -794,7 +862,7 @@ def _build_once(archive, thread, backend, profile, max_chars, model, operator: s
     araw = backend.generate("actions", cprompts.actions(comprehension, _candidate_sheet(action_cands), operator),
                             schema=_ACTIONS_SCHEMA) or {}
     actions = _clean_actions(araw.get("actions") if isinstance(araw, dict) else None,
-                             _msg_date_map(archive, thread), operator, comprehension)
+                             date_map, operator, comprehension, full)
 
     ruled = rulesmod.match(archive, text=full, project=facts.get("project", ""),
                            senders=[m.get("from", "") for m in thread.get("members", [])])
@@ -872,11 +940,18 @@ def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Pro
     # the TASK is COMPLETE only when BOTH the comprehension and every distilled layer verify; detected
     # sensitive content (privilege / without-prejudice / PHI) ALSO gates to human review (not inert).
     sens = rec["verified"].get("sensitivity") or []
+    uncovered = rec["verified"].get("action_floor_uncovered") or []
+    unverified = [a for a in (rec.get("actions") or []) if a.get("quote_unverified")]
     issues = comp["issues"] + [_issue_str(i) for i in (dq.get("issues") or [])]
     if sens:
         issues = issues + [f"sensitive content ({', '.join(sens)}) — route to human review"]
+    if uncovered:
+        issues = issues + [f"{len(uncovered)} floor obligation(s) not covered by an action — review"]
+    if unverified:
+        issues = issues + [f"{len(unverified)} action(s) with an unverifiable quote — possible fabrication"]
     rec["qaqc"] = {**comp, "distill_passed": distill_passed, "issues": issues[:8],
-                   "needs_review": (not comp["passed"]) or (not distill_passed) or bool(sens)}
+                   "needs_review": (not comp["passed"]) or (not distill_passed)
+                   or bool(sens) or bool(uncovered) or bool(unverified)}
     return rec
 
 

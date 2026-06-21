@@ -40,6 +40,21 @@ def test_plain_number_not_grabbed_as_amount():
     assert extract_amounts("会议室 80 人") == []
 
 
+def test_no_phantom_amount_for_rmb_plus_ascii_multiplier():
+    # bug: RMB/¥ + ASCII multiplier (m/bn) emitted BOTH the real value and a phantom bare number
+    assert extract_amounts("RMB 1.2m") == [{"currency": "CNY", "value": "1200000"}]
+    assert {"currency": "CNY", "value": "1.2"} not in extract_amounts("¥1.2bn")
+
+
+def test_us_month_first_date_recovered():
+    assert "2025-03-14" in extract_dates("filing due 3/14/2025")    # month-first recovered (was dropped)
+    assert "2025-04-03" in extract_dates("meet 03/04/2025")          # ambiguous stays day-first
+
+
+def test_slash_iso_date():
+    assert "2025-03-14" in extract_dates("dated 2025/3/14")
+
+
 def test_hkd_and_ntd_not_mislabeled_usd():
     # bug: the bare-$ branch ate HK$/NT$ and tagged them USD
     assert {"currency": "HKD", "value": "50000"} in extract_amounts("HK$50,000")

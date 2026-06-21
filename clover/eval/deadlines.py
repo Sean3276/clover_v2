@@ -12,7 +12,8 @@ import re
 from datetime import date, timedelta
 
 _NET = re.compile(r"\bnet[\s-]?(\d{1,3})\b", re.I)
-_WITHIN = re.compile(r"\bwithin\s+(\d{1,3})\s+(business day|working day|day|week|month)s?\b", re.I)
+_WITHIN = re.compile(r"\bwithin\s+(\d{1,3})\s+(business day|working day|day|week|month)s?"
+                     r"(?:\s+(?:of|from|after)\s+([^.,;:\n]{2,40}))?\b", re.I)
 _REL = re.compile(r"\b(\d{1,3})\s+(business day|working day|day|week|month)s?\s+"
                   r"(after|before|from|prior to|following)\s+([^.,;:\n]{2,40})", re.I)
 _CN_WITHIN = re.compile(r"(\d{1,3})\s*个?\s*(工作日|天|日|周|月)\s*内")
@@ -38,8 +39,13 @@ def find_relative_deadlines(text: str) -> list[dict]:
         out.append({"raw": m.group(0), "kind": "net", "n": int(m.group(1)), "unit": "days",
                     "direction": "after", "anchor": "invoice/receipt"})
     for m in _WITHIN.finditer(t):
-        out.append({"raw": m.group(0), "kind": "within", "n": int(m.group(1)), "unit": _unit(m.group(2)),
-                    "direction": "after", "anchor": "now/receipt"})
+        anc = (m.group(3) or "").strip()
+        # 'within N days of <service/order/the hearing>' = an EXTERNAL anchor -> treat as event-relative
+        # (statutory-safe); a bare 'within N days' (or 'of receipt/now') runs from receipt/now.
+        external = bool(anc) and "receipt" not in anc.lower() and anc.lower() not in ("now", "today")
+        out.append({"raw": m.group(0), "kind": ("relative" if external else "within"),
+                    "n": int(m.group(1)), "unit": _unit(m.group(2)),
+                    "direction": "after", "anchor": anc or "now/receipt"})
     for m in _REL.finditer(t):
         d = m.group(3).lower()
         out.append({"raw": m.group(0).strip(), "kind": "relative", "n": int(m.group(1)),

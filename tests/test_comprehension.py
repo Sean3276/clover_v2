@@ -147,14 +147,17 @@ def test_low_confidence_dispute_asks_operator(tmp_path):
 
 # ---------------------------------------------------------------- QAQC gate
 def test_qaqc_passes_clean_single_attempt(tmp_path):
-    rec = cp.comprehend_thread(tmp_path, _one_thread(tmp_path), StubComprehender(), get_profile())
+    # cue-free bodies so no floor obligation is uncovered (which would correctly gate review)
+    t = _one_thread(tmp_path, body_a="hello there", body_b="noted, thank you")
+    rec = cp.comprehend_thread(tmp_path, t, StubComprehender(), get_profile())
     assert rec["qaqc"]["passed"] is True and rec["qaqc"]["needs_review"] is False and rec["qaqc"]["attempts"] == 1
 
 
 def test_qaqc_failure_retries_once_then_flags(tmp_path):
     stub = StubComprehender(responses={"qa": {"passed": False, "faithfulness": 0.4,
                                               "completeness": 0.5, "issues": ["omitted the deadline"]}})
-    rec = cp.comprehend_thread(tmp_path, _one_thread(tmp_path), stub, get_profile())
+    t = _one_thread(tmp_path, body_a="hello there", body_b="noted, thanks")   # cue-free: isolate the QA issue
+    rec = cp.comprehend_thread(tmp_path, t, stub, get_profile())
     assert rec["qaqc"]["needs_review"] is True and rec["qaqc"]["attempts"] == 2
     assert rec["qaqc"]["issues"] == ["omitted the deadline"]
     assert stub.calls.count("comprehend") == 2         # re-comprehended once on failure
@@ -223,8 +226,9 @@ def test_distill_verification_flags_unfaithful_abstract(tmp_path):
 
 
 def test_task_complete_only_when_all_layers_verify(tmp_path):
-    # a clean task records the per-layer verification and is NOT flagged
-    rec = cp.comprehend_thread(tmp_path, _one_thread(tmp_path), StubComprehender(), get_profile())
+    # a clean task (cue-free bodies) records the per-layer verification and is NOT flagged
+    t = _one_thread(tmp_path, body_a="hello there", body_b="noted, thank you")
+    rec = cp.comprehend_thread(tmp_path, t, StubComprehender(), get_profile())
     assert rec["verified"]["abstract_ok"] and rec["verified"]["summary_ok"] and rec["verified"]["event_ok"]
     assert rec["qaqc"]["distill_passed"] is True and rec["qaqc"]["needs_review"] is False
 
@@ -316,11 +320,11 @@ def test_actions_richer_fields_normalized(tmp_path):
         "direction": "Outbound", "is_mine": False, "due_raw": "", "refs": ["VO-09"],
         "status": "Open", "priority": "high", "source": "[M1][M2]", "quote": "please price VO-09",
         "confidence": "review", "false_positive_suspected": False, "implied": False,
-        "owner_history": [{"owner": "S", "source": "[M3][M4]"}]}]}})
+        "owner_history": [{"owner": "S", "source": "[M1][M2]"}]}]}})
     a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
     assert a["is_mine"] is False and a["direction"] == "outbound"
     assert a["source"] == ["M1", "M2"] and a["quote"] == "please price VO-09"
-    assert a["owner_history"] == [{"owner": "S", "source": "M3,M4"}]   # multi-tag join is comma-delimited
+    assert a["owner_history"] == [{"owner": "S", "source": "M1,M2"}]   # comma-joined, range-checked
 
 
 def test_is_mine_resolved_from_operator_identity(tmp_path):
@@ -373,6 +377,170 @@ def test_action_out_of_range_cite_dropped(tmp_path):
         {"action": "Submit RFI-12", "quote": "submit RFI-12", "source": ["M9"]}]}})
     a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
     assert a["source"] == [] and a["confidence"] == "review"
+
+
+def test_action_status_clamped_to_closed_set(tmp_path):
+    t = _one_thread(tmp_path, body_a="x y z", body_b="ok")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Do X", "status": "in progress", "source": ["M1"]},
+        {"action": "Do Y", "status": "partial", "source": ["M1"]}]}})
+    acts = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"]
+    assert next(a for a in acts if a["action"] == "Do X")["status"] == "open"     # unknown -> open
+    assert next(a for a in acts if a["action"] == "Do Y")["status"] == "partial"  # partial now valid
+
+
+def test_sensitivity_detects_dob_and_mrn(tmp_path):
+    t = _one_thread(tmp_path, body_a="Contact DOB 12 May 1990; MRN 884512 on file.", body_b="ok")
+    rec = cp.comprehend_thread(tmp_path, t, StubComprehender(), get_profile(), qaqc=False)
+    assert "personal-data" in rec["verified"]["sensitivity"]
+
+
+def test_event_anchor_resolves_when_single_date_elsewhere(tmp_path):
+    # anchor word and its date on different lines; one date in the thread -> resolve (not pending)
+    t = _one_thread(tmp_path, body_a="Submit 14 days after the instruction.", body_b="ok")
+    stub = StubComprehender(responses={
+        "comprehend": lambda p: "The Engineer's instruction was issued [M1].\nIt is dated 1 March 2025 [M1].\nSubmit 14 days after the instruction [M1].",
+        "actions": {"actions": [{"action": "Submit", "due_raw": "14 days after the instruction", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["due_canonical"] == "2025-03-15"               # 1 March + 14 days
+
+
+def test_implied_action_multileg_quote_verified(tmp_path):
+    # implied actions carry '||'-joined per-leg snippets; each leg must verify individually (not as one
+    # contiguous string) — otherwise every correct implied action is mislabeled a fabrication
+    t = _one_thread(tmp_path, body_a="precondition and event", body_b="ok")
+    stub = StubComprehender(responses={
+        "comprehend": lambda p: "The cert is required before handover [M1]. Handover is on Friday [M1].",
+        "actions": {"actions": [{"action": "Issue cert before handover", "implied": True,
+            "quote": "cert is required before handover || Handover is on Friday", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["quote_unverified"] is False                   # both legs present -> verified
+
+
+def test_implied_quote_verified_against_source(tmp_path):
+    # quote appears verbatim in the SOURCE email but the comprehension paraphrases it -> still verified
+    t = _one_thread(tmp_path, body_a="The fire cert is required before handover.", body_b="ok")
+    stub = StubComprehender(responses={
+        "comprehend": lambda p: "Summary: a certificate is needed prior to the handover [M1].",
+        "actions": {"actions": [{"action": "Issue cert", "implied": True,
+            "quote": "fire cert is required before handover", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["quote_unverified"] is False
+
+
+def test_no_year_date_infers_year_from_message(tmp_path):
+    # 'by 14 March' (no year) resolves the year from the citing message's send-date (M1 sent 2026)
+    t = _one_thread(tmp_path, body_a="Please submit by 14 March.", body_b="ok")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Submit", "due_raw": "by 14 March", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["due_canonical"] == "2026-03-14"
+
+
+def test_implied_action_missing_leg_flagged(tmp_path):
+    t = _one_thread(tmp_path, body_a="precondition and event", body_b="ok")
+    stub = StubComprehender(responses={
+        "comprehend": lambda p: "The cert is required before handover [M1].",
+        "actions": {"actions": [{"action": "Issue cert", "implied": True,
+            "quote": "cert is required before handover || a leg that is not present", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["quote_unverified"] is True                    # one leg missing -> flagged
+
+
+def test_quote_unverified_gates_needs_review(tmp_path):
+    # an action whose proof quote is NOT in the comprehension (possible fabrication) flags the task
+    t = _one_thread(tmp_path, body_a="hello there", body_b="noted")     # cue-free: isolate the quote gate
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Do X", "quote": "a quote that is nowhere in the comprehension", "source": ["M1"]}]}})
+    rec = cp.comprehend_thread(tmp_path, t, stub, get_profile())        # qaqc on
+    assert rec["actions"][0]["quote_unverified"] is True
+    assert rec["qaqc"]["needs_review"] is True
+
+
+def test_sensitivity_detects_hipaa_priorauth(tmp_path):
+    t = _one_thread(tmp_path, body_a="Re: prior authorization and the HIPAA notice.", body_b="ok")
+    rec = cp.comprehend_thread(tmp_path, t, StubComprehender(), get_profile(), qaqc=False)
+    assert "personal-data" in rec["verified"]["sensitivity"]
+
+
+def test_unanchored_statutory_deadline_escalated(tmp_path):
+    # a deadline left pending BECAUSE its anchor date is missing is a time-bar risk -> force priority high
+    t = _one_thread(tmp_path, body_a="File the defence 14 days after service.", body_b="ok")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "File the defence", "due_raw": "14 days after service", "priority": "normal", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["due_pending"] is True and a["priority"] == "high"
+
+
+def test_uncovered_obligation_gates_needs_review(tmp_path):
+    # the floor finds a strong obligation the AI didn't emit -> the task is flagged for review (not inert)
+    t = _one_thread(tmp_path, body_a="Please submit the RFI-12 response.", body_b="noted")
+    rec = cp.comprehend_thread(tmp_path, t, StubComprehender(), get_profile())   # qaqc on, stub emits no actions
+    assert rec["verified"]["action_floor_uncovered"]
+    assert rec["qaqc"]["needs_review"] is True
+
+
+def test_fact_sources_cite_range_checked(tmp_path):
+    # an out-of-range [Mn] cite on a fact is dropped (2-message thread, cite M9)
+    t = _one_thread(tmp_path, body_a="discussion regarding EOT-05", body_b="ok")
+    stub = StubComprehender(responses={"distill_facts": {"project": [], "contacts": [],
+        "facts": [{"field": "ref", "value": "EOT-05", "cite": "M9"}]}})
+    rec = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)
+    fs = [s for s in rec["fact_sources"] if s["value"] == "EOT-05"][0]
+    assert fs["cite"] == ""                                 # out-of-range cite dropped
+
+
+def test_net30_anchors_to_invoice_date(tmp_path):
+    t = _one_thread(tmp_path, body_a="Payment terms Net 30.", body_b="ok")
+    stub = StubComprehender(responses={
+        "comprehend": lambda p: "Invoice dated 1 March 2025 [M1]. Payment terms Net 30 [M1].",
+        "actions": {"actions": [{"action": "Pay the invoice", "due_raw": "Net 30", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["due_canonical"] == "2025-03-31"               # 1 Mar + 30 days (from the invoice, not the email)
+
+
+def test_net30_anchors_via_dated_keyword(tmp_path):
+    # the invoice date is stated as 'INV-204 dated ...' (no literal 'invoice') -> still anchors Net-30
+    t = _one_thread(tmp_path, body_a="Net 30 terms.", body_b="ok")
+    stub = StubComprehender(responses={
+        "comprehend": lambda p: "INV-204 dated 1 March 2025 [M1]. Net 30 terms [M1].",
+        "actions": {"actions": [{"action": "Pay the invoice", "due_raw": "Net 30", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["due_canonical"] == "2025-03-31"               # 1 Mar (dated) + 30
+
+
+def test_terminal_action_without_cite_downgraded(tmp_path):
+    # a 'done'/'superseded' action must name the message that resolved it; absent -> downgrade to review
+    t = _one_thread(tmp_path, body_a="x y z", body_b="ok")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Approve VO", "status": "done", "confidence": "high", "source": []}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["confidence"] == "review"                      # terminal-without-cite is downgraded from high
+
+
+def test_net30_pending_without_invoice_date(tmp_path):
+    t = _one_thread(tmp_path, body_a="Payment terms Net 30.", body_b="ok")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Pay the invoice", "due_raw": "Net 30", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["due_pending"] is True and "invoice" in a["due_basis"].lower()
+
+
+def test_within_with_external_anchor_is_statutory_safe(tmp_path):
+    # 'within 14 days of service' carries an external anchor -> pending + high, not email-anchored
+    t = _one_thread(tmp_path, body_a="Acknowledge within 14 days of service.", body_b="ok")
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Acknowledge", "due_raw": "within 14 days of service", "priority": "normal", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["due_pending"] is True and a["priority"] == "high"
+
+
+def test_within_plain_still_uses_message_date(tmp_path):
+    t = _one_thread(tmp_path, body_a="Reply within 14 days.", body_b="ok")   # M1 sent 2026-01-01
+    stub = StubComprehender(responses={"actions": {"actions": [
+        {"action": "Reply", "due_raw": "within 14 days", "source": ["M1"]}]}})
+    a = cp.comprehend_thread(tmp_path, t, stub, get_profile(), qaqc=False)["actions"][0]
+    assert a["due_canonical"] == "2026-01-15"               # plain 'within' unchanged
 
 
 def test_event_deadline_pending_when_anchor_date_absent(tmp_path):
