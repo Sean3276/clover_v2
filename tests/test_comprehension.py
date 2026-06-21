@@ -4,7 +4,11 @@ from email.message import EmailMessage
 from clover import comprehend as cp
 from clover import threads as th
 from clover.comprehenders import StubComprehender, get_comprehender, _parse_json
-from clover.profiles import get_profile
+from clover.profiles import get_profile as _get_profile
+
+
+def get_profile(name="construction"):   # these tests validate the construction taxonomy; the shipped default is now generic
+    return _get_profile(name)
 
 
 def _eml(tmp, folder, key, mid, irt=None, text="body"):

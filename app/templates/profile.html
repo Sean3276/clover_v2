@@ -32,7 +32,7 @@
       <label for="ptax">Domains &amp; categories</label>
       <textarea id="ptax" spellcheck="false">{{ taxonomy }}</textarea>
       <p class="hint">One domain per line as <code>Domain: Category, Category, …</code> — e.g.
-        <code>Project: Commercial, Design &amp; Technical, Operation, Quality, Safety</code></p>
+        <code>Work: Request, Commitment, Decision, Issue, Information</code> — edit to match your own field (construction, legal, healthcare, …).</p>
     </div>
 
     <div class="pfield">
@@ -46,15 +46,15 @@
       <label for="pprec">Precedence rules (deterministic tie-breakers)</label>
       <textarea id="pprec" spellcheck="false">{{ precedence }}</textarea>
       <p class="hint">One rule per line as <code>keyword, keyword, … =&gt; Category</code>. The first rule whose
-        keyword appears in the thread wins, overriding the council — e.g. <code>variation order, VO, EOT, claim =&gt; Commercial</code></p>
+        keyword appears in the thread wins, overriding the council — e.g. <code>urgent, asap, overdue =&gt; Issue</code></p>
     </div>
 
     <div class="pfield">
       <label for="pfacets">Facet tags (independent labels — the AI tags each thread; you filter by any combination)</label>
       <textarea id="pfacets" spellcheck="false">{{ facets }}</textarea>
       <p class="hint">One facet per line as <code>Facet: Value, Value, …</code> — e.g.
-        <code>Discipline: Architecture, Structural, M&amp;E, Authority</code> /
-        <code>Authority: BCA, URA, SCDF, LTA, PUB</code>. The AI only assigns values from this list (it never invents new ones);
+        <code>Channel: Email, Meeting, Call, Chat</code> /
+        <code>Stage: Request, In Progress, Blocked, Done</code>. The AI only assigns values from this list (it never invents new ones);
         a thread can carry several facets or none. These power the Mail tag search.</p>
     </div>
 

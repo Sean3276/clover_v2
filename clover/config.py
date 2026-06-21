@@ -16,7 +16,7 @@ def default_config() -> dict:
         "archive_path": str(default_archive_path()),
         "folders": ["INBOX", "Sent"],
         "comprehension": {
-            "backend": "claude-cli", "model": "sonnet", "profile": "construction",
+            "backend": "claude-cli", "model": "sonnet", "profile": "generic",
             "budget_tokens": 200000, "autorun": True, "timeout_seconds": 300,
         },
         # Delivery track — OFF by default; sending is impossible until enabled (see CLOVER_V2_SENDING_SPEC).

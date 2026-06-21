@@ -46,6 +46,14 @@ def test_industry_profiles_ship_and_are_valid():
     assert any("MRN" in r for r in get_profile("healthcare").ref_examples)
 
 
+def test_default_profile_is_generic_not_construction():
+    from clover import config as cfg
+    assert cfg.default_config()["comprehension"]["profile"] == "generic"   # industry-agnostic out-of-box
+    assert get_profile().name == "generic"                                 # fallback is domain-neutral
+    assert get_profile(None).name == "generic" and get_profile("nope").name == "generic"
+    assert get_profile("construction").name == "construction"              # still selectable
+
+
 # ---- F4: money percents ---------------------------------------------------------------------
 def test_percent_floor():
     from clover.eval.extractors import extract_percents

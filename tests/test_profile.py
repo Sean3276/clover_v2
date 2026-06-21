@@ -28,8 +28,8 @@ def test_effective_profile_uses_override_else_default():
         "name": "construction", "domains": {"Ops": ["A", "B"]}, "safety_net": "A", "precedence": []}}}
     p = pf.effective_profile(cfg)
     assert p.domain_names() == ["Ops"] and p.categories("Ops") == ["A", "B"]
-    assert pf.effective_profile({}).name == "construction"                       # no override -> default
-    assert pf.effective_profile({"comprehension": {"profile_def": {"domains": {}}}}).name == "construction"  # invalid -> default
+    assert pf.effective_profile({}).name == "generic"                       # no override -> domain-neutral default
+    assert pf.effective_profile({"comprehension": {"profile_def": {"domains": {}}}}).name == "generic"  # invalid -> default
 
 
 def _store_cfg(monkeypatch, m, cfg):
@@ -76,10 +76,10 @@ def test_account_under_mail_and_classification_under_hub(tmp_path, monkeypatch):
 
 
 def test_facets_roundtrip_and_effective():
-    d = pf.to_dict(pf.get_profile())
+    d = pf.to_dict(pf.get_profile("construction"))                  # construction has Discipline/Authority facets
     assert "Discipline" in d["facets"] and "Authority" in d["facets"]
     p = pf.from_dict(d)
-    assert p.facet_values("Authority") == pf.get_profile().facet_values("Authority")
+    assert p.facet_values("Authority") == pf.get_profile("construction").facet_values("Authority")
     cfg = {"comprehension": {"profile_def": {"domains": {"D": ["A"]}, "safety_net": "A",
                                              "facets": {"Trade": ["Mason", "Welder"]}}}}
     assert pf.effective_profile(cfg).facet_values("Trade") == ["Mason", "Welder"]

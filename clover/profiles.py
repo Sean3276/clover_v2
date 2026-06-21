@@ -175,7 +175,9 @@ PROFILES = {p.name: p for p in (CONSTRUCTION, GENERIC, LEGAL, HEALTHCARE, AGENCY
 
 
 def get_profile(name: str | None = None) -> Profile:
-    return PROFILES.get(name or "construction", CONSTRUCTION)
+    """Look up a shipped profile. Unset/unknown falls back to the domain-NEUTRAL GENERIC profile —
+    construction is just one selectable preset, not the baseline (industry-agnostic by default)."""
+    return PROFILES.get(name or "generic", GENERIC)
 
 
 def to_dict(p: Profile) -> dict:
