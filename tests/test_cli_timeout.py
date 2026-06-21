@@ -36,6 +36,15 @@ def test_comprehender_factory_passes_configured_timeout():
     assert b.timeout == 420
 
 
+def test_dev_shows_per_backend_setup_guides():
+    from starlette.testclient import TestClient
+    import app.main as m
+    h = TestClient(m.app).get("/dev").text
+    assert "npm i -g @anthropic-ai/claude-code" in h          # claude-cli guide
+    assert "codex exec -m gpt-5.5" in h                       # codex-cli (gpt-5.5) guide
+    assert 'data-backend="stub"' in h and "showGuide()" in h  # stub guide + the toggle
+
+
 def test_set_timeout_clamps():
     from clover import models as mod
     cfg = {}

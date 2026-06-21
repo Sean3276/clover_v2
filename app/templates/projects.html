@@ -6,61 +6,61 @@
 <h1>Hub</h1>
 <p class="note">Projects detected from <strong>comprehended</strong> conversations — grouped by the project
   name each thread is about. Comprehend more mail to see more here.</p>
+<style>
+  .throw .mergebtn{flex:none;background:none;border:0;cursor:pointer;font-size:15px;color:var(--sub);padding:0 2px}
+  .throw .mergebtn:hover{color:var(--clover-d)}
+  .thside{display:flex;gap:10px;align-items:center}
+</style>
 {% if not projects %}
 <div class="card"><p class="note dim" style="margin:0">No projects yet — open a conversation in
   <a href="/threads">Mail</a> and click <strong>Comprehend</strong>; detected project names group here.</p></div>
 {% else %}
-<div class="thlist" style="margin-top:14px">
+<p class="note">Two names for the same project? Click <b>⛙</b> on the one to fold in, then type the target's
+  name — same as merging firms in <a href="/contacts">Rolodex</a>. The target keeps its name; merges survive re-comprehension.</p>
+<div class="thlist" style="margin-top:12px">
   {% for p in projects %}
-  <a class="throw" href="/projects/{{ p.key|urlencode }}">
-    <div class="thmain">
+  <div class="throw">
+    <a class="thmain" href="/projects/{{ p.key|urlencode }}" style="text-decoration:none;color:inherit;display:flex;gap:10px;align-items:center;min-width:0;flex:1">
       <span class="thsubj">🏗 {{ p.name }}</span>
       {% if p.categories %}<span class="cbadges">{% for c in p.categories[:5] %}<span class="cbadge">{{ c }}</span>{% endfor %}</span>{% endif %}
+    </a>
+    <div class="thside">
+      <span class="thn">{{ p.count }} thread{{ 's' if p.count != 1 }}</span>
+      <button type="button" class="mergebtn" title="Merge this project into another (type the target's name)"
+              data-key="{{ p.key }}" data-name="{{ p.name }}" onclick="mergeProject(this)">⛙</button>
     </div>
-    <div class="thside"><span class="thn">{{ p.count }} thread{{ 's' if p.count != 1 }}</span></div>
-  </a>
+  </div>
   {% endfor %}
 </div>
 {% endif %}
 
-{% if projects|length > 1 or merged %}
+{% if merged %}
 <div class="card" style="margin-top:16px">
-  <h2 style="font-size:15px;margin:0 0 6px">Merge projects</h2>
-  <p class="note">Two names for the same project? Fold one into the other. The target keeps its name, and
-    the merge survives re-comprehension. You can un-merge below.</p>
-  {% if projects|length > 1 %}
-  <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
-    <div><label class="note" for="mFrom">Merge this</label><br>
-      <select id="mFrom" style="width:auto">{% for p in projects %}<option value="{{ p.key }}">{{ p.name }} ({{ p.count }})</option>{% endfor %}</select></div>
-    <div><label class="note" for="mInto">into</label><br>
-      <select id="mInto" style="width:auto">{% for p in projects %}<option value="{{ p.key }}">{{ p.name }} ({{ p.count }})</option>{% endfor %}</select></div>
-    <button type="button" onclick="mergeProjects()">Merge</button>
-  </div>
-  {% endif %}
-  {% if merged %}
-  <p class="note dim" style="margin:12px 0 4px">Currently merged:</p>
+  <p class="note dim" style="margin:0 0 6px">Currently merged:</p>
   <ul class="note" style="margin:0;padding-left:18px">
     {% for m in merged %}
     <li><span class="mono">{{ m.from_key }}</span> → <strong>{{ m.to_name }}</strong>
-      <button type="button" class="linkbtn" onclick="unmergeProject('{{ m.from_key }}')">un-merge</button></li>
+      <button type="button" class="mergebtn" style="font-size:12px;font-weight:600" onclick="unmergeProject('{{ m.from_key }}')">un-merge</button></li>
     {% endfor %}
   </ul>
-  {% endif %}
-  <p id="mMsg" class="note" style="margin-top:8px"></p>
 </div>
+{% endif %}
+
 <script>
-function _mmsg(r){ const m=document.getElementById('mMsg'); m.textContent=r.message;
-  m.style.color = r.ok ? 'var(--clover-d)' : 'var(--amber)'; if(r.ok) setTimeout(()=>location.reload(),700); }
-async function mergeProjects(){
-  const fd=new FormData();
-  fd.append('from_key', document.getElementById('mFrom').value);
-  fd.append('to_key', document.getElementById('mInto').value);
-  _mmsg(await (await fetch('/projects/merge',{method:'POST',body:fd})).json());
+async function mergeProject(btn){
+  const name = btn.dataset.name || '';
+  const into = prompt('Merge “' + name + '” INTO which project?\nType the target project\'s name (as shown):', '');
+  if(into === null || !into.trim()) return;
+  try{
+    const fd = new FormData(); fd.append('from_key', btn.dataset.key); fd.append('into', into.trim());
+    const res = await (await fetch('/projects/merge', {method:'POST', body:fd})).json();
+    if(res.ok) location.reload(); else alert(res.message || 'Merge failed.');
+  }catch(e){ alert('Merge failed: ' + e); }
 }
 async function unmergeProject(k){
-  const fd=new FormData(); fd.append('from_key', k);
-  _mmsg(await (await fetch('/projects/unmerge',{method:'POST',body:fd})).json());
+  const fd = new FormData(); fd.append('from_key', k);
+  const res = await (await fetch('/projects/unmerge', {method:'POST', body:fd})).json();
+  if(res.ok) location.reload(); else alert(res.message || 'Un-merge failed.');
 }
 </script>
-{% endif %}
 {% endblock %}

@@ -31,6 +31,12 @@ def test_mail_subnav_groups_conversations_import_account(client):
     assert "Import" in client.get("/setup").text                       # /setup (Account) sits under Mail too
 
 
+def test_import_header_links_to_account_and_drops_step2(client):
+    h = client.get("/archive").text
+    assert '/setup#user' in h and '/setup#archive_path' in h           # mailbox/destination jump to settings
+    assert "Step 2" not in h                                           # the orphan 'Step 2 —' copy is gone
+
+
 def test_hub_subnav_groups_projects_profile_rules(client):
     h = client.get("/projects").text
     assert "Profile" in h and "Rules" in h                # Hub folds profile/taxonomy + rules in

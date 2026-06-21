@@ -595,17 +595,19 @@ def projects_page(request: Request):
 
 
 @app.post("/projects/merge")
-def projects_merge(from_key: str = Form(...), to_key: str = Form(...)):
-    """Fold one project into another (operator). The target survives; persisted, survives re-comprehension."""
+def projects_merge(from_key: str = Form(...), into: str = Form(...)):
+    """Fold one project into another (operator) — firm-merge style: `into` is the TARGET typed by name (or
+    key). The target survives; persisted, survives re-comprehension."""
     arch = _archive_dir(cfgmod.load_config())
     by_key = {p["key"]: p for p in projmod.list_projects(arch)}
-    src, dest = (from_key or "").strip(), (to_key or "").strip()
-    if src == dest:
+    src, target = (from_key or "").strip(), (into or "").strip()
+    dest = by_key.get(projmod.project_key(target)) or by_key.get(target)   # resolve a typed name -> its key
+    if not dest:
+        return JSONResponse({"ok": False, "message": f"No project matches “{target}”. Type the target project's name as shown."})
+    if dest["key"] == src:
         return JSONResponse({"ok": False, "message": "That's the same project."})
-    if dest not in by_key:
-        return JSONResponse({"ok": False, "message": "Pick a target project to merge into."})
-    ok = projmod.set_merge(arch, src, dest)
-    return JSONResponse({"ok": ok, "message": f"Merged into {by_key[dest]['name']}." if ok
+    ok = projmod.set_merge(arch, src, dest["key"])
+    return JSONResponse({"ok": ok, "message": f"Merged into {dest['name']}." if ok
                          else "Couldn't merge (would create a loop)."})
 
 

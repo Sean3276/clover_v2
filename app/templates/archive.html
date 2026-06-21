@@ -63,8 +63,9 @@
 
 <div class="runhdr">
   <div><h1>Import</h1>
-    <p class="note">Mailbox <code>{{ cfg.auth.imap.user or "not set" }}</code> · Destination <code>{{ cfg.archive_path }}</code></p>
-    <p class="note dim" style="margin:4px 0 0"><strong>Step 2 — download your mail.</strong> Select folders, optionally filter, then Archive. <span class="help" tabindex="0" role="note" data-tip="Read-only: nothing on the server is moved, deleted, or marked read. It auto-resumes if the connection drops, and skips anything already archived.">?</span></p>
+    <p class="note">Mailbox <a href="/setup#user" title="Change in Account settings"><code>{{ cfg.auth.imap.user or "not set" }}</code></a> ·
+      Destination <a href="/setup#archive_path" title="Change in Account settings"><code>{{ cfg.archive_path }}</code></a></p>
+    <p class="note dim" style="margin:4px 0 0">Select folders, optionally filter, then <strong>Archive selected</strong>. <span class="help" tabindex="0" role="note" data-tip="Read-only: nothing on the server is moved, deleted, or marked read. It auto-resumes if the connection drops, and skips anything already archived.">?</span></p>
     <p id="sessionLine" class="note dim" style="margin:4px 0 0"></p></div>
   <span id="runPill" class="pill down">● idle</span>
 </div>

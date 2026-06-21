@@ -48,6 +48,24 @@ def test_unmerge_restores(tmp_path):
     assert len(pj.list_projects(tmp_path)) == 2
 
 
+def test_merge_route_resolves_target_by_typed_name(monkeypatch, tmp_path):
+    from starlette.testclient import TestClient
+    monkeypatch.setenv("CLOVER_V2_HOME", str(tmp_path))
+    from clover.paths import default_archive_path
+    arch = default_archive_path(); arch.mkdir(parents=True, exist_ok=True)
+    with comprehension_path(arch).open("w", encoding="utf-8") as f:
+        f.write(json.dumps({"thread_id": "t1", "root_id": "r1", "subject": "s", "facts": {"project": "Tower A"}}) + "\n")
+        f.write(json.dumps({"thread_id": "t2", "root_id": "r2", "subject": "s", "facts": {"project": "Twr Annex"}}) + "\n")
+    import app.main as m
+    c = TestClient(m.app)
+    src = pj.project_key("Twr Annex")
+    r = c.post("/projects/merge", data={"from_key": src, "into": "Tower A"}).json()    # firm-style: type the target name
+    assert r["ok"] and "Tower A" in r["message"]
+    assert len(pj.list_projects(arch)) == 1
+    bad = c.post("/projects/merge", data={"from_key": src, "into": "Nonexistent"}).json()
+    assert bad["ok"] is False
+
+
 def test_get_project_resolves_merged_key(tmp_path):
     _write_comp(tmp_path, [
         {"thread_id": "t1", "subject": "s1", "facts": {"project": "Alpha"}},

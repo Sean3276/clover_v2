@@ -56,8 +56,37 @@
     <div class="row3">
       <div><label for="mlabel">Label</label><input id="mlabel" placeholder="e.g. Sonnet (CLI)"></div>
       <div><label for="mbackend">Backend</label>
-        <select id="mbackend"><option value="claude-cli">claude-cli</option><option value="codex-cli">codex-cli</option><option value="stub">stub</option></select></div>
+        <select id="mbackend" onchange="showGuide()"><option value="claude-cli">claude-cli</option><option value="codex-cli">codex-cli</option><option value="stub">stub</option></select></div>
       <div><label for="mmodel">Model</label><input id="mmodel" placeholder="sonnet / opus / haiku"></div>
+    </div>
+    <style>
+      .setupguide{margin:8px 0 4px}
+      .setupguide .guide{display:none;background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:11px 14px;font-size:13px}
+      .setupguide .guide.on{display:block}
+      .setupguide .gh{margin:0 0 6px;color:var(--ink)}
+      .setupguide ol{margin:0;padding-left:20px} .setupguide li{margin:3px 0;color:var(--sub)}
+    </style>
+    <div class="setupguide" id="setupGuide">
+      <div class="guide" data-backend="claude-cli">
+        <p class="gh">Set up the <b>Claude CLI</b> — uses your Claude subscription, no API key.</p>
+        <ol>
+          <li>Install: <code>npm i -g @anthropic-ai/claude-code</code></li>
+          <li>Sign in once: run <code>claude</code> in a terminal and log in.</li>
+          <li>Check it works: <code>claude -p "hi"</code></li>
+          <li>Set <b>Model</b> below to <code>sonnet</code>, <code>opus</code>, or <code>haiku</code>, then <b>Save model</b> and <b>Activate</b> it.</li>
+        </ol>
+      </div>
+      <div class="guide" data-backend="codex-cli">
+        <p class="gh">Set up the <b>Codex CLI</b> (GPT-5.x) — uses your ChatGPT account, no API key.</p>
+        <ol>
+          <li>Install the Codex CLI and sign in with ChatGPT (follow Codex's own install docs).</li>
+          <li>Check it works: <code>codex exec -m gpt-5.5 "hi"</code></li>
+          <li>Set <b>Model</b> below to <code>gpt-5.5</code> (or another Codex model), then <b>Save model</b> and <b>Activate</b> it.</li>
+        </ol>
+      </div>
+      <div class="guide" data-backend="stub">
+        <p class="gh"><b>Stub</b> — a deterministic offline backend for testing. No setup and no AI; it returns placeholder output.</p>
+      </div>
     </div>
     <div class="row">
       <div><label for="mbudget">Token budget (0 = unlimited, no tracking)</label><input id="mbudget" type="number" min="0" value="0"></div>
@@ -108,11 +137,15 @@ async function saveModel(){
     model: $("mmodel").value, token_budget: $("mbudget").value || 0, enabled: $("menabled").value});
   msg(r.ok, r.message); if(r.ok) setTimeout(() => location.reload(), 700);
 }
+function showGuide(){
+  const b = $("mbackend").value;
+  document.querySelectorAll(".setupguide .guide").forEach(g => g.classList.toggle("on", g.dataset.backend === b));
+}
 function edit(m){
   $("formTitle").textContent = "Edit model";
   $("mid").value = m.id; $("mlabel").value = m.label; $("mbackend").value = m.backend;
   $("mmodel").value = m.model || ""; $("mbudget").value = m.token_budget || 0;
-  $("menabled").value = m.enabled ? "on" : "";
+  $("menabled").value = m.enabled ? "on" : ""; showGuide();
   window.scrollTo({top: document.body.scrollHeight, behavior: "smooth"});
 }
 function resetForm(){ $("formTitle").textContent = "Add a model"; $("mform").reset(); $("mid").value = ""; }
@@ -123,5 +156,6 @@ async function del(id, label){ if(!confirm("Delete model “" + label + "”?"))
   const r = await post("/dev/models/delete", {id}); msg(r.ok, r.message); if(r.ok) setTimeout(() => location.reload(), 500); }
 async function saveConc(){ const r = await post("/dev/concurrency", {n: $("conc").value || 1}); msg(r.ok, r.message); }
 async function saveTimeout(){ const r = await post("/dev/timeout", {seconds: $("aitimeout").value || 300}); msg(r.ok, r.message); }
+showGuide();   // show the setup steps for the initially-selected backend
 </script>
 {% endblock %}
