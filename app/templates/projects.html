@@ -4,7 +4,7 @@
 {% block body %}
 <h1>Projects</h1>
 <p class="note">Projects detected from <strong>comprehended</strong> conversations — grouped by the project
-  name each thread is about. Comprehend more mail to populate this.</p>
+  name each thread is about. Comprehend more mail to see more here.</p>
 {% if not projects %}
 <div class="card"><p class="note dim" style="margin:0">No projects yet — open a conversation in
   <a href="/threads">Mail</a> and click <strong>Comprehend</strong>; detected project names group here.</p></div>
@@ -20,5 +20,46 @@
   </a>
   {% endfor %}
 </div>
+{% endif %}
+
+{% if projects|length > 1 or merged %}
+<div class="card" style="margin-top:16px">
+  <h2 style="font-size:15px;margin:0 0 6px">Merge projects</h2>
+  <p class="note">Two names for the same project? Fold one into the other. The target keeps its name, and
+    the merge survives re-comprehension. You can un-merge below.</p>
+  {% if projects|length > 1 %}
+  <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+    <div><label class="note" for="mFrom">Merge this</label><br>
+      <select id="mFrom" style="width:auto">{% for p in projects %}<option value="{{ p.key }}">{{ p.name }} ({{ p.count }})</option>{% endfor %}</select></div>
+    <div><label class="note" for="mInto">into</label><br>
+      <select id="mInto" style="width:auto">{% for p in projects %}<option value="{{ p.key }}">{{ p.name }} ({{ p.count }})</option>{% endfor %}</select></div>
+    <button type="button" onclick="mergeProjects()">Merge</button>
+  </div>
+  {% endif %}
+  {% if merged %}
+  <p class="note dim" style="margin:12px 0 4px">Currently merged:</p>
+  <ul class="note" style="margin:0;padding-left:18px">
+    {% for m in merged %}
+    <li><span class="mono">{{ m.from_key }}</span> → <strong>{{ m.to_name }}</strong>
+      <button type="button" class="linkbtn" onclick="unmergeProject('{{ m.from_key }}')">un-merge</button></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <p id="mMsg" class="note" style="margin-top:8px"></p>
+</div>
+<script>
+function _mmsg(r){ const m=document.getElementById('mMsg'); m.textContent=r.message;
+  m.style.color = r.ok ? 'var(--clover-d)' : 'var(--amber)'; if(r.ok) setTimeout(()=>location.reload(),700); }
+async function mergeProjects(){
+  const fd=new FormData();
+  fd.append('from_key', document.getElementById('mFrom').value);
+  fd.append('to_key', document.getElementById('mInto').value);
+  _mmsg(await (await fetch('/projects/merge',{method:'POST',body:fd})).json());
+}
+async function unmergeProject(k){
+  const fd=new FormData(); fd.append('from_key', k);
+  _mmsg(await (await fetch('/projects/unmerge',{method:'POST',body:fd})).json());
+}
+</script>
 {% endif %}
 {% endblock %}

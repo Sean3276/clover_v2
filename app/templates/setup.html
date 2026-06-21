@@ -3,11 +3,11 @@
 {% block nav_setup %}active{% endblock %}
 {% block body %}
 <h1>Settings</h1>
-<p class="note"><strong>Connect your mailbox</strong> (IMAP), and tune how Clover classifies. Enter your provider's
+<p class="note"><strong>Connect your mailbox</strong> (IMAP), then tune how Clover classifies your mail. Enter your provider's
   IMAP details, click <strong>Test IMAP</strong>, then <strong>Save</strong>. Your password is stored in your OS
   keyring (never in config files or logs).</p>
 <div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-  <span class="note" style="flex:1;min-width:220px">⚖ <strong>Classification</strong> — edit the taxonomy the AI files mail against, and the rules you've taught it.</span>
+  <span class="note" style="flex:1;min-width:220px">⚖ <strong>Classification</strong> — edit the taxonomy the AI files mail into, and the rules you've taught it.</span>
   <a href="/profile" class="btn ghost" style="text-decoration:none">Profile &amp; taxonomy →</a>
   <a href="/rules" class="btn ghost" style="text-decoration:none">Learned rules →</a>
 </div>
@@ -45,9 +45,9 @@
 
   <div class="card">
     <h2>Sending — reply / forward <span class="note" style="text-transform:none;letter-spacing:0">(optional, off by default)</span></h2>
-    <p class="note" style="margin:0 0 6px">Lets Clover <strong>send</strong> replies/forwards via SMTP from the Mail tab.
+    <p class="note" style="margin:0 0 6px">Lets Clover <strong>send</strong> replies and forwards via SMTP from the Mail tab.
       This is the only feature that sends mail to real recipients — leave it off until you're ready. Every send asks
-      for confirmation and a copy is saved to Sent.</p>
+      for confirmation, and a copy is saved to Sent.</p>
     {% set snd = cfg.get('sending') or {} %}
     <div class="row3">
       <div><label for="smtp_host">SMTP host</label><input id="smtp_host" name="smtp_host" value="{{ snd.get('smtp', {}).get('host', '') }}" placeholder="smtp.example.com"></div>
@@ -61,7 +61,7 @@
     </div>
     <div class="row">
       <div><label for="send_from">From address</label><input id="send_from" name="send_from" value="{{ snd.get('from', '') }}" placeholder="you@example.com (defaults to your IMAP user)"></div>
-      <div><label for="smtp_password">SMTP password {% if has_smtp_pw %}(stored — blank to keep){% endif %}</label>
+      <div><label for="smtp_password">SMTP password {% if has_smtp_pw %}(stored — leave blank to keep){% endif %}</label>
            <input id="smtp_password" name="smtp_password" type="password" placeholder="{% if has_smtp_pw %}••••••••{% else %}SMTP password{% endif %}"></div>
     </div>
     <label style="display:flex;gap:8px;align-items:center;margin-top:12px;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink);cursor:pointer">
@@ -75,7 +75,7 @@
 
 <div class="card">
   <h2>Ingestion suite</h2>
-  <p class="note">IMAP is available now; the rest are planned and added one by one (pluggable sources).</p>
+  <p class="note">IMAP is available now; the rest are planned and added one at a time (pluggable sources).</p>
   <div class="tablewrap">
   <table>
     <tr><th>Source</th><th>Protocol</th><th>Status</th></tr>

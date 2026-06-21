@@ -115,4 +115,4 @@ def test_owner_history_and_soft_uncovered_render():
                       thread={"subject": "S", "n": 3, "participants": ["a"], "start": "2026-01-01",
                               "end": "2026-01-03", "thread_id": "t1"})
     assert "carol@x.com" in html and "sam@x.com" in html and "→" in html   # hand-off chain rendered
-    assert "soft/indirect" in html and "leak" in html                       # soft disclosure rendered
+    assert "soft or indirect" in html and "leak" in html                    # soft disclosure rendered

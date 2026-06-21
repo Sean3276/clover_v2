@@ -17,7 +17,7 @@ def default_config() -> dict:
         "folders": ["INBOX", "Sent"],
         "comprehension": {
             "backend": "claude-cli", "model": "sonnet", "profile": "construction",
-            "budget_tokens": 200000, "autorun": True,
+            "budget_tokens": 200000, "autorun": True, "timeout_seconds": 300,
         },
         # Delivery track — OFF by default; sending is impossible until enabled (see CLOVER_V2_SENDING_SPEC).
         "sending": {

@@ -44,16 +44,52 @@
   .actions{display:flex;align-items:center;gap:12px;margin-top:18px;flex-wrap:wrap}
   .linkbtn{background:none;border:0;color:var(--clover);font-size:12px;font-weight:600;padding:0;cursor:pointer;letter-spacing:0}
   .linkbtn:hover{text-decoration:underline;filter:none}
+  .flowcard{padding:0 16px}
+  .flowcard>summary{cursor:pointer;padding:14px 0;font-size:15px;font-weight:600;color:var(--ink);
+    list-style:none;display:flex;align-items:center;gap:8px}
+  .flowcard>summary::-webkit-details-marker{display:none}
+  .flowcard>summary::marker{content:""}
+  .flowcard .caret{color:var(--clover);transition:transform .15s ease;display:inline-block;font-size:12px}
+  .flowcard[open] .caret{transform:rotate(90deg)}
+  .flow{list-style:none;margin:0 0 16px;padding:0;display:grid;gap:11px}
+  .flow li{display:flex;gap:12px;align-items:flex-start}
+  .fnum{flex:none;width:26px;height:26px;border-radius:50%;background:var(--clover-d);color:#04140b;
+    font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;margin-top:1px}
+  .flow b{color:var(--ink);font-size:13.5px}
+  .flow .opt{font-size:10px;font-weight:700;color:var(--sub);border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-left:5px}
   @media (max-width:640px){ .filtergrid{grid-template-columns:1fr} .tiles{grid-template-columns:repeat(2,1fr)} }
 </style>
 
 <div class="runhdr">
   <div><h1>Archive monitor</h1>
     <p class="note">Mailbox <code>{{ cfg.auth.imap.user or "not set" }}</code> · Destination <code>{{ cfg.archive_path }}</code></p>
-    <p class="note dim" style="margin:4px 0 0"><strong>Step 2 — download your mail.</strong> Tick folders, optionally filter, then Archive. <span class="help" tabindex="0" role="note" data-tip="Read-only: nothing on the server is moved, deleted, or marked read. It auto-resumes if the connection drops, and skips anything already archived.">?</span></p>
+    <p class="note dim" style="margin:4px 0 0"><strong>Step 2 — download your mail.</strong> Select folders, optionally filter, then Archive. <span class="help" tabindex="0" role="note" data-tip="Read-only: nothing on the server is moved, deleted, or marked read. It auto-resumes if the connection drops, and skips anything already archived.">?</span></p>
     <p id="sessionLine" class="note dim" style="margin:4px 0 0"></p></div>
   <span id="runPill" class="pill down">● idle</span>
 </div>
+
+<details class="card flowcard" open>
+  <summary><span class="caret">▶</span> What happens when you archive
+    <span class="note" style="text-transform:none;letter-spacing:0;font-weight:400">— one click runs the whole pipeline, in order</span></summary>
+  <ol class="flow">
+    <li><span class="fnum">1</span><div><b>Download your mail</b><br>
+      <span class="note">Saves new messages as <code>.eml</code> from the folders you tick. Read-only on the
+      server — nothing is moved, deleted, or marked read — and it auto-resumes if the connection drops,
+      skipping anything already archived.</span></div></li>
+    <li><span class="fnum">2</span><div><b>Re-stitch threads</b><br>
+      <span class="note">Rebuilds the conversation index so replies and forwards group into one thread.</span></div></li>
+    <li><span class="fnum">3</span><div><b>Comprehend new threads</b> <span class="opt">auto · budget-capped</span><br>
+      <span class="note">The AI reads each new thread into a summary, key facts, and cited to-dos. Controlled in
+      <a href="/dev">/dev</a> (model, parallelism, timeout); skipped if auto-comprehend is off.</span></div></li>
+    <li><span class="fnum">4</span><div><b>Refresh the GreenBook</b><br>
+      <span class="note">Pulls names, titles, and phone numbers from email signatures into your
+      <a href="/contacts">contacts</a> directory.</span></div></li>
+    <li><span class="fnum">5</span><div><b>Catalogue share links &amp; attachments</b> <span class="opt">download is optional</span><br>
+      <span class="note">Always lists the share links found in new mail. If you tick <b>“download share links”</b>
+      below, it also fetches the files (SharePoint/OneDrive, Drive, Dropbox, WeTransfer, Box) — very large
+      files pause for your confirmation in <a href="/threads">Mail</a>.</span></div></li>
+  </ol>
+</details>
 
 <div class="card" id="monitor">
   <div id="prepBox" class="prep">
@@ -79,7 +115,7 @@
       <div class="tile"><div class="k">Archived</div><div id="cSaved" class="v">0</div></div>
       <div class="tile"><div class="k">Remaining</div><div id="cRemain" class="v">0</div></div>
       <div class="tile err"><div class="k">Errors</div><div id="cErr" class="v">0</div></div>
-      <div class="tile"><div class="k">Rate /s</div><div id="cRate" class="v">—</div></div>
+      <div class="tile"><div class="k">Emails/s</div><div id="cRate" class="v">—</div></div>
       <div class="tile"><div class="k">ETA</div><div id="cEta" class="v">—</div></div>
     </div>
   </div>
@@ -92,7 +128,7 @@
   {% if folder_err %}
     <div class="msg err" style="display:block">{{ folder_err }}
       <button type="button" class="linkbtn" style="font-size:13px;margin-left:4px" onclick="location.reload()">↻ Retry</button>
-      — once you're back online, or check your details on <a href="/setup">Setup</a>.</div>
+      once you're back online, or check your connection details on <a href="/setup">Setup</a>.</div>
   {% elif not folders %}
     <p class="note">No folders loaded. Save IMAP credentials on the <a href="/setup">Setup</a> page first.</p>
   {% else %}
@@ -175,7 +211,7 @@
 
 <div class="card">
   <h2>Archived on disk</h2>
-  <p class="note">{{ summary.total }} .eml file(s) · {{ summary.unique_ids }} unique email(s) (linked across folders)</p>
+  <p class="note">{{ summary.total }} .eml file(s) · {{ summary.unique_ids }} unique email(s) (the same email can appear in more than one folder)</p>
   {% if summary.per_folder %}
   <table><tr><th>Folder</th><th>Emails archived</th></tr>
     {% for fol, n in summary.per_folder.items() %}<tr><td>{{ fol }}</td><td class="mono">{{ n }}</td></tr>{% endfor %}
@@ -278,7 +314,7 @@ function render(s){
         <span class="mono dim">${fdone}/${ftot}${e}</span></div>
         <div class="track"><div class="fill" style="width:${p}%"></div></div></div>`;
     }).join("");
-  } else { box.innerHTML = '<p class="note dim">No active run — select folders below and click Archive.</p>'; }
+  } else { box.innerHTML = '<p class="note dim">No active run — select folders below and click Archive selected.</p>'; }
 
   const logEl = $("log");
   if((s.log||[]).length){ logEl.style.display="block"; logEl.textContent=s.log.join("\n"); logEl.scrollTop=logEl.scrollHeight; }
@@ -312,7 +348,7 @@ async function reconcile(){
     const r = await (await fetch("/archive/reconcile",{method:"POST"})).json();
     m.className="msg "+(r.ok?"ok":"err");
     m.textContent = r.ok
-      ? `✓ Sound — ${r.total_indexed} indexed, all on disk, no stray files.`
+      ? `✓ All good — ${r.total_indexed} indexed, all on disk, no stray files.`
       : `⚠ ${r.missing_count} indexed file(s) missing, ${r.orphans_count} stray file(s) — see below.`;
     const fols = Object.keys(r.per_folder||{}).sort();
     let html = '<table style="margin-top:10px"><tr><th>Folder</th><th>Server</th><th>Archived</th><th>On disk</th></tr>';
@@ -323,7 +359,7 @@ async function reconcile(){
     out.innerHTML = html + '</table>'
       + (r.missing_count?`<p class="note" style="color:var(--amber);margin-top:8px">Indexed but missing on disk (${r.missing_count}): <span class="mono">${r.missing.map(esc).join(', ')}${r.missing_count>r.missing.length?' …':''}</span></p>`:'')
       + (r.orphans_count?`<p class="note" style="color:var(--amber);margin-top:6px">On disk but not indexed (${r.orphans_count}): <span class="mono">${r.orphans.map(esc).join(', ')}${r.orphans_count>r.orphans.length?' …':''}</span></p>`:'');
-  }catch(e){ m.className="msg err"; m.textContent="Verify failed: "+e; }
+  }catch(e){ m.className="msg err"; m.textContent="Couldn't verify the archive: "+e; }
   if(b) b.disabled=false;
 }
 document.addEventListener("DOMContentLoaded", () => { onDate(); onSize(); poll(); });

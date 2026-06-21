@@ -2,7 +2,7 @@
 {% block title %}{{ project.name }} · Projects{% endblock %}
 {% block nav_projects %}active{% endblock %}
 {% block body %}
-<p style="margin:0 0 6px"><a href="/projects" class="note">← all projects</a></p>
+<p style="margin:0 0 6px"><a href="/projects" class="note">← All projects</a></p>
 <h1>🏗 {{ project.name }}</h1>
 <p class="note">{{ project.count }} conversation(s){% if project.categories %} · {{ project.categories[:5]|join(' · ') }}{% endif %}</p>
 
@@ -15,13 +15,13 @@
   <div style="margin-top:12px">
     {% if firms %}
     <h3 style="margin:6px 0 8px">Firms involved
-      <span class="help" tabindex="0" role="note" data-tip="The companies whose people appear on this project's conversations — who worked together. Deterministic, from email domains; no AI needed.">?</span></h3>
+      <span class="help" tabindex="0" role="note" data-tip="The companies whose people appear on this project's conversations — who worked together. Determined from email domains, no AI needed.">?</span></h3>
     <div class="coprojs" style="display:flex;gap:6px;flex-wrap:wrap">
       {% for f in firms %}<span class="cbadge proj" title="{{ f.name }}">{% if f.code %}{{ f.code }} · {% endif %}{{ f.name }} ({{ f.count }})</span>{% endfor %}
     </div>
     {% endif %}
     <h3 style="margin:16px 0 8px">People
-      <span class="help" tabindex="0" role="note" data-tip="Everyone who appears on this project's conversations (sender or recipient), with company / title / phone from the Contacts directory. Grouped by company.">?</span>
+      <span class="help" tabindex="0" role="note" data-tip="Everyone who appears on this project's conversations (sender or recipient), with company, title, and phone from the Contacts directory. Grouped by company.">?</span>
       {% if contacts %}<a href="/projects/{{ project.key|urlencode }}/people.csv" class="note" style="font-weight:600;margin-left:8px">⬇ CSV</a>{% endif %}</h3>
     {% if contacts %}
     <div class="tablewrap">
@@ -37,7 +37,7 @@
       </table>
     </div>
     {% else %}
-    <p class="note dim">No participants resolved — build the thread index on the <a href="/threads">Mail</a> tab.</p>
+    <p class="note dim">No participants found yet — build the thread index on the <a href="/threads">Mail</a> tab.</p>
     {% endif %}
   </div>
 </details>

@@ -43,7 +43,7 @@
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
       <button id="rebuildBtn" type="button" class="ghost" onclick="rebuildContacts()"
-              title="Re-read each sender's latest signature and re-derive firms, codes and merges">↻ Refresh from signatures</button>
+              title="Re-read each sender's latest signature and rebuild firms, codes and merges">↻ Refresh from signatures</button>
       <a href="/contacts/export.csv" class="btn ghost" style="text-decoration:none" title="Download the whole green book as CSV">⬇ Export CSV</a>
       <span id="rebuildMsg" class="msg" role="status" aria-live="polite" style="margin:0"></span>
     </div>
@@ -51,13 +51,13 @@
 </div>
 
 {% if not companies and not individuals %}
-<div class="card"><p class="note dim" style="margin:0">No contacts yet — archive some mail first.</p></div>
+<div class="card"><p class="note dim" style="margin:0">No contacts yet — import some email first.</p></div>
 {% else %}
 <div class="card">
   <div class="azbar" role="toolbar" aria-label="Jump to companies by first letter">
     <button type="button" class="azbtn active" data-l="*" onclick="byLetter('*')">All</button>
     {% for L in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" %}<button type="button" class="azbtn" data-l="{{ L }}" onclick="byLetter('{{ L }}')">{{ L }}</button>{% endfor %}
-    <button type="button" class="azbtn" data-l="#" onclick="byLetter('#')" title="Names starting with a number or symbol">#</button>
+    <button type="button" class="azbtn" data-l="#" onclick="byLetter('#')" title="Companies whose name starts with a number or symbol">#</button>
   </div>
   <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px">
     <input id="cfilter" type="text" placeholder="Filter by company, person, email, code…" aria-label="Filter contacts" oninput="applyContacts()" style="flex:1;min-width:220px;margin:0">
@@ -68,13 +68,13 @@
   {% if qaqc %}
   <details class="qaqc" style="margin-top:12px">
     <summary style="cursor:pointer;color:var(--amber);font-weight:600;font-size:13px">⚠ Quality review — {{ qaqc|length }} item(s) to check</summary>
-    <p class="note" style="margin:6px 0 4px">Automation's self-check. Fix with the ✎ (name) or code box on the firm.</p>
+    <p class="note" style="margin:6px 0 4px">Clover's automatic self-check. Fix each item using the ✎ (name) or code box on the firm's card.</p>
     <ul style="margin:4px 0 0;padding-left:18px">
       {% for q in qaqc %}<li class="note"><span class="cbadge warn">{{ q.type }}</span> {{ q.detail }}</li>{% endfor %}
     </ul>
   </details>
   {% else %}
-  <p class="note dim" style="margin:10px 0 0">✓ Quality review: no duplicate codes, odd names, or likely-duplicate firms detected.</p>
+  <p class="note dim" style="margin:10px 0 0">✓ Quality review: no duplicate codes, odd names, or likely-duplicate firms found.</p>
   {% endif %}
 </div>
 
@@ -88,7 +88,7 @@
     <button type="button" class="editname" title="Merge this firm into another (give the target's code)" data-key="{{ co.key }}" data-name="{{ co.name }}" onclick="mergeFirm(this)">⛙</button>
     <span class="codelbl">code</span>
     <input class="codebox" value="{{ co.code }}" data-key="{{ co.key }}" maxlength="8"
-           aria-label="Company code" title="Click to rename this firm's code (must be unique)"
+           aria-label="Company code" title="Click to edit this firm's code (must be unique)"
            onfocus="this.dataset.prev=this.value" onchange="saveCode(this)">
     <span class="note" style="margin-left:auto">{{ co.count }} {{ 'person' if co.count == 1 else 'people' }}</span>
   </div>
@@ -120,7 +120,7 @@
 {% if individuals %}
 <div class="card co" data-indiv="1" data-q="individuals no company {{ (individuals|map(attribute='name')|join(' ') ~ ' ' ~ individuals|map(attribute='email')|join(' '))|lower }}">
   <div class="cohdr"><h2>Individuals</h2>
-    <span class="note" style="margin-left:auto">{{ individuals|length }} · no company (personal / free-mail addresses)</span></div>
+    <span class="note" style="margin-left:auto">{{ individuals|length }} · no company (personal or free-email addresses)</span></div>
   <details class="cobody">
     <summary>{{ individuals|length }} people</summary>
     <div class="tablewrap" style="margin-top:8px">

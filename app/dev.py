@@ -41,6 +41,7 @@ def dev_page(request: Request):
     return _templates.TemplateResponse(request, "dev.html", {
         "cfg": cfg, "models": rows, "active_id": modelsmod.active_id(cfg),
         "concurrency": modelsmod.get_concurrency(cfg),
+        "timeout_seconds": int((cfg.get("comprehension") or {}).get("timeout_seconds") or 300),
         "legacy": (cfg.get("comprehension") or {}).get("model", "")})
 
 
@@ -90,6 +91,17 @@ def dev_concurrency(n: int = Form(1)):
     cfgmod.save_config(cfg)
     return JSONResponse({"ok": True, "concurrency": val,
                          "message": f"Comprehension concurrency set to {val} parallel thread(s)."})
+
+
+@router.post("/dev/timeout")
+def dev_timeout(seconds: int = Form(300)):
+    g = _guard()
+    if g:
+        return g
+    cfg = cfgmod.load_config()
+    val = modelsmod.set_timeout(cfg, seconds)
+    cfgmod.save_config(cfg)
+    return JSONResponse({"ok": True, "timeout_seconds": val, "message": f"AI timeout set to {val}s per step."})
 
 
 @router.post("/dev/models/reset-usage")

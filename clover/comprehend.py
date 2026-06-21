@@ -220,20 +220,54 @@ def comp_for_thread(archive, thread: dict) -> dict | None:
     return rec if rec else get_comprehension(archive, thread.get("thread_id"))
 
 
-def thread_sig(thread: dict) -> dict:
-    """The thread's identity for staleness: message count + latest-message date."""
-    return {"n": thread.get("n"), "end": thread.get("end") or ""}
+def downloaded_link_index(archive) -> tuple[dict, dict]:
+    """Built once for many threads: ({message_id: count}, {eml_path: count}) of DOWNLOADED share-link
+    files. Lets staleness notice when an attachment lands (its message-id or .eml path gains a file)."""
+    by_mid, by_path = {}, {}
+    try:
+        from .linkshares import read_link_shares
+    except Exception:
+        return by_mid, by_path
+    for r in read_link_shares(archive):
+        if r.get("status") != "downloaded" or not r.get("file"):
+            continue
+        if r.get("message_id"):
+            by_mid[r["message_id"]] = by_mid.get(r["message_id"], 0) + 1
+        if r.get("eml"):
+            p = str(r["eml"]).replace("\\", "/")
+            by_path[p] = by_path.get(p, 0) + 1
+    return by_mid, by_path
 
 
-def is_stale(thread: dict, rec: dict | None) -> bool:
-    """True if the thread changed since it was comprehended (a newer message arrived / count grew).
-    Legacy records with no stored signature can't be judged, so they're treated as current (no nag)."""
+def thread_attach_count(archive, thread: dict, index: tuple[dict, dict] | None = None) -> int:
+    """How many downloaded share-link files belong to this thread's messages. Pass `index` (from
+    downloaded_link_index) when iterating many threads; omit it for a single thread."""
+    by_mid, by_path = index if index is not None else downloaded_link_index(archive)
+    n = 0
+    for m in (thread.get("members") or []):
+        n += by_mid.get(m.get("message_id"), 0)
+        for loc in (m.get("locations") or []):
+            n += by_path.get(str(loc.get("path") or "").replace("\\", "/"), 0)
+    return n
+
+
+def thread_sig(thread: dict, attach: int = 0) -> dict:
+    """The thread's identity for staleness: message count + latest-message date + downloaded-attachment
+    count (so a share-link file that arrives after comprehension re-comprehends the thread)."""
+    return {"n": thread.get("n"), "end": thread.get("end") or "", "attach": int(attach)}
+
+
+def is_stale(thread: dict, rec: dict | None, attach: int = 0) -> bool:
+    """True if the thread changed since it was comprehended — a newer message arrived, the count grew,
+    or a share-link attachment was downloaded. Legacy records with no signature can't be judged (no nag)."""
     if not rec:
         return False
     src = rec.get("source")
     if not src:
         return False
-    return (src.get("n") != thread.get("n")) or ((src.get("end") or "") != (thread.get("end") or ""))
+    return ((src.get("n") != thread.get("n"))
+            or ((src.get("end") or "") != (thread.get("end") or ""))
+            or (int(src.get("attach") or 0) != int(attach)))
 
 
 def get_comprehension(archive, thread_id: str) -> dict | None:
@@ -1018,7 +1052,7 @@ def _build_once(archive, thread, backend, profile, max_chars, model, operator: s
     rec = {
         "thread_id": thread.get("thread_id"), "root_id": thread.get("root_id"),
         "subject": thread.get("subject"),
-        "source": thread_sig(thread),                    # thread state when comprehended (staleness check)
+        "source": thread_sig(thread, thread_attach_count(archive, thread)),   # state at comprehension (staleness)
         "comprehension": comprehension,
         "abstract": abstract,
         "summary": summary,
@@ -1120,10 +1154,11 @@ def select_threads(archive, *, only=None, redo=False, include_stale=True) -> lis
     if only is not None:
         only = set(only)
         threads = [t for t in threads if t.get("thread_id") in only]
+    idx = downloaded_link_index(archive) if include_stale else ({}, {})   # read link files once
     todo = []
     for t in threads:
         rec = done.get(t.get("root_id"))
-        if rec is None or redo or (include_stale and is_stale(t, rec)):
+        if rec is None or redo or (include_stale and is_stale(t, rec, thread_attach_count(archive, t, idx))):
             todo.append(t)
     return todo
 

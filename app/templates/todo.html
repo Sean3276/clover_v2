@@ -30,14 +30,14 @@
 
 <div class="tdhd">
   <h1>🫵 Need You</h1>
-  <span class="note">your open obligations across all comprehended mail · as of {{ today }}</span>
+  <span class="note">Your open items across all comprehended mail · as of {{ today }}</span>
 </div>
 
 {% if items %}
 <div class="tdsum">
   <span class="tdchip"><b>{{ counts.total }}</b> to-do</span>
   {% if counts.overdue %}<span class="tdchip od"><b>{{ counts.overdue }}</b> overdue</span>{% endif %}
-  <span class="tdchip"><b>{{ counts.soon }}</b> due ≤7 days</span>
+  <span class="tdchip"><b>{{ counts.soon }}</b> due in 7 days</span>
   <span class="tdchip"><b>{{ counts.undated }}</b> no date</span>
 </div>
 
@@ -54,16 +54,16 @@
   <div class="tdmain">
     <p class="tdact">
       {% if i.priority == 'high' %}<span class="pill hi">high</span> {% endif %}
-      {% if i.implied %}<span class="pill imp" title="implied / cross-message obligation">implied</span> {% endif %}
-      {% if i.is_mine is none %}<span class="pill maybe" title="owner unclear — surfaced for triage">maybe yours</span> {% endif %}
+      {% if i.implied %}<span class="pill imp" title="Implied across the thread, not stated outright">implied</span> {% endif %}
+      {% if i.is_mine is none %}<span class="pill maybe" title="Owner unclear — surfaced so you can check">maybe yours</span> {% endif %}
       {{ i.action }}{% if i.about %} <span class="note">— {{ i.about }}</span>{% endif %}
     </p>
     <div class="tdmeta">
-      <a href="/threads/{{ i.thread_id }}" title="open thread">📨 {{ i.subject }}</a>
+      <a href="/threads/{{ i.thread_id }}" title="Open thread">📨 {{ i.subject }}</a>
       {% if i.recurrence %}<span title="recurring">🔁 {{ i.recurrence }}</span>{% endif %}
-      {% if i.owner_history and i.owner_history|length > 1 %}<span title="ownership hand-off">{% for h in i.owner_history %}{{ h.owner }}{% if not loop.last %} → {% endif %}{% endfor %}</span>{% endif %}
+      {% if i.owner_history and i.owner_history|length > 1 %}<span title="Owner changed hands">{% for h in i.owner_history %}{{ h.owner }}{% if not loop.last %} → {% endif %}{% endfor %}</span>{% endif %}
       {% if i.status and i.status != 'open' %}<span>· {{ i.status }}</span>{% endif %}
-      {% if i.confidence == 'review' %}<span title="low confidence — verify">⚠ review</span>{% endif %}
+      {% if i.confidence == 'review' %}<span title="Low confidence — worth a check">⚠ review</span>{% endif %}
     </div>
   </div>
 </div>
@@ -72,7 +72,7 @@
 {% else %}
 <div class="tdempty">
   <p style="font-size:40px;margin:0">✅</p>
-  <p>Nothing needs you right now — no open obligations found across your comprehended mail.</p>
+  <p>Nothing needs you right now — no open items found across your comprehended mail.</p>
   <p class="note">Comprehend more threads from <a href="/threads">Mail</a> to populate this list.</p>
 </div>
 {% endif %}

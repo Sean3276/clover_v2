@@ -222,7 +222,7 @@ def test_confirm_link_route_and_needs_confirm_render(tmp_path, monkeypatch):
     tid = th.read_threads(tmp_path)[0]["thread_id"]
 
     tv = c.get(f"/threads/{tid}")                       # needs-confirm must surface at thread level (not a dead end)
-    assert "large file(s) to confirm" in tv.text
+    assert "large file(s)" in tv.text and "Confirm" in tv.text   # needs-confirm action surfaces
 
     r = c.get(f"/threads/{tid}/msg/0")
     assert r.status_code == 200

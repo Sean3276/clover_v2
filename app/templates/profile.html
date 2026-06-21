@@ -26,7 +26,7 @@
 <div class="card">
   <form id="pform" onsubmit="return false">
     <label for="pdesc">Description</label>
-    <input id="pdesc" type="text" value="{{ prof.description }}" placeholder="How this profile files mail">
+    <input id="pdesc" type="text" value="{{ prof.description }}" placeholder="A short note on how this profile files mail">
 
     <div class="pfield">
       <label for="ptax">Domains &amp; categories</label>
@@ -39,7 +39,7 @@
       <label for="psafe">Safety-net category (the costliest to miss)</label>
       <input id="psafe" type="text" value="{{ prof.safety_net }}" list="catlist" style="max-width:340px">
       <datalist id="catlist">{% for c in all_categories %}<option value="{{ c }}">{% endfor %}</datalist>
-      <p class="hint">When the council is in genuine doubt, it falls back to this. Must be one of the categories above.</p>
+      <p class="hint">When the council is genuinely unsure, it falls back to this. Must be one of the categories above.</p>
     </div>
 
     <div class="pfield">
@@ -50,12 +50,12 @@
     </div>
 
     <div class="pfield">
-      <label for="pfacets">Facet tags (orthogonal — the AI tags each thread; you filter by any combination)</label>
+      <label for="pfacets">Facet tags (independent labels — the AI tags each thread; you filter by any combination)</label>
       <textarea id="pfacets" spellcheck="false">{{ facets }}</textarea>
       <p class="hint">One facet per line as <code>Facet: Value, Value, …</code> — e.g.
         <code>Discipline: Architecture, Structural, M&amp;E, Authority</code> /
-        <code>Authority: BCA, URA, SCDF, LTA, PUB</code>. The AI assigns only these values (never invents);
-        threads can carry several facets or none. These power the Mail tag search.</p>
+        <code>Authority: BCA, URA, SCDF, LTA, PUB</code>. The AI only assigns values from this list (it never invents new ones);
+        a thread can carry several facets or none. These power the Mail tag search.</p>
     </div>
 
     <div style="display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap">
@@ -78,7 +78,7 @@
   {% endfor %}
   {% else %}
   <p class="note dim" style="margin:6px 0 0">No learned rules yet. Resolve a flagged thread on the
-    <a href="/threads">Mail</a> tab and tick “save as a rule” to add one. <a href="/rules">Rules page →</a></p>
+    <a href="/threads">Mail</a> tab and tick “Save as a rule” to add one. <a href="/rules">Rules page →</a></p>
   {% endif %}
 </div>
 

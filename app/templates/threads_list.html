@@ -40,7 +40,7 @@
 
 {% if not has_index %}
 <div class="card">
-  <h2>No thread index yet</h2>
+  <h2>No conversations indexed yet</h2>
   <p class="note">Build the thread index from your archived <code>.eml</code> files — header-only, deterministic,
     takes a few seconds. (Re-runnable anytime; it never modifies your archive.)</p>
   <button id="rebuildBtn" type="button" onclick="rebuild()" style="margin-top:10px">Build thread index →</button>
@@ -55,7 +55,7 @@
       <span style="color:var(--amber)">{{ comp_counts.stale }} out&#8209;of&#8209;date</span></span>.</p>
   </div></div>
   {% if not ai_ready %}
-  <p class="note dim" style="margin:10px 0 0">AI backend not set up — install the Claude CLI
+  <p class="note dim" style="margin:10px 0 0">AI reader not set up yet — install the Claude CLI
     (<code>npm i -g @anthropic-ai/claude-code</code>) and log in, then reload.</p>
   {% else %}
   <div class="comprow">
@@ -70,7 +70,7 @@
     <span id="compDates" style="display:none;align-items:center;gap:6px">
       <input type="date" id="compFrom" aria-label="From date"> <span class="note">→</span> <input type="date" id="compTo" aria-label="To date">
     </span>
-    <label class="note"><input type="checkbox" id="compRedo"> re-do already-comprehended</label>
+    <label class="note"><input type="checkbox" id="compRedo"> re-comprehend ones already done</label>
     <button id="compRunBtn" type="button" onclick="compRun()">Comprehend</button>
     <button id="compStopBtn" type="button" class="ghost" onclick="compStop()" style="display:none">⏹ Stop</button>
   </div>
@@ -85,7 +85,7 @@
 </div>
 {% if link_total %}
 <div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px;padding:12px 16px">
-  <span class="note" style="flex:1;min-width:240px">🔗 Share links: {{ link_total }} catalogued —
+  <span class="note" style="flex:1;min-width:240px">🔗 Share links: {{ link_total }} found —
     <strong id="lsDownloaded">{{ link_stats.get('downloaded', 0) }}</strong> downloaded,
     <span id="lsPending">{{ link_stats.get('pending', 0) }}</span> pending,
     {{ link_stats.get('needs-auth', 0) }} need sign-in,
@@ -111,7 +111,7 @@
 {% else %}
 <div class="card">
   <div class="thtools">
-    <input id="filter" type="text" placeholder="Filter by subject or participant…" aria-label="Filter conversations by subject or participant" oninput="apply()">
+    <input id="filter" type="text" placeholder="Filter by subject, participant, project, or category…" aria-label="Filter conversations by subject or participant" oninput="apply()">
     <select id="sort" onchange="apply()" aria-label="Sort conversations">
       <option value="recent">Most recent</option>
       <option value="size">Largest</option>
@@ -140,13 +140,13 @@
         <span class="thsubj">{% if c %}{% if t.thread_id in stale %}<span class="leaf stale" title="Comprehended — out of date (thread changed since)">🍀</span>{% else %}<span class="leaf" title="Comprehended (up to date)">🍀</span>{% endif %} {% endif %}{% if t.has_attach %}<span title="Has an attachment">📎</span> {% endif %}{% if lk %}{% if lk.pending %}<span style="color:var(--amber)" title="{{ lk.pending }} share link(s) still to fetch{% if lk.fetched %}, {{ lk.fetched }} downloaded{% endif %} — use ⬇ Download on this page or open the thread">🔗</span> {% elif lk.fetched %}<span style="color:var(--clover)" title="{{ lk.fetched }} share link(s) downloaded">🔗</span> {% endif %}{% endif %}{{ t.subject }}</span>
         {% if c %}
         <span class="thmeta note">{{ c.summary or (c.classification.category ~ ' — comprehended') }}</span>
-        <span class="cbadges">{% if c.facts and c.facts.project %}<span class="cbadge proj">🏗 {{ c.facts.project }}</span>{% endif %}<span class="cbadge dom">{{ c.classification.domain }}</span><span class="cbadge">{{ c.classification.category }}</span>{% if needs %}<span class="cbadge warn" tabindex="0" title="{% if c.classification.consensus == 'asked' %}The AI council was split and couldn't agree on the category. {% endif %}{% if c.qaqc and c.qaqc.needs_review %}QAQC check flagged: {{ (c.qaqc.issues or ['faithfulness/completeness'])|join('; ') }}. {% endif %}→ Open this conversation and use ‘Resolve / reclassify’ to set the correct domain &amp; category.">review</span>{% endif %}{% if is_stale %}<span class="cbadge warn" title="Comprehended before the thread changed — re-comprehend to update.">OUT OF DATE</span>{% endif %}</span>
+        <span class="cbadges">{% if c.facts and c.facts.project %}<span class="cbadge proj">🏗 {{ c.facts.project }}</span>{% endif %}<span class="cbadge dom">{{ c.classification.domain }}</span><span class="cbadge">{{ c.classification.category }}</span>{% if needs %}<span class="cbadge warn" tabindex="0" title="{% if c.classification.consensus == 'asked' %}The AI council was split and couldn't agree on the category. {% endif %}{% if c.qaqc and c.qaqc.needs_review %}QAQC check flagged: {{ (c.qaqc.issues or ['faithfulness/completeness'])|join('; ') }}. {% endif %}→ Open this conversation and use ‘Resolve / reclassify’ to set the correct domain &amp; category.">review</span>{% endif %}{% if is_stale %}<span class="cbadge warn" title="Comprehended before the thread changed — re-comprehend to update.">out of date</span>{% endif %}</span>
         {% else %}
         <span class="thmeta note">{{ t.participants[:3]|join(', ') }}{% if t.participants|length > 3 %} +{{ t.participants|length - 3 }} more{% endif %}</span>
         {% endif %}
       </div>
       <div class="thside">
-        <span class="thn">{{ t.n }} msg</span>
+        <span class="thn">{{ t.n }} msg{{ 's' if t.n != 1 }}</span>
         <span class="note mono">{{ (t.start or '')[:10] }}{% if t.n > 1 %} → {{ (t.end or '')[:10] }}{% endif %}</span>
       </div>
     </a>

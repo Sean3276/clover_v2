@@ -5,10 +5,9 @@
 <p style="margin:0 0 6px"><a href="/setup" class="note">← Settings</a></p>
 <h1>Classification rules</h1>
 <p class="note">Rules you taught Clover when resolving threads. A matching rule classifies a thread
-  <strong>directly</strong> (no AI council); newest wins on conflict. Delete any to stop applying it.</p>
+  <strong>directly</strong> (no AI council); if rules conflict, the newest one wins. Delete a rule to stop applying it.</p>
 {% if not rules %}
-<div class="card"><p class="note dim" style="margin:0">No rules yet — when you <strong>Resolve</strong> a flagged
-  thread (Mail → a conversation), you can save one.</p></div>
+<div class="card"><p class="note dim" style="margin:0">No rules yet. To add one, open a flagged thread in Mail and <strong>Resolve</strong> it — you can save a rule from there.</p></div>
 {% else %}
 <div class="card">
   <div class="tablewrap">
@@ -28,7 +27,7 @@
 </div>
 <script>
 async function delRule(i){
-  if(!confirm('Delete this rule? Threads will no longer auto-classify from it.')) return;
+  if(!confirm('Delete this rule? Threads will no longer be classified by it.')) return;
   try{
     await fetch('/rules/delete', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
       body: new URLSearchParams({index: i})});

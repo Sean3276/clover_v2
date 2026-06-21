@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-_BACKENDS = ("claude-cli", "stub")          # known comprehender backends
+_BACKENDS = ("claude-cli", "codex-cli", "stub")          # known comprehender backends
 
 
 def _comp(cfg) -> dict:
@@ -135,4 +135,27 @@ def set_concurrency(cfg, n) -> int:
         n = 1
     n = min(_MAX_CONCURRENCY, max(1, n))
     cfg.setdefault("comprehension", {})["concurrency"] = n
+    return n
+
+
+_MIN_TIMEOUT, _MAX_TIMEOUT, _DEFAULT_TIMEOUT = 30, 1200, 300
+
+
+def get_timeout(cfg) -> int:
+    """Seconds to wait for a single AI step (developer-controlled). Clamped to 30..1200."""
+    try:
+        n = int(_comp(cfg).get("timeout_seconds") or _DEFAULT_TIMEOUT)
+    except (TypeError, ValueError):
+        n = _DEFAULT_TIMEOUT
+    return min(_MAX_TIMEOUT, max(_MIN_TIMEOUT, n))
+
+
+def set_timeout(cfg, n) -> int:
+    """Set the per-AI-step timeout, clamped to 30..1200s. Returns the stored value."""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        n = _DEFAULT_TIMEOUT
+    n = min(_MAX_TIMEOUT, max(_MIN_TIMEOUT, n))
+    cfg.setdefault("comprehension", {})["timeout_seconds"] = n
     return n

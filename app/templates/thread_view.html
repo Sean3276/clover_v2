@@ -99,7 +99,7 @@
   </div>
   {% if stale %}
   <p class="note" style="margin:6px 0 0;color:var(--amber)"><span class="leaf stale">🍀</span>
-    <strong>Out of date.</strong> New messages arrived since this was comprehended — re-comprehend to refresh.
+    <strong>Out of date.</strong> New messages have arrived since this was last comprehended — re-comprehend to refresh.
     {% if ai_ready %}<button type="button" class="linkbtn" onclick="comprehend()">↻ Re-comprehend now</button>{% endif %}</p>
   {% endif %}
   {% if comp.qaqc and comp.qaqc.needs_review and comp.qaqc.issues %}
@@ -148,13 +148,13 @@
   {% endif %}
   {% if comp.verified and comp.verified.implied_candidates %}
   <details class="acts soft" style="margin-top:8px">
-    <summary class="note" style="cursor:pointer">🔎 {{ comp.verified.implied_candidates|length }} possible implied obligation(s) — review</summary>
+    <summary class="note" style="cursor:pointer">🔎 {{ comp.verified.implied_candidates|length }} possible implied task(s) — review</summary>
     <ul class="note" style="margin:6px 0 0;padding-left:18px">{% for c in comp.verified.implied_candidates %}<li>{{ c }}</li>{% endfor %}</ul>
   </details>
   {% endif %}
   {% if comp.verified and comp.verified.action_floor_soft_uncovered %}
   <details class="acts soft" style="margin-top:8px">
-    <summary class="note" style="cursor:pointer">🔎 {{ comp.verified.action_floor_soft_uncovered|length }} soft/indirect ask(s) the AI didn't action — review</summary>
+    <summary class="note" style="cursor:pointer">🔎 {{ comp.verified.action_floor_soft_uncovered|length }} soft or indirect ask(s) not turned into a to-do — review</summary>
     <ul class="note" style="margin:6px 0 0;padding-left:18px">{% for c in comp.verified.action_floor_soft_uncovered %}<li>{{ c }}</li>{% endfor %}</ul>
   </details>
   {% endif %}
@@ -199,7 +199,7 @@
 <div class="card comp">
   <p class="note" style="margin:0">Not yet comprehended.
   {% if ai_ready %}<button type="button" id="compBtn" onclick="comprehend()" style="margin-left:8px">🍀 Comprehend</button>
-  {% else %}<span class="dim">— AI backend not set up; install the Claude CLI to enable.</span>{% endif %}</p>
+  {% else %}<span class="dim">— No AI backend yet. Install the Claude CLI to enable comprehension.</span>{% endif %}</p>
   <div id="compMsg" class="msg"></div>
 </div>
 {% endif %}
@@ -207,10 +207,10 @@
 {% if link_saved or link_pending or link_needs_confirm %}
 <div class="tbar" style="margin-bottom:8px;flex-wrap:wrap">
   {% if link_pending %}
-  <button id="threadFetchBtn" type="button" class="ghost" onclick="fetchThreadLinks()" title="Download the not-yet-saved files shared via links in this conversation">⬇ Download {{ link_pending }} linked file(s)</button>
+  <button id="threadFetchBtn" type="button" class="ghost" onclick="fetchThreadLinks()" title="Download the files shared via links in this conversation that aren't saved yet">⬇ Download {{ link_pending }} linked file(s)</button>
   {% endif %}
   {% if link_needs_confirm %}
-  <button type="button" class="ghost" onclick="expandAll(true)" title="Large files need your confirmation — open the messages and click ‘Download anyway’" style="color:var(--amber);border-color:var(--amber)">⚠ {{ link_needs_confirm }} large file(s) to confirm</button>
+  <button type="button" class="ghost" onclick="expandAll(true)" title="Large files need your confirmation — open the messages and click ‘Download anyway’" style="color:var(--amber);border-color:var(--amber)">⚠ Confirm {{ link_needs_confirm }} large file(s)</button>
   {% endif %}
   {% if link_saved %}
   <button type="button" class="ghost" onclick="toggleSavedFiles()" title="These link files are already downloaded and kept in your archive">📁 {{ link_saved|length }} file(s) downloaded</button>
@@ -249,7 +249,7 @@
     <button type="button" class="ghost" onclick="closeCompose()">Cancel</button>
     <span id="cMsg" class="note dim"></span>
   </div>
-  <p class="note dim" style="margin:8px 0 0">⚠ Sending is ON — this sends a real email to the recipients above. You'll confirm them first; a copy is saved to Sent.</p>
+  <p class="note dim" style="margin:8px 0 0">⚠ Sending is ON — this sends a real email to the recipients above. You'll confirm them first, and a copy is saved to Sent.</p>
 </div>
 {% endif %}
 

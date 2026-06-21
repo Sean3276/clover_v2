@@ -207,32 +207,61 @@ def _run_archive_bg(folders: list[str], limit: int | None, filters: dict, auto_l
             should_stop=lambda: _status.get("stop", False),
         )
         saved_new = _status.get("session_saved", 0) > 0
-        if saved_new:                               # new mail landed -> refresh the thread index once
-            _log("Rebuilding thread index…")
-            try:
-                threadmod.build_threads(_archive_dir(cfg), log=_log)
-            except Exception as e:
-                _log(f"Thread index rebuild failed: {type(e).__name__}: {e}")
-            _maybe_autorun_comprehension(cfg)       # comprehend the new threads (budget-capped)
-            try:                                    # refresh the contacts directory (signatures + AI)
-                contactsmod.rebuild(_archive_dir(cfg))
-            except Exception as e:
-                _log(f"Contacts refresh failed: {type(e).__name__}: {e}")
-        # Cataloguing share links always runs after new mail; the tickbox adds downloading on top.
         do_fetch = auto_links and not _status.get("stop")
-        if saved_new or do_fetch:
-            if _start_link_task(lambda: _auto_link_task(_archive_dir(cfg), saved_new, do_fetch)):
-                _log("Share links: cataloguing + downloading in the background "
-                     "(oversize files wait for confirmation in Threads; 'Stop links' halts it)."
-                     if do_fetch else "Share links: cataloguing new mail's links in the background.")
-            else:
-                _log("Share-link task skipped — a link task is already running.")
+        # Re-stitch -> fetch share-links/attachments -> comprehend -> contacts. Links BEFORE comprehend so
+        # their text is read; oversize files pause for confirmation and re-comprehend the thread on confirm.
+        _post_import(cfg, _archive_dir(cfg), saved_new, do_fetch)
     except Exception as e:
         _log(f"ERROR: {type(e).__name__}: {e}")
     finally:
         with _lock:
             _status["running"] = False
             _status["prep"] = None
+
+
+def _run_links_inline(arch, harvest: bool = True, fetch: bool = False) -> None:
+    """Run the share-link step SYNCHRONOUSLY (catalogue always; download when asked) so it finishes BEFORE
+    comprehension reads attachment text. Cataloguing is cheap/offline; downloading is size-gated — oversize
+    files pause as needs-confirm and re-comprehend their thread once confirmed. Guarded vs a concurrent task."""
+    with _lock:
+        if _linktask.get("running"):
+            _log("Share-link step skipped — a link task is already running.")
+            return
+        _linktask.update({"running": True, "stop": False})
+    try:
+        if harvest:
+            _log("Cataloguing share links…")
+        if fetch:
+            _log("Downloading share-link files before comprehension (oversize files wait for confirmation)…")
+        _auto_link_task(arch, harvest, fetch)
+    except Exception as e:
+        _log(f"Share-link step failed: {type(e).__name__}: {e}")
+    finally:
+        with _lock:
+            _linktask["running"] = False
+
+
+def _post_import(cfg: dict, arch, saved_new: bool, do_fetch: bool) -> None:
+    """The post-download auto-pipeline, in order: re-stitch threads -> fetch share-links/attachments ->
+    comprehend (now sees attachment text) -> refresh contacts. With no new mail, a requested download just
+    runs in the background. The ORDER is the point — link files must exist before comprehension reads them."""
+    if saved_new:
+        _log("Rebuilding thread index…")
+        try:
+            threadmod.build_threads(arch, log=_log)
+        except Exception as e:
+            _log(f"Thread index rebuild failed: {type(e).__name__}: {e}")
+        _run_links_inline(arch, harvest=True, fetch=do_fetch)   # BEFORE comprehend
+        _maybe_autorun_comprehension(cfg)
+        try:                                                    # signatures + AI titles/phones -> GreenBook
+            contactsmod.rebuild(arch)
+        except Exception as e:
+            _log(f"Contacts refresh failed: {type(e).__name__}: {e}")
+    elif do_fetch:                                              # no new mail — just catch up downloads
+        if _start_link_task(lambda: _auto_link_task(arch, False, True)):
+            _log("Share links: downloading catalogued files in the background ('Stop links' halts it).")
+        else:
+            _log("Share-link task skipped — a link task is already running.")
 
 
 def _parse_date(s: str):
@@ -359,8 +388,9 @@ def _comprehender(cfg: dict):
     am = modelsmod.active_model(cfg)
     backend = am["backend"] if am else _comp_cfg(cfg)["backend"]
     model = (am.get("model") if am else _comp_cfg(cfg).get("model")) or "sonnet"
-    if backend == "claude-cli":
-        return get_comprehender("claude-cli", model=model)
+    timeout = modelsmod.get_timeout(cfg)             # clamped 30..1200
+    if backend in ("claude-cli", "codex-cli"):       # CLI backends take model + timeout
+        return get_comprehender(backend, model=model, timeout=timeout)
     return get_comprehender(backend)
 
 
@@ -420,8 +450,10 @@ def threads_page(request: Request):
     threads = threadmod.read_threads(arch)
     by_root = compmod.latest_by_root(arch)                # link by stable root_id (thread_id changes on new msgs)
     comps = {t["thread_id"]: by_root[t["root_id"]] for t in threads if t.get("root_id") in by_root}
+    _dlidx = compmod.downloaded_link_index(arch)          # read link files once for the whole list
     stale = {t["thread_id"] for t in threads
-             if t.get("root_id") in by_root and compmod.is_stale(t, by_root[t["root_id"]])}
+             if t.get("root_id") in by_root
+             and compmod.is_stale(t, by_root[t["root_id"]], compmod.thread_attach_count(arch, t, _dlidx))}
     # per-thread share-link state (for the 🔗 fetched/pending icon)
     mid2t, path2t = {}, {}
     for t in threads:
@@ -481,8 +513,35 @@ def todo_page(request: Request):
 @app.get("/projects", response_class=HTMLResponse)
 def projects_page(request: Request):
     cfg = cfgmod.load_config()
+    arch = _archive_dir(cfg)
+    projs = projmod.list_projects(arch)
+    merges = projmod.read_merges(arch)
+    name_by_key = {p["key"]: p["name"] for p in projs}
+    merged = [{"from_key": fk, "to_name": name_by_key.get(projmod._resolve_merge(tk, merges), tk)}
+              for fk, tk in merges.items()]
     return templates.TemplateResponse(request, "projects.html",
-                                      {"cfg": cfg, "projects": projmod.list_projects(_archive_dir(cfg))})
+                                      {"cfg": cfg, "projects": projs, "merged": merged})
+
+
+@app.post("/projects/merge")
+def projects_merge(from_key: str = Form(...), to_key: str = Form(...)):
+    """Fold one project into another (operator). The target survives; persisted, survives re-comprehension."""
+    arch = _archive_dir(cfgmod.load_config())
+    by_key = {p["key"]: p for p in projmod.list_projects(arch)}
+    src, dest = (from_key or "").strip(), (to_key or "").strip()
+    if src == dest:
+        return JSONResponse({"ok": False, "message": "That's the same project."})
+    if dest not in by_key:
+        return JSONResponse({"ok": False, "message": "Pick a target project to merge into."})
+    ok = projmod.set_merge(arch, src, dest)
+    return JSONResponse({"ok": ok, "message": f"Merged into {by_key[dest]['name']}." if ok
+                         else "Couldn't merge (would create a loop)."})
+
+
+@app.post("/projects/unmerge")
+def projects_unmerge(from_key: str = Form(...)):
+    ok = projmod.unmerge(_archive_dir(cfgmod.load_config()), (from_key or "").strip())
+    return JSONResponse({"ok": ok, "message": "Un-merged." if ok else "That project wasn't merged."})
 
 
 @app.get("/projects/{key}", response_class=HTMLResponse)
@@ -764,7 +823,7 @@ def thread_view(request: Request, thread_id: str):
     # render only the lightweight header list from threads.jsonl; bodies load on demand below
     return templates.TemplateResponse(request, "thread_view.html", {
         "cfg": cfg, "thread": t, "back": back,
-        "comp": comp, "stale": compmod.is_stale(t, comp),
+        "comp": comp, "stale": compmod.is_stale(t, comp, compmod.thread_attach_count(arch, t)),
         "ai_ready": _backend_available(cfg),
         "link_saved": link_saved, "link_pending": link_pending,
         "link_needs_confirm": link_needs_confirm,
@@ -795,7 +854,8 @@ def thread_comprehend(thread_id: str):
         _record_usage(backend)
         return JSONResponse({"ok": True, "message": "Comprehended.", "classification": rec["classification"]})
     except Exception as e:
-        return JSONResponse({"ok": False, "message": f"{type(e).__name__}: {e}"})
+        msg = str(e) if isinstance(e, RuntimeError) else f"{type(e).__name__}: {e}"   # friendly errors are clean
+        return JSONResponse({"ok": False, "message": msg})
 
 
 # ---- batch comprehension (select by project / date range; runs in the background) -------------------
@@ -899,7 +959,9 @@ def comprehend_status():
     threads = threadmod.read_threads(arch)
     by_root = compmod.latest_by_root(arch)
     done = sum(1 for t in threads if t.get("root_id") in by_root)
-    stale = sum(1 for t in threads if t.get("root_id") in by_root and compmod.is_stale(t, by_root[t["root_id"]]))
+    _dlidx = compmod.downloaded_link_index(arch)
+    stale = sum(1 for t in threads if t.get("root_id") in by_root
+                and compmod.is_stale(t, by_root[t["root_id"]], compmod.thread_attach_count(arch, t, _dlidx)))
     ct = _comptask
     elapsed = (time.time() - ct["started_at"]) if ct.get("started_at") else 0
     rate = (ct.get("done", 0) / elapsed) if (elapsed > 0 and ct.get("done")) else 0   # threads/sec

@@ -15,15 +15,15 @@
   <h1>🛠 Developer controls</h1>
   <p class="devbanner">Internal panel — not part of the end-user app. Reachable at <code>/dev</code> only;
     hide it with <code>CLOVER_DEV=0</code>.</p>
-  <p class="note">Register multiple comprehension AI models, give each a token budget, watch tokens used /
-    left, and switch the <strong>active</strong> model the pipeline uses. Token usage is recorded from each
-    model's actual reported usage after every comprehension run.</p>
+  <p class="note">Register multiple comprehension models, give each a token budget, track tokens used and
+    remaining, and switch the <strong>active</strong> model the pipeline uses. Token usage is recorded from
+    each model's own reported usage after every comprehension run.</p>
 </div></div>
 
 <div class="card">
   <h2>Comprehension models</h2>
   {% if not models %}
-  <p class="note dim">No models registered — the app uses the legacy backend{% if legacy %} (model “{{ legacy }}”){% endif %}. Add one below to track tokens and switch models.</p>
+  <p class="note dim">No models registered — the app is using the legacy backend{% if legacy %} (model “{{ legacy }}”){% endif %}. Add one below to track tokens and switch between models.</p>
   {% else %}
   <div class="tablewrap"><table class="mtable">
     <tr><th>Active</th><th>Label</th><th>Backend</th><th>Model</th><th>Tokens used / budget</th><th>Left</th><th>State</th><th>Actions</th></tr>
@@ -56,11 +56,11 @@
     <div class="row3">
       <div><label for="mlabel">Label</label><input id="mlabel" placeholder="e.g. Sonnet (CLI)"></div>
       <div><label for="mbackend">Backend</label>
-        <select id="mbackend"><option value="claude-cli">claude-cli</option><option value="stub">stub</option></select></div>
+        <select id="mbackend"><option value="claude-cli">claude-cli</option><option value="codex-cli">codex-cli</option><option value="stub">stub</option></select></div>
       <div><label for="mmodel">Model</label><input id="mmodel" placeholder="sonnet / opus / haiku"></div>
     </div>
     <div class="row">
-      <div><label for="mbudget">Token budget (0 = untracked / unlimited)</label><input id="mbudget" type="number" min="0" value="0"></div>
+      <div><label for="mbudget">Token budget (0 = unlimited, no tracking)</label><input id="mbudget" type="number" min="0" value="0"></div>
       <div><label for="menabled">Enabled</label>
         <select id="menabled"><option value="on">yes</option><option value="">no</option></select></div>
     </div>
@@ -73,13 +73,25 @@
 
 <div class="card">
   <h2>Comprehension concurrency</h2>
-  <p class="note">How many threads Phase&nbsp;3 comprehends in parallel. Higher drains the backlog
-    faster, but throughput is ultimately capped by the backend — a local model serializes on one GPU,
-    and CLI backends are rate-limited. Start at 2–4 and watch the error count.</p>
+  <p class="note">How many threads Phase&nbsp;3 comprehends in parallel. A higher number clears the backlog
+    faster, but throughput is ultimately capped by the backend — a local model serializes on one GPU, and
+    CLI backends are rate-limited. Start at 2–4 and watch the error count.</p>
   <div style="display:flex;gap:10px;align-items:flex-end">
     <div><label for="conc">Parallel workers (1–16)</label>
       <input id="conc" type="number" min="1" max="16" value="{{ concurrency }}"></div>
     <button type="button" onclick="saveConc()">Save</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>AI timeout</h2>
+  <p class="note">How long to wait for a single AI step before giving up. The decomposed pipeline makes
+    several cold-start CLI calls per thread, so a slow model can need more than the 300-second default. Raise
+    this if comprehension times out; lower it to fail faster on a stuck backend.</p>
+  <div style="display:flex;gap:10px;align-items:flex-end">
+    <div><label for="aitimeout">Seconds per AI step (30–1200)</label>
+      <input id="aitimeout" type="number" min="30" max="1200" value="{{ timeout_seconds }}"></div>
+    <button type="button" onclick="saveTimeout()">Save</button>
   </div>
 </div>
 
@@ -110,5 +122,6 @@ async function resetUsage(id){ if(!confirm("Reset recorded token usage for this 
 async function del(id, label){ if(!confirm("Delete model “" + label + "”?")) return;
   const r = await post("/dev/models/delete", {id}); msg(r.ok, r.message); if(r.ok) setTimeout(() => location.reload(), 500); }
 async function saveConc(){ const r = await post("/dev/concurrency", {n: $("conc").value || 1}); msg(r.ok, r.message); }
+async function saveTimeout(){ const r = await post("/dev/timeout", {seconds: $("aitimeout").value || 300}); msg(r.ok, r.message); }
 </script>
 {% endblock %}
