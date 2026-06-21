@@ -577,11 +577,15 @@ _SENSITIVITY = {
 
 def _sensitivity(text: str) -> list[str]:
     """Deterministic sensitivity classes detected in the source (privilege / without-prejudice /
-    confidential / personal-data) so downstream handling can gate or mark them. Awareness, not redaction."""
+    confidential / personal-data) so downstream handling can gate or mark them. Awareness, not redaction.
+    ASCII cues match on whole words/phrases (so 'patient' doesn't fire inside 'outpatient', nor 'phi'
+    inside 'morphine') — consistent with _precedence/_verify_facts. CJK cues have no word boundaries,
+    so \\b would never match; use containment for them."""
     low = (text or "").lower()
     out = []
     for cue, cls in _SENSITIVITY.items():
-        if cue in low and cls not in out:
+        hit = re.search(r"\b" + re.escape(cue) + r"\b", low) if cue.isascii() else cue in low
+        if hit and cls not in out:
             out.append(cls)
     return out
 
@@ -614,8 +618,56 @@ def _tok_in(tok: str, s: str) -> bool:
     return re.search(r"(?<![\w.@-])" + re.escape(tok) + r"(?![\w.@-])", s) is not None
 
 
+def _parse_ledger(comprehension: str) -> list[dict]:
+    """Parse the <<<LEDGER>>> tail into structured open-items (queryable: status/supersedes/owner_history),
+    handling the comprehend shape {"open_items":[...]} and the refine array shape. [] if absent/invalid."""
+    _, blob = _split_ledger(comprehension)
+    if not blob:
+        return []
+    data = None
+    for candidate in (blob, (re.search(r"[\[{].*[\]}]", blob, re.S) or [None])[0] if re.search(r"[\[{].*[\]}]", blob, re.S) else None):
+        if candidate:
+            try:
+                data = json.loads(candidate); break
+            except Exception:
+                continue
+    if isinstance(data, dict):
+        data = data.get("open_items") or data.get("items") or []
+    return [d for d in data if isinstance(d, dict)] if isinstance(data, list) else []
+
+
+def _infer_operator(thread: dict) -> str:
+    """Fallback operator identity when none is configured: the most frequent sender across the thread
+    (the mailbox owner is usually the dominant participant). Low-confidence; a configured operator wins."""
+    from collections import Counter
+    c = Counter()
+    for m in thread.get("members", []):
+        em = re.search(r"[\w.+-]+@[\w.-]+", (m.get("from") or "").lower())
+        if em:
+            c[em.group(0)] += 1
+    return c.most_common(1)[0][0] if c else ""
+
+
+_PII_MASK = [
+    (re.compile(r"\bMRN[:#\s-]*\d{3,}\b", re.I), "[MRN]"),
+    (re.compile(r"\b(?:DOB|date of birth)[:\s]*[\d/.\- ]{6,12}", re.I), "[DOB]"),
+    (re.compile(r"\b[STFG]\d{7}[A-Z]\b"), "[NRIC]"),                          # SG NRIC/FIN
+    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), "[EMAIL]"),
+    (re.compile(r"\b(?:member|subscriber|policy|accession)\s*(?:id|no\.?|#)?[:\s#-]*[A-Z0-9]{4,}\b", re.I), "[ID]"),
+    (re.compile(r"\b\+?\d[\d().\s-]{7,}\d\b"), "[PHONE]"),
+]
+
+
+def _minimize(text: str) -> str:
+    """Mask pattern-detectable identifiers (MRN/DOB/NRIC/email/member-id/phone) — 'minimum necessary'
+    redaction for the human-facing layers of a thread classified sensitive (PHI / privileged)."""
+    for rx, rep in _PII_MASK:
+        text = rx.sub(rep, text or "")
+    return text
+
+
 def _clean_actions(raw, date_map: dict | None = None, operator: str = "",
-                   comprehension: str = "", source_text: str = "") -> list[dict]:
+                   comprehension: str = "", source_text: str = "", holidays=()) -> list[dict]:
     """Normalize the model's to-do items to a stable shape and resolve their deadline deterministically:
     an absolute date in due_raw -> ISO due_canonical; a RELATIVE deadline (Net-30, 'within 14 days') is
     resolved against the SOURCE message's sent-date — business/working-day phrasings skip weekends but
@@ -656,6 +708,8 @@ def _clean_actions(raw, date_map: dict | None = None, operator: str = "",
         quote_unverified = bool(legs) and bool(comp_norm) and any(_norm(lg) not in comp_norm for lg in legs)
         if quote_unverified:
             confidence = "review"
+        msg_anchor = next((date_map.get(t) for t in source if date_map.get(t)), "")
+        recurrence = _dl.recurrence(action + " " + str(a.get("due_raw") or ""))   # standing/cadence duty
         due_raw = str(a.get("due_raw") or "").strip()
         iso = extract_dates(due_raw)
         rel = _dl.find_relative_deadlines(due_raw)
@@ -685,19 +739,22 @@ def _clean_actions(raw, date_map: dict | None = None, operator: str = "",
                     due_canonical, due_pending = "", True
                     due_basis = "Net-term — confirm invoice date"
             else:                                         # within -> now/receipt -> source msg date
-                anchor = next((date_map.get(t) for t in source if date_map.get(t)), "")
-                resolved = _dl.resolve(r0, anchor) if anchor else None
+                resolved = _dl.resolve(r0, msg_anchor, holidays) if msg_anchor else None
                 due_canonical = resolved or ""
                 if resolved and r0.get("unit") == "businessdays":
-                    # weekend-aware ESTIMATE, but keep it pending — holidays aren't applied, so never
-                    # present a business/working-day statutory deadline as a confident hard date.
-                    due_pending, due_basis = True, "business-day estimate (holidays not applied — verify)"
+                    if holidays:                          # a holiday calendar IS configured -> confident
+                        due_pending, due_basis = False, "business-day (holiday calendar applied)"
+                    else:                                 # weekend-aware estimate; holidays unapplied
+                        due_pending, due_basis = True, "business-day estimate (holidays not applied — verify)"
                 else:
                     due_pending = resolved is None
-        else:                                             # no absolute/relative date: try a no-year month-day
-            ny = _resolve_no_year(due_raw, next((date_map.get(t) for t in source if date_map.get(t)), ""))
+        else:                                             # no N+unit date: try no-year month-day, then colloquial
+            ny = _resolve_no_year(due_raw, msg_anchor)
+            col = _dl.resolve_colloquial(due_raw, msg_anchor) if not ny else None
             if ny:
                 due_canonical, due_pending, due_basis = ny, False, "year inferred from message date"
+            elif col:
+                due_canonical, due_pending, due_basis = col, False, "resolved vs message date"
             else:
                 due_canonical, due_pending = "", False
         is_mine = a.get("is_mine")
@@ -735,10 +792,12 @@ def _clean_actions(raw, date_map: dict | None = None, operator: str = "",
             "counterparty": counterparty,
             "direction": direction,
             "is_mine": is_mine,
+            "is_mine_confidence": "high",     # downgraded to 'low' by _build_once when operator was inferred
             "due_raw": due_raw,
             "due_canonical": due_canonical,
             "due_pending": due_pending,
             "due_basis": due_basis,
+            "recurrence": recurrence,
             "refs": [str(r).strip() for r in (a.get("refs") or []) if str(r).strip()],
             "status": status,
             "priority": priority,
@@ -753,7 +812,7 @@ def _clean_actions(raw, date_map: dict | None = None, operator: str = "",
     return out
 
 
-def _uncovered_candidates(candidates, actions) -> list[str]:
+def _uncovered_candidates(candidates, actions, cue_set=frozenset({"request", "obligation", "waiver"})) -> list[str]:
     """No-miss backstop for the to-do list (parity with the facts floor backfill): strong obligation
     sentences the deterministic floor surfaced that NO emitted action covers. Conservative — a candidate
     is 'covered' if any of its distinctive tokens (a ref, a >=5-char word, or a CJK run) appears in the
@@ -764,8 +823,8 @@ def _uncovered_candidates(candidates, actions) -> list[str]:
     hay += " " + " ".join(str(r) for a in (actions or []) for r in (a.get("refs") or [])).lower()
     out = []
     for c in (candidates or []):
-        if not (set(c.get("cues") or []) & {"request", "obligation", "waiver"}):
-            continue                                       # only STRONG obligation cues qualify
+        if not (set(c.get("cues") or []) & cue_set):
+            continue
         text = str(c.get("text") or "")
         refs = {r.lower() for r in extract_refs(text)}
         words = set(re.findall(r"[a-z]{5,}", text.lower())) | set(re.findall(r"[一-鿿]{2,}", text))
@@ -777,6 +836,50 @@ def _uncovered_candidates(candidates, actions) -> list[str]:
         if not covered:
             out.append(text)
     return out[:10]
+
+
+def _action_haystack(actions) -> str:
+    """The text an action covers — its own words/about/quote plus its refs — lowercased, for coverage checks."""
+    hay = " ".join(str(a.get(k) or "") for a in (actions or []) for k in ("action", "about", "quote")).lower()
+    return hay + " " + " ".join(str(r) for a in (actions or []) for r in (a.get("refs") or [])).lower()
+
+
+def _unreconciled_open_items(open_items, actions) -> list[str]:
+    """Open ledger items (the cross-chunk no-miss record the REFINE pass maintains) that NO emitted action
+    covers — a silent miss the ledger exists to prevent. Matched on a shared ref or >=2 distinctive tokens;
+    items already done/closed/superseded never flag. Recall-first: surfaced so the chain doesn't die in JSON."""
+    from .eval.extractors import extract_refs
+    hay = _action_haystack(actions)
+    out = []
+    for it in (open_items or []):
+        if str(it.get("status") or "open").lower() in ("done", "closed", "resolved", "superseded", "cancelled"):
+            continue
+        matter = str(it.get("matter") or it.get("item") or it.get("desc") or it.get("title") or "").strip()
+        oid = str(it.get("id") or "").strip()
+        refs = {r.lower() for r in extract_refs(matter + " " + oid)}
+        words = set(re.findall(r"[a-z]{5,}", matter.lower())) | set(re.findall(r"[一-鿿]{2,}", matter))
+        if not (refs or words):
+            continue
+        covered = any(r in hay for r in refs) or sum(1 for w in words if w in hay) >= 2
+        if not covered:
+            out.append(matter or oid)
+    return out[:10]
+
+
+def _implied_action(text: str) -> dict:
+    """Turn an uncovered implied-floor obligation into a provisional REVIEW action — the no-miss net, not
+    just a triage hint, so every floor-caught duty is a dismissible to-do. Carries the floor's paired date."""
+    due = ""
+    if " — by " in text:
+        text, due = text.split(" — by ", 1)
+        due = due.strip()
+    iso = due if re.match(r"^\d{4}-\d\d-\d\d$", due) else ""
+    return {"action": text.strip(), "about": "implied obligation — review", "owner": "", "counterparty": "",
+            "direction": "unknown", "is_mine": None, "due_raw": due, "due_canonical": iso,
+            "due_pending": False, "due_basis": "implied-floor" if iso else "",
+            "recurrence": "", "refs": [], "status": "open", "priority": "normal",
+            "source": "", "quote": "", "quote_unverified": False, "confidence": "review",
+            "false_positive_suspected": False, "implied": True, "owner_history": []}
 
 
 def _clean_tags(raw, profile: Profile | None) -> list[str]:
@@ -812,6 +915,8 @@ def _issue_str(i) -> str:
 
 
 def _build_once(archive, thread, backend, profile, max_chars, model, operator: str = ""):
+    operator_inferred = not operator                     # configured operator vs dominant-sender guess
+    operator = operator or _infer_operator(thread)       # out-of-the-box is_mine: dominant-sender fallback
     msgs = _thread_messages(archive, thread)
     full = "\n\n----\n\n".join(msgs)
     if len(msgs) <= 1 or len(full) <= max_chars:
@@ -849,6 +954,8 @@ def _build_once(archive, thread, backend, profile, max_chars, model, operator: s
         if _miss:
             facts.setdefault(_k, []).extend(_miss)
             backfilled[_k] = _miss
+    from .eval.extractors import extract_percents as _extpct
+    facts["percents"] = _extpct(floor_src)                       # rates/retention/discounts/equity (floor)
 
     # SUMMARY pass (decomposed) — the narrative layer + facet tags, grounded in the comprehension.
     sraw = backend.generate("distill_summary", cprompts.distill_summary(comprehension, _facet_vocab(profile)),
@@ -859,10 +966,46 @@ def _build_once(archive, thread, backend, profile, max_chars, model, operator: s
     # thread into itemized cited actions, then deadlines are resolved deterministically in _clean_actions.
     from .eval import action_floor as _afloor
     action_cands = _afloor.action_candidates(floor_src)
-    araw = backend.generate("actions", cprompts.actions(comprehension, _candidate_sheet(action_cands), operator),
+    implied_cands = _afloor.implied_candidates(floor_src)        # cross-message implied-duty floor
+    # feed BOTH strong AND implied candidates into the AI's no-miss checklist (implied was previously inert)
+    araw = backend.generate("actions",
+                            cprompts.actions(comprehension, _candidate_sheet(action_cands + implied_cands), operator),
                             schema=_ACTIONS_SCHEMA) or {}
     actions = _clean_actions(araw.get("actions") if isinstance(araw, dict) else None,
-                             date_map, operator, comprehension, full)
+                             date_map, operator, comprehension, full, getattr(profile, "holidays", ()))
+    # coverage is measured against the AI's OWN actions first, so the deterministic backfill below can't
+    # mask a real miss. Each floor tier that the AI dropped becomes load-bearing, not an inert count.
+    strong_uncovered = _uncovered_candidates(action_cands, actions)
+    soft_uncovered = _uncovered_candidates(_afloor.soft_candidates(floor_src), actions, frozenset({"soft"}))
+    implied_uncovered = _uncovered_candidates(implied_cands, actions, frozenset({"implied"}))
+    open_items = _parse_ledger(comprehension)                    # structured cross-chunk ledger
+    open_items_unreconciled = _unreconciled_open_items(open_items, actions)
+    implied = [c["text"] for c in implied_cands]
+    # BACKFILL: an implied duty the AI dropped becomes a provisional review to-do (reaches a human as a
+    # dismissible row, not just a hint). Done before minimization so a sensitive thread's row is masked too.
+    for _txt in implied_uncovered:
+        actions.append(_implied_action(_txt))
+    # who-owes-whom rests on the operator identity; when that was GUESSED (dominant sender, not configured)
+    # the is_mine arrow is a guess, not an assertion — mark it low-confidence so the UI never over-claims.
+    if operator_inferred:
+        for _a in actions:
+            if _a.get("is_mine") is not None:
+                _a["is_mine_confidence"] = "low"
+
+    # PHI / privilege MINIMIZATION: if the thread is sensitive, mask pattern-identifiers in the
+    # human-facing layers (abstract/summary/actions/contacts) — 'minimum necessary', awareness->protection.
+    sensitivity = _sensitivity(full)
+    minimized = bool(set(sensitivity) & {"personal-data", "privileged"})
+    abstract = str(sraw.get("abstract") or "").strip()
+    summary = str(sraw.get("summary") or "").strip()
+    contacts = _clean_contacts(contacts_raw)
+    if minimized:
+        abstract, summary = _minimize(abstract), _minimize(summary)
+        for _a in actions:
+            _a["action"], _a["quote"], _a["about"] = _minimize(_a["action"]), _minimize(_a["quote"]), _minimize(_a["about"])
+        for _c in contacts:
+            for _k in ("name", "phone", "email"):
+                _c[_k] = _minimize(_c.get(_k, ""))
 
     ruled = rulesmod.match(archive, text=full, project=facts.get("project", ""),
                            senders=[m.get("from", "") for m in thread.get("members", [])])
@@ -877,21 +1020,27 @@ def _build_once(archive, thread, backend, profile, max_chars, model, operator: s
         "subject": thread.get("subject"),
         "source": thread_sig(thread),                    # thread state when comprehended (staleness check)
         "comprehension": comprehension,
-        "abstract": str(sraw.get("abstract") or "").strip(),
-        "summary": str(sraw.get("summary") or "").strip(),
+        "abstract": abstract,
+        "summary": summary,
         "event": str(sraw.get("event") or "").strip()[:30],
         "facts": facts,
         "fact_sources": fact_sources,                    # [{field, value, cite}] — [Mn] traceability
-        "contacts": _clean_contacts(contacts_raw),
+        "contacts": contacts,
         "tags": _clean_tags(sraw.get("tags"), profile),
         "actions": actions,
+        "open_items": open_items,                         # structured ledger (status/supersedes/owner_history)
         "classification": classification,
         "method": method, "model": model, "profile": profile.name,
         "verified": {"facts_ok": not dropped, "dropped_facts": dropped,
                      "grounded": bool(comprehension), "backfilled": backfilled,
                      "action_candidates": len(action_cands),
-                     "action_floor_uncovered": _uncovered_candidates(action_cands, actions),
-                     "sensitivity": _sensitivity(full)},
+                     "action_floor_uncovered": strong_uncovered,
+                     "action_floor_soft_uncovered": soft_uncovered,
+                     "implied_candidates": implied,
+                     "implied_uncovered": implied_uncovered,
+                     "open_items_unreconciled": open_items_unreconciled,
+                     "operator": operator, "operator_inferred": operator_inferred,
+                     "sensitivity": sensitivity, "minimized": minimized},
     }
     return rec, full
 
@@ -931,27 +1080,35 @@ def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Pro
     dq = backend.generate("verify_distill",
                           cprompts.distill_qa(rec["comprehension"], rec["abstract"], rec["summary"],
                                               rec["event"]), schema=_DISTILL_QA_SCHEMA) or {}
-    rec["verified"].update({"abstract_ok": bool(dq.get("abstract_ok", True)),
-                            "summary_ok": bool(dq.get("summary_ok", True)),
-                            "event_ok": bool(dq.get("event_ok", True))})
-    distill_passed = bool(dq.get("passed", True)) and all(
+    # FAIL CLOSED: a missing/empty distill-QA payload (backend error, unparseable {} ) must NOT score as
+    # a pass — absent verification is not verification. Defaults are False, so silence routes to review.
+    rec["verified"].update({"abstract_ok": bool(dq.get("abstract_ok", False)),
+                            "summary_ok": bool(dq.get("summary_ok", False)),
+                            "event_ok": bool(dq.get("event_ok", False))})
+    distill_passed = bool(dq.get("passed", False)) and all(
         rec["verified"][k] for k in ("abstract_ok", "summary_ok", "event_ok"))
 
     # the TASK is COMPLETE only when BOTH the comprehension and every distilled layer verify; detected
     # sensitive content (privilege / without-prejudice / PHI) ALSO gates to human review (not inert).
     sens = rec["verified"].get("sensitivity") or []
     uncovered = rec["verified"].get("action_floor_uncovered") or []
+    implied_unc = rec["verified"].get("implied_uncovered") or []
+    orphans = rec["verified"].get("open_items_unreconciled") or []
     unverified = [a for a in (rec.get("actions") or []) if a.get("quote_unverified")]
     issues = comp["issues"] + [_issue_str(i) for i in (dq.get("issues") or [])]
     if sens:
         issues = issues + [f"sensitive content ({', '.join(sens)}) — route to human review"]
     if uncovered:
         issues = issues + [f"{len(uncovered)} floor obligation(s) not covered by an action — review"]
+    if implied_unc:
+        issues = issues + [f"{len(implied_unc)} implied obligation(s) the floor caught — added as review to-dos"]
+    if orphans:
+        issues = issues + [f"{len(orphans)} open ledger item(s) with no matching action — review"]
     if unverified:
         issues = issues + [f"{len(unverified)} action(s) with an unverifiable quote — possible fabrication"]
     rec["qaqc"] = {**comp, "distill_passed": distill_passed, "issues": issues[:8],
                    "needs_review": (not comp["passed"]) or (not distill_passed)
-                   or bool(sens) or bool(uncovered) or bool(unverified)}
+                   or bool(sens) or bool(uncovered) or bool(implied_unc) or bool(orphans) or bool(unverified)}
     return rec
 
 

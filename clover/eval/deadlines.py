@@ -72,20 +72,84 @@ def _add_months(d: date, n: int) -> date:
     return date(y, m, min(d.day, calendar.monthrange(y, m)[1]))
 
 
-def _add_business_days(d: date, n: int) -> date:
-    """Add n business days (weekends skipped). Holidays are NOT applied — callers flag that caveat."""
+def _add_business_days(d: date, n: int, holidays=()) -> date:
+    """Add n business days (weekends + any configured holidays skipped)."""
+    hol = set(holidays or ())
     step = 1 if n >= 0 else -1
     remaining = abs(n)
     while remaining:
         d += timedelta(days=step)
-        if d.weekday() < 5:            # Mon-Fri
+        if d.weekday() < 5 and d.isoformat() not in hol:    # Mon-Fri and not a holiday
             remaining -= 1
     return d
 
 
-def resolve(rel: dict, anchor) -> str | None:
+_WEEKDAYS = {"monday": 0, "mon": 0, "tuesday": 1, "tue": 1, "tues": 1, "wednesday": 2, "wed": 2,
+             "thursday": 3, "thu": 3, "thurs": 3, "friday": 4, "fri": 4, "saturday": 5, "sat": 5,
+             "sunday": 6, "sun": 6}
+_WEEKDAY_RE = re.compile(r"\b(next\s+|this\s+|by\s+|on\s+)?(" + "|".join(_WEEKDAYS) + r")\b", re.I)
+_NTH_RE = re.compile(r"\b(?:by\s+|on\s+|the\s+)?(\d{1,2})(?:st|nd|rd|th)\b", re.I)
+_RECUR = re.compile(r"\b(daily|every day|weekly|every week|fortnightly|biweekly|monthly|every month|"
+                    r"quarterly|every quarter|annually|yearly|every year)\b", re.I)
+_RECUR_CN = ["每天", "每日", "每周", "每月", "每季", "每年", "按月", "按季"]
+
+
+def recurrence(text: str) -> str:
+    """A cadence label ('daily/weekly/monthly/quarterly/annual') if the text states a recurring duty, else ''."""
+    t = (text or "").lower()
+    m = _RECUR.search(t)
+    if m:
+        w = m.group(1)
+        return ("weekly" if "week" in w or "fortnight" in w or "biweek" in w else
+                "monthly" if "month" in w else "quarterly" if "quarter" in w else
+                "annual" if ("year" in w or "annual" in w) else "daily")
+    for c in _RECUR_CN:
+        if c in (text or ""):
+            return ("weekly" if c in ("每周",) else "monthly" if c in ("每月", "按月") else
+                    "quarterly" if c in ("每季", "按季") else "annual" if c == "每年" else "daily")
+    return ""
+
+
+def resolve_colloquial(due_raw: str, anchor) -> str | None:
+    """Resolve colloquial deadlines against the citing message's date (anchor): EOD/COB/today, tomorrow,
+    a weekday ('by Friday'/'next Friday'), or a bare day-of-month ('by the 20th'). None if not colloquial."""
+    if not anchor:
+        return None
+    if isinstance(anchor, str):
+        try:
+            anchor = date.fromisoformat(anchor[:10])
+        except ValueError:
+            return None
+    low = (due_raw or "").lower()
+    if any(k in low for k in ("eod", "cob", "end of day", "by close", "today", "end of business")):
+        return anchor.isoformat()
+    if "tomorrow" in low:
+        return (anchor + timedelta(days=1)).isoformat()
+    mw = _WEEKDAY_RE.search(low)
+    if mw:
+        target = _WEEKDAYS[mw.group(2)]
+        ahead = (target - anchor.weekday()) % 7          # 0 = the anchor day itself
+        if (mw.group(1) or "").strip() == "next":         # 'next <weekday>' = the FOLLOWING week
+            ahead += 7
+        return (anchor + timedelta(days=ahead)).isoformat()
+    mn = _NTH_RE.search(low)
+    if mn:
+        day = int(mn.group(1))
+        if 1 <= day <= 31:
+            import calendar as _cal
+            mo, yr = anchor.month, anchor.year
+            if day < anchor.day:                          # already past this month -> next month
+                mo += 1
+                if mo > 12:
+                    mo, yr = 1, yr + 1
+            day = min(day, _cal.monthrange(yr, mo)[1])
+            return date(yr, mo, day).isoformat()
+    return None
+
+
+def resolve(rel: dict, anchor, holidays=()) -> str | None:
     """Compute the ISO due date for a relative deadline given an anchor date (ISO str or date),
-    or None when no anchor / not computable."""
+    or None when no anchor / not computable. ``holidays`` (ISO strings) are skipped for business days."""
     if not anchor:
         return None
     if isinstance(anchor, str):
@@ -98,7 +162,7 @@ def resolve(rel: dict, anchor) -> str | None:
     if unit == "days":
         return (anchor + timedelta(days=n)).isoformat()
     if unit == "businessdays":
-        return _add_business_days(anchor, n).isoformat()
+        return _add_business_days(anchor, n, holidays).isoformat()
     if unit == "weeks":
         return (anchor + timedelta(weeks=n)).isoformat()
     if unit == "months":

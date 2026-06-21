@@ -62,6 +62,6 @@ def test_emails_lowercased_sorted_deduped():
 
 def test_extract_atoms_shape():
     out = ex.extract_atoms("RFI-1 due 2025-01-02 for $5 from a@x.com")
-    assert set(out) == {"refs", "dates", "amounts", "emails"}
+    assert set(out) == {"refs", "dates", "amounts", "emails", "percents"}
     assert out["refs"] == ["RFI-1"] and out["dates"] == ["2025-01-02"]
     assert out["amounts"] == [{"currency": "USD", "value": "5"}] and out["emails"] == ["a@x.com"]

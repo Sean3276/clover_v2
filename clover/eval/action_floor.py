@@ -104,3 +104,42 @@ def action_candidates(text: str) -> list[dict]:
             cats = sorted(set(cats) | {"request", "question"})
         out.append({"text": s[:200], "cues": cats, "has_deadline": "deadline" in cats})
     return out
+
+
+_PRECOND_EN = ["required before", "precondition", "prerequisite", "prior to", "before handover",
+               "cannot proceed until", "needed before", "must be completed before", "is a condition of",
+               "before we can", "before it can", "before sign-off", "before go-live"]
+_PRECOND_CN = ["的前提", "之前完成", "视为放弃", "逾期", "须先", "先决条件"]
+
+
+def implied_candidates(text: str) -> list[dict]:
+    """Deterministic backstop for cross-message IMPLIED obligations (the costliest silent miss): a stated
+    PRECONDITION plus a date in the thread implies a dated duty no single sentence phrases as a request.
+    Recall-first triage surface — pairs the precondition with the nearest thread date."""
+    from .extractors import extract_dates
+    dates = extract_dates(text or "")
+    out, seen = [], set()
+    for m in _SENT.finditer(text or ""):
+        s = m.group(0).strip()
+        low = s.lower()
+        if (any(c in low for c in _PRECOND_EN) or any(c in s for c in _PRECOND_CN)) and s[:160] not in seen:
+            seen.add(s[:160])
+            due = f" — by {dates[0]}" if dates else ""
+            out.append({"text": s[:160] + due, "cues": ["implied"]})
+    return out
+
+
+def soft_candidates(text: str) -> list[dict]:
+    """A WEAKER recall tier: sentences carrying a weak/ambiguous request noun ('review', 'update',
+    'proceed'…) that did NOT qualify as strong. Surfaced for one-click triage, never gating — so a
+    cue-less-but-real soft ask isn't lost, without flooding the strong no-miss path."""
+    strong = {c["text"] for c in action_candidates(text)}
+    out = []
+    for m in _SENT.finditer(text or ""):
+        s = m.group(0).strip()
+        if len(s) < 3 or s[:200] in strong:
+            continue
+        low = s.lower()
+        if _has(low, s, _WEAK_REQ) and not _has(low, s, _COURTESY):
+            out.append({"text": s[:200], "cues": ["soft"], "has_deadline": False})
+    return out

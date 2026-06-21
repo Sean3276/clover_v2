@@ -31,6 +31,7 @@ from clover import projects as projmod
 from clover import rules as rulesmod
 from clover import sender as sendermod
 from clover import threads as threadmod
+from clover import todo as todomod
 from clover.comprehenders import get_comprehender
 from clover.errors import friendly_conn_error
 from clover.paths import auto_clover_root, ensure_runtime
@@ -457,6 +458,23 @@ def threads_page(request: Request):
         "projects": projmod.list_projects(arch),
         "link_stats": link_stats,
         "link_total": sum(link_stats.values()),
+    })
+
+
+@app.get("/todo", response_class=HTMLResponse)
+def todo_page(request: Request):
+    """The "Need You" inbox: the operator's own open obligations across every comprehended thread,
+    ranked by urgency. The cross-thread render of the to-do list the comprehension pass computes."""
+    cfg = cfgmod.load_config()
+    arch = _archive_dir(cfg)
+    today = date.today().isoformat()
+    items = todomod.needyou_items(arch, today)
+    overdue = sum(1 for i in items if i["overdue"])
+    soon = sum(1 for i in items if i["days_left"] is not None and 0 <= i["days_left"] <= 7)
+    undated = sum(1 for i in items if i["days_left"] is None)
+    return templates.TemplateResponse(request, "todo.html", {
+        "cfg": cfg, "items": items, "today": today,
+        "counts": {"total": len(items), "overdue": overdue, "soon": soon, "undated": undated},
     })
 
 

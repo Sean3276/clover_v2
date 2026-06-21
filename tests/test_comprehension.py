@@ -590,6 +590,38 @@ def test_sensitivity_flag_detects_without_prejudice(tmp_path):
     assert any("prejudice" in s.lower() for s in rec["verified"]["sensitivity"])
 
 
+# ---------------------------------------------------------------- sensitivity: word-boundary matching
+def test_sensitivity_outpatient_not_personal_data():
+    # 'patient' is a personal-data cue but must NOT fire inside 'outpatient' (substring false positive)
+    assert "personal-data" not in cp._sensitivity("The outpatient clinic reopened on Monday.")
+
+
+def test_sensitivity_phi_not_inside_other_words():
+    # short cue 'phi' must not fire inside 'morphine'/'graphics' (substring false positive)
+    assert "personal-data" not in cp._sensitivity("The morphine dosage and graphics were attached.")
+
+
+def test_sensitivity_patient_record_is_personal_data():
+    # the whole word 'patient' must still trigger personal-data
+    assert "personal-data" in cp._sensitivity("Please review the patient record before the call.")
+
+
+def test_sensitivity_prior_auth_phrase_still_matches():
+    # multi-word ASCII cue 'prior auth' must still match as a phrase
+    assert "personal-data" in cp._sensitivity("Submit the prior auth form today.")
+
+
+def test_sensitivity_multiword_phrase_still_matches():
+    # a longer phrase cue must match as a phrase across the words
+    assert "personal-data" in cp._sensitivity("This memo contains protected health information.")
+
+
+def test_sensitivity_cjk_cue_uses_containment():
+    # CJK cues have no word boundaries, so \b would never match — containment must be preserved
+    assert "personal-data" in cp._sensitivity("附件是病历资料。")
+    assert "without-prejudice" in cp._sensitivity("这是调解会议记录。")
+
+
 def test_generic_profile_is_industry_neutral():
     from clover.profiles import get_profile
     p = get_profile("generic")

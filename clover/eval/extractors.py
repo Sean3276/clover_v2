@@ -185,6 +185,23 @@ def extract_amounts(text: str) -> list[dict]:
     return out
 
 
+# ── percentages (rates/retention/discounts/equity) ──────────────────────────────────
+_PCT = re.compile(r"(\d{1,3}(?:\.\d+)?)\s?%|(\d{1,3}(?:\.\d+)?)\s?(?:percent|per cent|pct)\b"
+                  r"|百分之\s?(\d{1,3}(?:\.\d+)?)", re.I)
+
+
+def extract_percents(text: str) -> list[str]:
+    """Canonical ``N%`` values (rates, retention, discounts, equity). Full-width ％ normalised; CN 百分之."""
+    t = _norm_fw(text or "")
+    out, seen = [], set()
+    for m in _PCT.finditer(t):
+        v = m.group(1) or m.group(2) or m.group(3)
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v + "%")
+    return out
+
+
 # ── email parties ───────────────────────────────────────────────────────────────────
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 
@@ -196,4 +213,5 @@ def extract_emails(text: str) -> list[str]:
 def extract_atoms(text: str) -> dict:
     """All T1 atom classes for a blob of text — the deterministic recall floor for one source."""
     return {"refs": extract_refs(text), "dates": extract_dates(text),
-            "amounts": extract_amounts(text), "emails": extract_emails(text)}
+            "amounts": extract_amounts(text), "emails": extract_emails(text),
+            "percents": extract_percents(text)}

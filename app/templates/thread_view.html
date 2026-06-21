@@ -54,6 +54,26 @@
   .csum{font-size:15px;font-weight:600;margin:0 0 6px;color:var(--ink)}
   .cfacts{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--sub)}
   .cfacts b{color:var(--ink)}
+  .acts{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+  .actshd{font-size:13px;font-weight:700;color:var(--ink);margin-bottom:6px}
+  .act{padding:7px 9px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:var(--card2)}
+  .act.mine{border-color:rgba(52,210,123,.4);background:rgba(52,210,123,.07)}
+  .act.done .acttext{text-decoration:line-through;opacity:.6}
+  .actmain{display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}
+  .acttext{font-size:13.5px;color:var(--ink)}
+  .pill{font-size:10px;font-weight:800;border-radius:4px;padding:1px 6px;flex:none;text-transform:uppercase;letter-spacing:.3px}
+  .pill.you{background:var(--clover-d);color:#04140b}
+  .pill.you.guess{background:rgba(52,210,123,.22);color:var(--clover-d);border:1px solid rgba(52,210,123,.5)}
+  .pill.hi{background:rgba(240,178,74,.18);color:var(--amber);border:1px solid rgba(240,178,74,.4)}
+  .pill.imp{background:rgba(150,170,255,.16);color:#9bb0ff;border:1px solid rgba(150,170,255,.35)}
+  .actmeta{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;font-size:11px;align-items:center}
+  .actmeta .st{font-weight:700;border-radius:4px;padding:0 6px}
+  .actmeta .st.blocked,.actmeta .st.rev{color:var(--amber);background:rgba(240,178,74,.14)}
+  .actmeta .st.superseded{color:var(--sub);text-decoration:line-through}
+  .actmeta .due{font-weight:700;color:var(--ink)}
+  .actmeta .src{font-family:ui-monospace,monospace;opacity:.7}
+  .actmeta .ohist{font-family:ui-monospace,monospace;opacity:.75;font-size:10.5px}
+  .acts.soft{margin-top:8px;border-top:none;padding-top:0}
   .scrollnav{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:6px;z-index:60}
   .scrollnav button{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--card2);
     color:var(--ink);font-size:17px;line-height:1;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.25)}
@@ -99,6 +119,44 @@
     {% if comp.facts.dates %}<span><b>Dates:</b> {{ comp.facts.dates|join(', ') }}</span>{% endif %}
     {% if comp.facts.parties %}<span><b>Parties:</b> {{ comp.facts.parties|join(', ') }}</span>{% endif %}
   </div>
+  {% endif %}
+  {% if comp.actions %}
+  <div class="acts">
+    <div class="actshd">✅ To-do <span class="note">· {{ comp.actions|length }} item(s)</span></div>
+    {% for a in comp.actions %}
+    <div class="act{% if a.is_mine %} mine{% endif %}{% if a.status == 'done' %} done{% endif %}">
+      <div class="actmain">
+        {% if a.is_mine %}<span class="pill you{% if a.is_mine_confidence == 'low' %} guess{% endif %}" title="{% if a.is_mine_confidence == 'low' %}owner inferred from dominant sender — verify{% else %}this obligation is yours{% endif %}">Need you{% if a.is_mine_confidence == 'low' %}?{% endif %}</span>{% endif %}
+        {% if a.priority == 'high' %}<span class="pill hi">high</span>{% endif %}
+        {% if a.implied %}<span class="pill imp" title="implied / cross-message obligation">implied</span>{% endif %}
+        <span class="acttext">{{ a.action }}{% if a.about %} <span class="note">— {{ a.about }}</span>{% endif %}</span>
+      </div>
+      <div class="actmeta note">
+        {% if a.due_canonical %}<span class="due" title="verbatim: {{ a.due_raw }}">📅 {{ a.due_canonical }}{% if a.due_pending %} (pending){% endif %}</span>
+        {% elif a.due_raw %}<span class="due">📅 {{ a.due_raw }}</span>{% endif %}
+        {% if a.recurrence %}<span title="recurring obligation">🔁 {{ a.recurrence }}</span>{% endif %}
+        {% if a.status and a.status != 'open' %}<span class="st {{ a.status }}">{{ a.status }}</span>{% endif %}
+        {% if a.refs %}<span>{{ a.refs|join(', ') }}</span>{% endif %}
+        {% if a.confidence == 'review' %}<span class="st rev" title="low confidence — verify against source">⚠ review</span>{% endif %}
+        {% if a.quote_unverified %}<span class="st rev" title="quote not found verbatim in thread">⚠ quote</span>{% endif %}
+        {% if a.source %}<span class="src" title="proof: {{ a.quote }}">{{ a.source }}</span>{% endif %}
+        {% if a.owner_history and a.owner_history|length > 1 %}<span class="ohist" title="ownership hand-off chain">{% for h in a.owner_history %}{{ h.owner }}{% if not loop.last %} → {% endif %}{% endfor %}</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if comp.verified and comp.verified.implied_candidates %}
+  <details class="acts soft" style="margin-top:8px">
+    <summary class="note" style="cursor:pointer">🔎 {{ comp.verified.implied_candidates|length }} possible implied obligation(s) — review</summary>
+    <ul class="note" style="margin:6px 0 0;padding-left:18px">{% for c in comp.verified.implied_candidates %}<li>{{ c }}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+  {% if comp.verified and comp.verified.action_floor_soft_uncovered %}
+  <details class="acts soft" style="margin-top:8px">
+    <summary class="note" style="cursor:pointer">🔎 {{ comp.verified.action_floor_soft_uncovered|length }} soft/indirect ask(s) the AI didn't action — review</summary>
+    <ul class="note" style="margin:6px 0 0;padding-left:18px">{% for c in comp.verified.action_floor_soft_uncovered %}<li>{{ c }}</li>{% endfor %}</ul>
+  </details>
   {% endif %}
   {% if comp.tags %}<div class="cbadges" style="margin-top:6px">{% for tag in comp.tags %}<span class="cbadge" title="facet tag">🏷 {{ tag }}</span>{% endfor %}</div>{% endif %}
   {% if comp.verified and not comp.verified.facts_ok %}<p class="note dim" style="margin-top:8px">⚠ Some extracted facts weren't found in the thread and were dropped.</p>{% endif %}

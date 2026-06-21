@@ -18,6 +18,7 @@ class Profile:
     precedence: list = field(default_factory=list)   # ordered deterministic tie-break rules
     facets: dict = field(default_factory=dict)       # orthogonal tag vocabularies: facet -> [allowed values]
     ref_examples: list = field(default_factory=list) # this domain's example reference identifiers (facts prompt)
+    holidays: list = field(default_factory=list)      # ISO dates skipped when resolving business-day deadlines
 
     def domain_names(self) -> list:
         return list(self.domains)
@@ -107,7 +108,70 @@ GENERIC = Profile(
     ref_examples=["invoice no.", "PO no.", "ticket no.", "case/matter no.", "order no.", "ref no."],
 )
 
-PROFILES = {CONSTRUCTION.name: CONSTRUCTION, GENERIC.name: GENERIC}
+# Per-industry presets (the engine is profile-driven; these seed taxonomy/precedence/refs/facets for the
+# lowest-scoring non-construction domains so a tenant isn't stuck on GENERIC).
+LEGAL = Profile(
+    name="legal",
+    description="Law firm view: Matter vs Practice; statutory/court deadlines and privilege are first-class.",
+    domains={"Matter": ["Litigation", "Advisory", "Corporate", "Compliance", "Filing & Court"],
+             "Practice": ["Billing", "Client Intake", "Conflicts", "Admin"]},
+    safety_net="Filing & Court",
+    precedence=[
+        {"if_any": ["unless order", "peremptory", "struck out", "debarred", "limitation", "time-barred",
+                    "statute-barred", "default judgment", "return date", "deemed served"],
+         "then": "Filing & Court"},
+        {"if_any": ["without prejudice", "privileged", "undertaking", "settlement", "discovery"],
+         "then": "Litigation"}],
+    facets={"Privilege": ["Privileged", "Without Prejudice", "Subject to Contract", "Open"],
+            "Stage": ["Pre-action", "Pleadings", "Discovery", "Trial", "Appeal", "Settled"],
+            "Artifact": ["Pleading", "Affidavit", "Exhibit", "Order", "Letter", "Contract"]},
+    ref_examples=["case/suit no.", "docket no.", "summons no.", "exhibit P-", "clause no.", "section no."],
+)
+HEALTHCARE = Profile(
+    name="healthcare",
+    description="Healthcare admin view: Clinical vs Admin; patient safety is the costliest miss; PHI-aware.",
+    domains={"Clinical": ["Scheduling", "Authorization", "Results", "Referral", "Safety"],
+             "Admin": ["Billing", "Credentialing", "Compliance", "HR"]},
+    safety_net="Safety",
+    precedence=[
+        {"if_any": ["adverse event", "patient safety", "sentinel", "recall", "critical result", "incident"],
+         "then": "Safety"},
+        {"if_any": ["prior authorization", "prior auth", "denial", "appeal", "credentialing"],
+         "then": "Authorization"}],
+    facets={"Sensitivity": ["PHI", "De-identified"],
+            "Stage": ["Requested", "Scheduled", "Pending Auth", "Completed"],
+            "Artifact": ["Referral", "Authorization", "Lab Result", "Clinical Note", "Claim"]},
+    ref_examples=["MRN", "accession no.", "auth no.", "claim no.", "member id", "referral no."],
+)
+AGENCY = Profile(
+    name="agency",
+    description="Marketing/creative agency view: Delivery vs Account; approval rounds and go-live dates.",
+    domains={"Delivery": ["Brief", "Concept", "Production", "Approval", "Launch"],
+             "Account": ["Billing", "Scope", "New Business", "Admin"]},
+    safety_net="Approval",
+    precedence=[
+        {"if_any": ["go live", "launch", "publish", "embargo", "air date", "push live"], "then": "Launch"},
+        {"if_any": ["sign off", "sign-off", "approval", "client sign-off", "legal review"], "then": "Approval"}],
+    facets={"Channel": ["Social", "Web", "Email", "Print", "Video", "OOH"],
+            "Stage": ["Brief", "In Review", "Approved", "Revisions", "Live"],
+            "Asset": ["Deck", "Copy", "Design", "Video", "Banner", "Brief"]},
+    ref_examples=["job no.", "PO no.", "SOW no.", "brief no.", "version", "round"],
+)
+FINANCE = Profile(
+    name="finance",
+    description="Finance / AP-AR view: Payables vs Receivables; payment terms and overdue obligations.",
+    domains={"Payables": ["Invoice", "Approval", "Payment", "Dispute", "Reconciliation"],
+             "Receivables": ["Billing", "Collection", "Credit", "Refund"]},
+    safety_net="Payment",
+    precedence=[
+        {"if_any": ["overdue", "past due", "final notice", "demand", "逾期", "拖欠"], "then": "Collection"},
+        {"if_any": ["invoice", "payment", "net 30", "net-30", "remittance", "purchase order"], "then": "Payment"}],
+    facets={"Stage": ["Received", "Approved", "Paid", "Disputed", "Overdue"],
+            "Type": ["Invoice", "PO", "Credit Note", "Statement", "Remittance"]},
+    ref_examples=["invoice no.", "PO no.", "credit note no.", "GL code", "statement no."],
+)
+
+PROFILES = {p.name: p for p in (CONSTRUCTION, GENERIC, LEGAL, HEALTHCARE, AGENCY, FINANCE)}
 
 
 def get_profile(name: str | None = None) -> Profile:
@@ -119,7 +183,7 @@ def to_dict(p: Profile) -> dict:
             "domains": {k: list(v) for k, v in p.domains.items()},
             "safety_net": p.safety_net, "precedence": [dict(r) for r in p.precedence],
             "facets": {k: list(v) for k, v in p.facets.items()},
-            "ref_examples": list(p.ref_examples)}
+            "ref_examples": list(p.ref_examples), "holidays": list(p.holidays)}
 
 
 def _clean_value_list(values) -> list:
@@ -164,7 +228,8 @@ def from_dict(d: dict) -> Profile:
     return Profile(name=(str(d.get("name") or "").strip() or "custom"),
                    description=str(d.get("description") or "").strip(),
                    domains=domains, safety_net=sn, precedence=prec, facets=facets,
-                   ref_examples=_clean_value_list(d.get("ref_examples")))
+                   ref_examples=_clean_value_list(d.get("ref_examples")),
+                   holidays=_clean_value_list(d.get("holidays")))
 
 
 def effective_profile(cfg: dict | None) -> Profile:
