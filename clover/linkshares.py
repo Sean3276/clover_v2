@@ -332,6 +332,19 @@ def _default_fetch(url, provider, headless=True, timeout=60, limit_bytes=None):
             or _playwright_fetch(url, provider, headless=headless, timeout=timeout, limit_bytes=limit_bytes))
 
 
+def _status_note(status: str, provider: str, url: str) -> str:
+    """A plain-English reason for a non-downloaded outcome, so the user isn't left with a bare status."""
+    if status == "needs-auth":
+        return "Sign-in required (private link). Open it yourself, or download the file and attach it."
+    if status == "dead":
+        if provider == "Google Drive" and "docs.google.com" in (url or ""):
+            return "Google Doc — can't auto-download. Open it signed in and use File > Download, or share it as a file."
+        return "Link returned not-found / expired — the file may have been removed or the URL changed."
+    if status == "error":
+        return "Couldn't fetch this link (network or browser error) — it'll be retried next time."
+    return ""
+
+
 def mark_confirmed(archive_path, message_id: str, url: str) -> None:
     """User OK'd a large link in the UI — clear the size gate and re-queue it for the next fetch."""
     _update_records(archive_path, {(message_id, url): {"confirmed": True, "status": "pending"}})
@@ -387,11 +400,11 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
             confirm += 1
             continue
         if not ok and url in dead_urls:                  # same link already dead elsewhere — skip the re-fetch
-            updates[(mid, url)] = {"status": "dead"}
+            updates[(mid, url)] = {"status": "dead", "note": _status_note("dead", prov, url)}
             dead += 1
             continue
         if not ok and url in auth_urls:                  # same link already gated elsewhere — skip the re-fetch
-            updates[(mid, url)] = {"status": "needs-auth"}
+            updates[(mid, url)] = {"status": "needs-auth", "note": _status_note("needs-auth", prov, url)}
             auth += 1
             continue
         try:
@@ -414,7 +427,7 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
         else:
             if status == "downloaded":          # 'downloaded' with no bytes -> retryable failure, not success
                 status = "error"
-            updates[(mid, url)] = {"status": status}
+            updates[(mid, url)] = {"status": status, "note": _status_note(status, prov, url)}
             if status == "dead":
                 dead += 1
                 dead_urls.add(url)              # remember so duplicate emails skip the re-fetch

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import rules as rulesmod
 from . import comprehend_prompts as cprompts
-from .comprehenders import Comprehender
+from .comprehenders import Comprehender, Stopped
 from .profiles import Profile, get_profile
 from . import attachments as attmod
 from .threads import get_attachment, read_threads, render_message
@@ -121,7 +121,56 @@ def _attachment_text(archive, location: dict, atts: list) -> str:
     return "\n\n".join(parts)
 
 
+_LINK_FILE_MAX_BYTES = 25 * 1024 * 1024            # don't try to inline >25MB shared files (archives/media)
+
+
+def _downloaded_files_by_mid(archive) -> dict:
+    """{message_id: [downloaded share-link file paths]} — read once per thread so a shared SharePoint/
+    Drive/Dropbox file's CONTENT (not just the link) is comprehended, like an attachment."""
+    out: dict = {}
+    try:
+        from .linkshares import read_link_shares
+    except Exception:
+        return out
+    for r in read_link_shares(archive):
+        if r.get("status") == "downloaded" and r.get("file") and r.get("message_id"):
+            out.setdefault(r["message_id"], []).append(r["file"])
+    return out
+
+
+def _link_file_text(archive, files) -> str:
+    """Extract text from a message's downloaded share-link files — same loud-on-unread discipline as
+    email attachments; oversize files are flagged, not loaded."""
+    parts = []
+    for rel in files or []:
+        path = Path(archive) / rel
+        name = Path(rel).name
+        try:
+            if not path.exists():
+                continue
+            if path.stat().st_size > _LINK_FILE_MAX_BYTES:
+                parts.append(f"[shared file NOT read: {name} — {path.stat().st_size // (1024 * 1024)}MB, too large to inline]")
+                continue
+            r = attmod.extract_attachment(path)
+        except Exception as e:
+            r = {"ok": False, "text": "", "note": type(e).__name__}
+        if r.get("ok") and r.get("text"):
+            parts.append(f"[shared file: {name}]\n{r['text']}")
+        else:
+            parts.append(f"[shared file NOT read: {name} — {r.get('note', '')}]")
+    return "\n\n".join(parts)
+
+
+def _cap_msg(text: str, limit: int) -> str:
+    """Bound one message's text (body + attachment/link content) so a single huge attachment can't blow
+    the AI prompt and time the call out. The deterministic floor still reads the FULL, uncapped text."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n[... this message's attachment/content was truncated to fit the comprehension budget ...]"
+
+
 def _thread_messages(archive, thread: dict) -> list[str]:
+    link_idx = _downloaded_files_by_mid(archive)       # downloaded share-link files, by message-id (read once)
     out = []
     for m in thread.get("members", []):
         locs = m.get("locations") or []
@@ -139,6 +188,9 @@ def _thread_messages(archive, thread: dict) -> list[str]:
         att = _attachment_text(archive, locs[0], b.get("attachments") or [])
         if att:
             text += "\n\n" + att
+        link_text = _link_file_text(archive, link_idx.get(m.get("message_id")) or [])   # shared-link file content
+        if link_text:
+            text += "\n\n" + link_text
         out.append(text)
     return out
 
@@ -951,11 +1003,13 @@ def _issue_str(i) -> str:
 def _build_once(archive, thread, backend, profile, max_chars, model, operator: str = ""):
     operator_inferred = not operator                     # configured operator vs dominant-sender guess
     operator = operator or _infer_operator(thread)       # out-of-the-box is_mine: dominant-sender fallback
-    msgs = _thread_messages(archive, thread)
+    raw_msgs = _thread_messages(archive, thread)
+    input_truncated = any(len(m) > max_chars for m in raw_msgs)   # a very large attachment won't fit the AI budget
+    msgs = [_cap_msg(m, max_chars) for m in raw_msgs]             # bound each message so no AI call overflows / times out
     full = "\n\n----\n\n".join(msgs)
     if len(msgs) <= 1 or len(full) <= max_chars:
         method = "whole"
-        comprehension = backend.generate("comprehend", cprompts.comprehend(thread.get("subject", ""), full))
+        comprehension = backend.generate("comprehend", cprompts.comprehend(thread.get("subject", ""), full[:max_chars]))
     else:
         method = "refine"
         comprehension = _refine(backend, thread, msgs, max_chars)
@@ -977,7 +1031,7 @@ def _build_once(archive, thread, backend, profile, max_chars, model, operator: s
     # the email's own send-date is never injected as a content fact. Backfilled atoms are grounded by
     # construction (they came from the source) and recorded in verified.backfilled.
     from .eval import scorer as _scorer
-    floor_src = "\n\n".join(m.split("\n", 1)[1] if "\n" in m else m for m in msgs)
+    floor_src = "\n\n".join(m.split("\n", 1)[1] if "\n" in m else m for m in raw_msgs)   # UNcapped: floor reads all
     floor = _scorer.crosscheck_floor(floor_src, facts)
     backfilled = {}
     _have_amt_digits = {re.sub(r"\D", "", str(a)) for a in facts.get("amounts", [])}
@@ -1048,7 +1102,7 @@ def _build_once(archive, thread, backend, profile, max_chars, model, operator: s
                           "confidence": 1.0, "council": "rule", "members": 0,
                           "consensus": "rule", "dissent": "", "votes": ""}
     else:
-        classification = _classify(backend, profile, comprehension, full)
+        classification = _classify(backend, profile, comprehension, full[:max_chars])
     rec = {
         "thread_id": thread.get("thread_id"), "root_id": thread.get("root_id"),
         "subject": thread.get("subject"),
@@ -1074,6 +1128,7 @@ def _build_once(archive, thread, backend, profile, max_chars, model, operator: s
                      "implied_uncovered": implied_uncovered,
                      "open_items_unreconciled": open_items_unreconciled,
                      "operator": operator, "operator_inferred": operator_inferred,
+                     "input_truncated": input_truncated,
                      "sensitivity": sensitivity, "minimized": minimized},
     }
     return rec, full
@@ -1095,7 +1150,7 @@ def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Pro
     # floor's job, not re-checked here); faithfulness + completeness; re-comprehend once on failure.
     comp = None
     for attempt in (1, 2):
-        qa = backend.generate("qa", cprompts.qa_semantic(rec["comprehension"], full), schema=_QA_SCHEMA) or {}
+        qa = backend.generate("qa", cprompts.qa_semantic(rec["comprehension"], full[:max_chars]), schema=_QA_SCHEMA) or {}
         passed = bool(qa.get("passed")) and rec["verified"]["facts_ok"]
         issues = [_issue_str(i) for i in (qa.get("issues") or [])][:6]
         if passed or attempt == 2:
@@ -1129,7 +1184,10 @@ def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Pro
     implied_unc = rec["verified"].get("implied_uncovered") or []
     orphans = rec["verified"].get("open_items_unreconciled") or []
     unverified = [a for a in (rec.get("actions") or []) if a.get("quote_unverified")]
+    truncated = bool(rec["verified"].get("input_truncated"))
     issues = comp["issues"] + [_issue_str(i) for i in (dq.get("issues") or [])]
+    if truncated:
+        issues = issues + ["a very large attachment was truncated for the AI — facts still extracted by the floor; review"]
     if sens:
         issues = issues + [f"sensitive content ({', '.join(sens)}) — route to human review"]
     if uncovered:
@@ -1141,7 +1199,7 @@ def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Pro
     if unverified:
         issues = issues + [f"{len(unverified)} action(s) with an unverifiable quote — possible fabrication"]
     rec["qaqc"] = {**comp, "distill_passed": distill_passed, "issues": issues[:8],
-                   "needs_review": (not comp["passed"]) or (not distill_passed)
+                   "needs_review": (not comp["passed"]) or (not distill_passed) or truncated
                    or bool(sens) or bool(uncovered) or bool(implied_unc) or bool(orphans) or bool(unverified)}
     return rec
 
@@ -1178,6 +1236,7 @@ def run_comprehension(archive, *, backend: Comprehender, profile: Profile | None
     if not allowed():
         log("Comprehension blocked by policy gate.")
         return {"done": 0, "pending": 0, "spent": 0, "total": 0, "blocked": True}
+    backend.should_stop = should_stop                # so a Stop press aborts in-flight AI calls + kills the tree
     backlog = select_threads(archive, only=only, redo=redo, include_stale=include_stale)
     todo = backlog[:limit] if limit else backlog
     total = len(todo)
@@ -1217,6 +1276,8 @@ def run_comprehension(archive, *, backend: Comprehender, profile: Profile | None
                 break
             try:
                 _record(t, est, _one(t), None)
+            except Stopped:
+                break                                   # operator pressed Stop — halt, don't count as error
             except Exception as e:
                 _record(t, est, None, e)
     else:                                               # concurrent — per-thread work is independent + I/O-bound
@@ -1234,6 +1295,8 @@ def run_comprehension(archive, *, backend: Comprehender, profile: Profile | None
                 return None
             try:
                 return (t, est, _one(t), None)
+            except Stopped:
+                return None                             # aborted by Stop — not an error
             except Exception as e:                      # report per-thread; keep the rest going
                 return (t, est, None, e)
 

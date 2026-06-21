@@ -2,10 +2,10 @@
 to the user. The CLI timeout must be configurable with a sane default, and a timeout must surface as a
 friendly, actionable message — never a raw Python exception string."""
 import shutil
-import subprocess
 
 import pytest
 
+import clover.comprehenders as cmod
 from clover.comprehenders import ClaudeCliComprehender
 
 
@@ -17,16 +17,15 @@ def test_default_timeout_is_generous():
 def test_timeout_raises_friendly_error(monkeypatch):
     c = ClaudeCliComprehender(model="sonnet", timeout=5)
     monkeypatch.setattr(shutil, "which", lambda _name: "claude")
-    def _boom(*a, **k):
-        raise subprocess.TimeoutExpired(cmd="claude", timeout=5)
-    monkeypatch.setattr(subprocess, "run", _boom)
+    def _boom(*a, **k):                            # _exec signals a timeout via TimeoutError (after tree-kill)
+        raise TimeoutError()
+    monkeypatch.setattr(cmod, "_exec", _boom)
     with pytest.raises(RuntimeError) as ei:
         c.generate("comprehend", "some prompt")
     msg = str(ei.value)
     assert "timed out" in msg.lower()              # human-readable
     assert "comprehend" in msg                     # names the step that stalled
-    assert "180 seconds" not in msg                # not the raw subprocess string
-    assert not isinstance(ei.value, subprocess.TimeoutExpired)   # wrapped, not leaked
+    assert not isinstance(ei.value, TimeoutError)  # wrapped, not leaked
 
 
 def test_comprehender_factory_passes_configured_timeout():

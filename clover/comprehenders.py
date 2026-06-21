@@ -8,11 +8,71 @@ the pipeline.
 from __future__ import annotations
 
 import json
+import os
 import re
+import signal
+import subprocess
+import sys
 import threading
+import time
 from abc import ABC, abstractmethod
 
 _REGISTRY: dict = {}
+
+
+class Stopped(Exception):
+    """Raised when an AI call is aborted because the operator pressed Stop (not an error)."""
+
+
+def _kill_tree(pid: int) -> None:
+    """Kill a process AND all its children — so a hung CLI (which spawns its own workers) never orphans.
+    Windows: taskkill /T /F (whole tree). POSIX: process-group kill, falling back to a plain kill."""
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+        else:
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+            except Exception:
+                os.kill(pid, signal.SIGKILL)
+    except Exception:
+        pass
+
+
+def _exec(cmd: list[str], stdin_text: str, timeout: int, should_stop=None):
+    """Run `cmd`, feeding stdin_text, returning (returncode, stdout, stderr). Unlike subprocess.run, this
+    enforces the timeout AND a live stop signal by killing the whole PROCESS TREE — so a wedged CLI is
+    actually terminated (no zombie claude.exe) and a Stop press aborts in-flight calls promptly.
+    Raises TimeoutError on timeout, Stopped when should_stop() turns true."""
+    kw = {}
+    if sys.platform != "win32":
+        kw["start_new_session"] = True                 # own process group, so _kill_tree gets the children
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding="utf-8", **kw)
+    res: dict = {}
+
+    def _communicate():
+        try:
+            res["out"], res["err"] = proc.communicate(input=stdin_text)
+        except Exception as e:                          # pragma: no cover - defensive
+            res["exc"] = e
+
+    worker = threading.Thread(target=_communicate, daemon=True)
+    worker.start()
+    start = time.monotonic()
+    while True:
+        worker.join(0.4)
+        if not worker.is_alive():
+            break
+        if should_stop and should_stop():
+            _kill_tree(proc.pid); worker.join(5)
+            raise Stopped()
+        if time.monotonic() - start > timeout:
+            _kill_tree(proc.pid); worker.join(5)
+            raise TimeoutError()
+    if "exc" in res:
+        raise res["exc"]
+    return proc.returncode, res.get("out", "") or "", res.get("err", "") or ""
 
 
 def register(cls):
@@ -155,11 +215,11 @@ class ClaudeCliComprehender(Comprehender):
         self.timeout = timeout
         self.tokens = 0           # actual tokens consumed (from the CLI usage envelope)
         self.cost = 0.0           # USD, if the CLI reports it
+        self.should_stop = None   # set by run_comprehension so a Stop press aborts in-flight calls + kills the tree
         self._lock = threading.Lock()   # token/cost accrual is concurrency-safe
 
     def generate(self, task: str, prompt: str, schema: dict | None = None):
         import shutil
-        import subprocess
         exe = shutil.which("claude")
         if not exe:
             raise RuntimeError("Claude CLI not found — install with: npm i -g @anthropic-ai/claude-code")
@@ -167,31 +227,31 @@ class ClaudeCliComprehender(Comprehender):
         if schema:
             p += ("\n\nReturn ONLY valid JSON (no prose, no code fence) matching this shape:\n"
                   + json.dumps(schema))
-        # prompt goes on STDIN (not argv) — thread text easily exceeds the OS command-line limit;
-        # force UTF-8 so mixed English/Chinese content round-trips
+        # prompt goes on STDIN (not argv) — thread text easily exceeds the OS command-line limit; force
+        # UTF-8 so mixed English/Chinese round-trips. _exec kills the whole tree on timeout/stop (no zombies).
+        # `--tools ""` disables ALL tools: this is a pure text->text LLM call, so untrusted EMAIL CONTENT
+        # can't hijack the agent into using Bash/Read/WebFetch on the machine (security) and can't send it
+        # off on multi-turn agentic tangents that hang the call (the real cause of the comprehension stalls).
         try:
-            proc = subprocess.run(
-                [exe, "-p", "--model", self.model, "--output-format", "json"],
-                input=p, capture_output=True, text=True, encoding="utf-8", timeout=self.timeout,
-            )
-        except subprocess.TimeoutExpired:
-            # never leak a raw TimeoutExpired traceback to the UI — give an actionable message instead
+            rc, out, err = _exec([exe, "-p", "--model", self.model, "--output-format", "json", "--tools", ""],
+                                 p, self.timeout, self.should_stop)
+        except TimeoutError:
             raise RuntimeError(
                 f"AI '{task}' step timed out after {self.timeout}s — the thread may be large or the model "
                 f"slow. Try again, or in /dev pick a faster model or raise the AI timeout."
             ) from None
-        if proc.returncode != 0:
-            raise RuntimeError(f"claude CLI failed ({proc.returncode}): {proc.stderr.strip()[:200]}")
+        if rc != 0:
+            raise RuntimeError(f"claude CLI failed ({rc}): {err.strip()[:200]}")
         try:
-            env = json.loads(proc.stdout)        # CLI envelope: {"result": "...", "usage": {...}, ...}
-            text = env.get("result", proc.stdout)
+            env = json.loads(out)                # CLI envelope: {"result": "...", "usage": {...}, ...}
+            text = env.get("result", out)
             u = env.get("usage") or {}
             with self._lock:
                 self.tokens += sum(int(v) for k, v in u.items()
                                    if isinstance(v, (int, float)) and "token" in k.lower())
                 self.cost += float(env.get("total_cost_usd") or 0)
         except Exception:
-            text = proc.stdout
+            text = out
         return _parse_json(text) if schema else text
 
 
@@ -208,12 +268,11 @@ class CodexCliComprehender(Comprehender):
         self.timeout = timeout
         self.tokens = 0
         self.cost = 0.0
+        self.should_stop = None   # set by run_comprehension so a Stop press aborts in-flight calls + kills the tree
         self._lock = threading.Lock()
 
     def generate(self, task: str, prompt: str, schema: dict | None = None):
-        import os
         import shutil
-        import subprocess
         import tempfile
         exe = shutil.which("codex")
         if not exe:
@@ -229,24 +288,23 @@ class CodexCliComprehender(Comprehender):
                "-m", self.model, "-o", outpath, "--json", "-"]
         try:
             try:
-                proc = subprocess.run(cmd, input=p, capture_output=True, text=True,
-                                      encoding="utf-8", timeout=self.timeout)
-            except subprocess.TimeoutExpired:
+                rc, out, err = _exec(cmd, p, self.timeout, self.should_stop)   # kills the tree on timeout/stop
+            except TimeoutError:
                 raise RuntimeError(
                     f"AI '{task}' step timed out after {self.timeout}s — the thread may be large or the "
                     f"model slow. Try again, or in /dev pick a faster model or raise the AI timeout."
                 ) from None
-            if proc.returncode != 0:
-                raise RuntimeError(f"codex CLI failed ({proc.returncode}): {(proc.stderr or '').strip()[:200]}")
+            if rc != 0:
+                raise RuntimeError(f"codex CLI failed ({rc}): {err.strip()[:200]}")
             try:
                 with open(outpath, encoding="utf-8") as fh:
                     text = fh.read().strip()
             except OSError:
                 text = ""
             if not text:                              # the -o sink was empty — recover from the JSONL stream
-                text = _codex_text_from_stream(proc.stdout)
+                text = _codex_text_from_stream(out)
             with self._lock:
-                self.tokens += _codex_tokens(proc.stdout)
+                self.tokens += _codex_tokens(out)
         finally:
             try:
                 os.remove(outpath)
