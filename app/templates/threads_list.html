@@ -110,6 +110,7 @@
     </a>
     {% endfor %}
   </div>
+  <button type="button" id="showMore" class="ghost" onclick="showMore()" style="display:none;width:100%;margin-top:12px"></button>
   <p id="empty" class="note dim" style="display:none;margin:6px 2px 0">No conversations match your filters. <button type="button" class="linkbtn" onclick="clearFilter()">Clear filters</button></p>
 </div>
 {% endif %}
@@ -208,6 +209,9 @@
 const $ = id => document.getElementById(id);
 function reloadKeepScroll(){ try{ sessionStorage.setItem("mailScroll", window.scrollY); }catch(e){} location.reload(); }
 let _statusFilter = "", _catFilter = "";
+const PAGE = 60;                       // rows painted at once — the list can run to thousands; the rest stay hidden
+let _pageShown = PAGE;                 // current paint window; grows via "Show more", resets on any filter/sort change
+function showMore(){ _pageShown += PAGE; apply(true); }   // reveal the next page WITHOUT resetting the window
 function setStatus(btn, val){
   _statusFilter = val;
   document.querySelectorAll(".chip[data-s]").forEach(b => { const on = b === btn; b.classList.toggle("active", on); b.setAttribute("aria-pressed", on); });
@@ -233,18 +237,18 @@ function _initThreadFilters(){
   if(st){ const b = document.querySelector('.chip[data-s="' + CSS.escape(st) + '"]'); if(b){ b.style.display = ""; setStatus(b, st); return; } }  // re-show a hidden (0-count) chip so the active filter is visible
   apply();
 }
-function apply(){
+function apply(keepPage){
+  if(!keepPage) _pageShown = PAGE;                        // a fresh filter/sort starts at the first page
   const q = ($("filter").value || "").toLowerCase().trim();
   const sort = $("sort").value;
   const rows = [...document.querySelectorAll(".throw")];
-  let shown = 0;
+  const vis = [];
   rows.forEach(r => {
     const ok = (!q || (r.dataset.q || "").includes(q)) &&
                (!_statusFilter || (r.dataset.status || "").includes(_statusFilter)) &&
                (!_catFilter || (r.dataset.cat || "") === _catFilter);
-    r.style.display = ok ? "" : "none"; if(ok) shown++;
+    if(ok) vis.push(r); else r.style.display = "none";   // non-matches hidden regardless of the paint window
   });
-  const vis = rows.filter(r => r.style.display !== "none");
   vis.sort((a,b) => {
     if(sort === "review") return ((b.dataset.status||"").includes("review")?1:0) - ((a.dataset.status||"").includes("review")?1:0)
                                  || (b.dataset.end || "").localeCompare(a.dataset.end || "");
@@ -252,9 +256,13 @@ function apply(){
     if(sort === "old")  return (a.dataset.start || "").localeCompare(b.dataset.start || "");
     return (b.dataset.end || "").localeCompare(a.dataset.end || "");
   });
-  const list = $("list"); vis.forEach(r => list.appendChild(r));
-  if($("count")) $("count").textContent = shown + " of " + rows.length;
-  if($("empty")) $("empty").style.display = (shown === 0 && rows.length > 0) ? "" : "none";
+  const list = $("list");
+  vis.forEach((r,i) => { list.appendChild(r); r.style.display = (i < _pageShown) ? "" : "none"; });   // paint only the window
+  const showing = Math.min(vis.length, _pageShown);
+  if($("count")) $("count").textContent = vis.length ? ("showing " + showing + " of " + vis.length) : ("0 of " + rows.length);
+  const more = $("showMore");
+  if(more){ const rem = vis.length - showing; more.style.display = rem > 0 ? "" : "none"; if(rem > 0) more.textContent = "Show " + Math.min(PAGE, rem) + " more (" + rem + " below)"; }
+  if($("empty")) $("empty").style.display = (vis.length === 0 && rows.length > 0) ? "" : "none";
 }
 function clearFilter(){
   if($("filter")) $("filter").value = "";

@@ -239,6 +239,20 @@ def test_mail_category_chip_is_xss_safe(tmp_path, monkeypatch):
     assert "),alert(1)//')" not in h                        # the payload never reaches an executable position
 
 
+def test_mail_list_is_paginated(tmp_path, monkeypatch):
+    # the list must not paint thousands of rows at once — it windows to PAGE with a "Show more" control
+    import json as _json
+    from starlette.testclient import TestClient
+    import app.main as m
+    (tmp_path / "threads.jsonl").write_text(_json.dumps(
+        {"thread_id": "t1", "root_id": "r1", "n": 1, "subject": "A", "participants": [],
+         "start": "2026-06-01", "end": "2026-06-01", "members": []}) + "\n", encoding="utf-8")
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: {"auth": {"imap": {}}, "archive_path": str(tmp_path)})
+    h = TestClient(m.app).get("/threads").text
+    assert 'id="showMore"' in h and 'onclick="showMore()"' in h   # the reveal-next-page control exists
+    assert "const PAGE" in h and "_pageShown" in h                # client-side paint window is wired
+
+
 def test_confirm_link_route_and_needs_confirm_render(tmp_path, monkeypatch):
     from starlette.testclient import TestClient
     import app.main as m
