@@ -14,6 +14,13 @@ def test_registered_and_configurable():
     assert CodexCliComprehender().model == "gpt-5.5"        # sensible default model
 
 
+def test_codex_model_is_normalized_lowercase():
+    # codex rejects 'GPT-5.5' (400: not supported with a ChatGPT account) but accepts 'gpt-5.5'.
+    # The /dev registry may store any casing, so the backend must normalize before invoking codex.
+    assert CodexCliComprehender(model="GPT-5.5").model == "gpt-5.5"
+    assert CodexCliComprehender(model="  GPT-5.5  ").model == "gpt-5.5"
+
+
 def _fake_exec_to_outfile(payload):
     def _ex(cmd, stdin_text, timeout, should_stop=None):    # mock the _exec seam (Popen+tree-kill supervisor)
         out = cmd[cmd.index("-o") + 1]                      # the unique temp sink

@@ -296,7 +296,9 @@ class CodexCliComprehender(Comprehender):
     name = "codex-cli"
 
     def __init__(self, model: str = "gpt-5.5", timeout: int = 300):
-        self.model = model
+        # codex model ids are lowercase; it 400s on 'GPT-5.5' ("not supported with a ChatGPT account").
+        # The /dev registry can hold any casing, so normalize here.
+        self.model = (model or "gpt-5.5").strip().lower()
         self.timeout = timeout
         self.tokens = 0
         self.cost = 0.0
