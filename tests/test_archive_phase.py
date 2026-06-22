@@ -49,6 +49,32 @@ def test_status_exposes_skipped_phases(client):
     assert "comprehend" in c.get("/archive/status").json()["skipped"]   # so the stepper shows it skipped, not ✓
 
 
+def test_phase_results_record_real_outcomes(client):
+    # the stepper must show the TRUTH: ok | partial | failed | skipped per phase (not a fake ✓ from phase order)
+    m, c = client
+    m._status["phase_results"] = {}
+    m._set_phase("threads", indeterminate=True)            # running -> ok-so-far
+    m._fail_phase("comprehend", "boom")
+    m._phase_result("links", "partial", done=3, total=10, errors=1)
+    m._skip_phase("contacts")
+    pr = c.get("/archive/status").json()["phase_results"]
+    assert pr["threads"]["state"] == "ok"
+    assert pr["comprehend"]["state"] == "failed" and "boom" in pr["comprehend"]["reason"]
+    assert pr["links"]["state"] == "partial" and pr["links"]["done"] == 3 and pr["links"]["errors"] == 1
+    assert pr["contacts"]["state"] == "skipped"
+
+
+def test_finalize_run_builds_honest_last_run_summary(client):
+    m, c = client
+    m._status["phase_results"] = {}
+    m._status["session_saved"] = 140
+    m._phase_result("comprehend", "partial", done=100, total=140, errors=12)
+    m._finalize_run()
+    lr = c.get("/archive/status").json()["last_run"]
+    assert lr["imported"] == 140 and lr["comprehended"] == 100 and lr["comprehend_total"] == 140
+    assert lr["comprehend_errors"] == 12
+
+
 def test_autorun_off_marks_comprehend_skipped(client):
     # comprehension disabled -> the comprehend phase is recorded skipped (must NOT render as a completed ✓ step)
     m, c = client

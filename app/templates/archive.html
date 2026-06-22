@@ -53,6 +53,12 @@
   .step.pending{opacity:.5}
   .step.skipped{opacity:.55;border-style:dashed}
   .step.skipped .sn{background:var(--track-bg);color:var(--sub)}
+  .step.failed{border-color:var(--red)}                          /* ran but errored — never a ✓ */
+  .step.failed .sn{background:var(--red);color:#fff}
+  .step.failed .sbar>i{width:100%;background:var(--red)}
+  .step.partial{border-color:var(--amber)}                       /* ran but capped / some errored */
+  .step.partial .sn{background:var(--amber);color:#04140b}
+  .step.partial .sbar>i{background:var(--amber)}
   .selrow{display:flex;justify-content:space-between;align-items:baseline}
   .filterbox{margin-top:16px;border:1px solid var(--line);border-radius:10px;background:var(--tile-bg);padding:0 14px}
   .filterbox summary{cursor:pointer;padding:12px 2px;font-size:14px;color:var(--ink);list-style:none;display:flex;align-items:center;gap:8px}
@@ -126,6 +132,7 @@
     </div>
   </div>
   <div id="stepper" class="steps"></div>
+  <div id="lastRun" class="note" role="status" style="display:none;margin:-6px 0 14px;padding:7px 11px;border:1px solid var(--line);border-radius:8px;background:var(--tile-bg)"></div>
   <div class="top">
     <div class="ringwrap">
       <svg viewBox="0 0 120 120" width="150" height="150">
@@ -289,20 +296,26 @@ const STEPS = [["download","Download"],["threads","Threads"],["links","Links"],
                ["comprehend","Comprehend"],["contacts","Rolodex"]];
 function renderSteps(s, a){
   const ph = s.phase, active = ph ? ph.step : (a.finished ? 99 : 0);
-  const skipped = new Set(s.skipped || []);          // phases the server skipped this run (e.g. comprehend off)
+  const skipped = new Set(s.skipped || []);
+  const pr = s.phase_results || {};                  // server-recorded OUTCOME per phase — the truth
   $("stepper").innerHTML = STEPS.map((st,i)=>{
-    const n=i+1, key=st[0]; let cls, indet=false, barW=0, ct="";
-    if(skipped.has(key)){ cls="skipped"; }            // skipped wins over 'done' — never show a ✓ for it
-    else if(a.finished || n<active){ cls="done"; barW=100; }
+    const n=i+1, key=st[0], res = pr[key]; let cls, indet=false, barW=0, ct="";
+    if(res && res.state==="failed"){ cls="failed"; ct = res.errors ? `${res.errors} errored` : ""; }     // failed wins over everything
+    else if(res && res.state==="partial"){ cls="partial"; barW=100; ct = `${res.done} of ${res.total}` + (res.errors?` · ${res.errors} err`:""); }
+    else if(skipped.has(key) || (res && res.state==="skipped")){ cls="skipped"; }
     else if(ph && n===active){
       cls="active";
       if(ph.key==="download"){ if(a.totalAll>0){ barW=a.dlPct; ct=`${a.doneAll}/${a.totalAll}`; } else indet=true; }
       else if(ph.total>0){ barW=ph.done/ph.total*100; ct=`${ph.done}/${ph.total}`; }
       else indet=true;
-    } else cls="pending";
-    const mark = (cls==="done") ? "✓" : (cls==="skipped") ? "–" : n;
+    }
+    else if(a.finished || n<active){ cls="done"; barW=100; }
+    else cls="pending";
+    const mark = cls==="done" ? "✓" : cls==="failed" ? "!" : cls==="skipped" ? "–" : cls==="partial" ? "◐" : n;
+    const note = cls==="failed" ? `<span class="sct" style="color:var(--red)">failed</span>`
+               : cls==="skipped" ? `<span class="sct dim">skipped</span>` : "";
     return `<div class="step ${cls}"><div class="sh"><span class="sn">${mark}</span><span>${st[1]}</span>`
-      + (ct?`<span class="sct mono dim">${ct}</span>`:"") + (cls==="skipped"?`<span class="sct dim">skipped</span>`:"") + `</div>`
+      + (ct?`<span class="sct mono dim">${ct}</span>`:"") + note + `</div>`
       + `<div class="sbar"><i class="${indet?'indet':''}"${indet?'':` style="width:${barW}%"`}></i></div></div>`;
   }).join("");
 }
@@ -330,9 +343,25 @@ function render(s){
     overall = Math.min(100, ((ph.step-1) + Math.max(0, Math.min(1, sub))) / STEPS.length * 100);
   }
   else if(stopped && totalAll>0){ overall = doneAll/totalAll/STEPS.length*100; }   // keep partial download progress
+  const hasIssues = Object.values(s.phase_results||{}).some(v => v.state==="failed" || v.state==="partial");
   $("ring").style.strokeDashoffset = C*(1-overall/100);
   $("ringPct").textContent = Math.round(overall)+"%";
-  $("ringSub").textContent = ph ? ph.label : (finished ? "Complete" : (stopped ? "stopped" : (s.running ? "…" : "idle")));
+  $("ringSub").textContent = ph ? ph.label
+    : (finished ? (hasIssues ? "done — with issues" : "Complete") : (stopped ? "stopped" : (s.running ? "…" : "idle")));
+  // honest one-line outcome of the last finished run (survives nav; persisted server-side too)
+  const lr = s.last_run, lel = $("lastRun");
+  if(lel){
+    if(lr && !s.running){
+      const c = (lr.phase_results||{}).comprehend || {}, bits = ["<strong>"+(lr.imported||0)+"</strong> new mail"];
+      if(c.state==="failed") bits.push('<span style="color:var(--red)">comprehend failed</span>');
+      else if(c.state==="skipped") bits.push("comprehend skipped");
+      else if(c.total) bits.push("comprehended "+c.done+" of "+c.total+(c.errors?(' · <span style="color:var(--red)">'+c.errors+" errored</span>"):""));
+      const fails = (lr.failed||[]).filter(k=>k!=="comprehend");
+      if(fails.length) bits.push('<span style="color:var(--red)">'+fails.join(", ")+" failed</span>");
+      lel.innerHTML = "Last import — " + bits.join(" · ");
+      lel.style.display = "";
+    } else lel.style.display = "none";
+  }
 
   $("cSaved").textContent = doneAll; $("cRemain").textContent = remaining; $("cErr").textContent = errs;
   const elapsed = s.started_at ? (Date.now()/1000 - s.started_at) : 0;

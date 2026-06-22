@@ -10,6 +10,7 @@ import csv
 import io
 import re
 import shutil
+import json
 import threading
 import time
 from datetime import date
@@ -35,7 +36,7 @@ from clover import threads as threadmod
 from clover import todo as todomod
 from clover.comprehenders import get_comprehender
 from clover.errors import friendly_conn_error
-from clover.paths import auto_clover_root, ensure_runtime
+from clover.paths import auto_clover_root, ensure_runtime, logs_dir
 from clover.profiles import get_profile, effective_profile, from_dict as _profile_from_dict
 from clover.sources import SUITE, get_source
 
@@ -77,7 +78,7 @@ _lock = threading.Lock()
 # live run state — per-folder progress drives the dashboard
 _status = {"running": False, "started_at": None, "folders": {}, "log": [], "manifest": None,
            "stop": False, "attempt": 0, "session_saved": 0, "session_saved_ids": [], "prep": None,
-           "phase": None, "skipped_phases": []}
+           "phase": None, "skipped_phases": [], "phase_results": {}, "last_run": None}
 
 # The whole-pipeline stepper. Download is step 1 (its own ring/folders); steps 2-5 run after the ring hits
 # 100% and used to be invisible — _set_phase surfaces each so the UI shows where the run actually is + ETA.
@@ -105,6 +106,46 @@ def _set_phase(key: str, *, done: int = 0, total: int = 0, indeterminate: bool =
             "indeterminate": bool(indeterminate), "current": str(current or ""),
             "at": started,
         }
+        # default the outcome to running/ok-so-far; _fail_phase / _phase_result override with the truth
+        _status["phase_results"].setdefault(key, {"state": "ok", "done": 0, "total": 0, "errors": 0, "reason": ""})
+        _status["phase_results"][key].update({"done": int(done), "total": int(total)})
+
+
+def _phase_result(key: str, state: str, *, done: int = 0, total: int = 0, errors: int = 0, reason: str = "") -> None:
+    """Record a phase's real OUTCOME (ok | partial | failed | skipped) so the stepper can't paint a fake ✓."""
+    with _lock:
+        _status["phase_results"][key] = {"state": state, "done": int(done), "total": int(total),
+                                         "errors": int(errors), "reason": str(reason or "")[:200]}
+
+
+def _fail_phase(key: str, reason) -> None:
+    _phase_result(key, "failed", reason=f"{type(reason).__name__}: {reason}" if isinstance(reason, BaseException) else str(reason))
+
+
+def _finalize_run() -> None:
+    """Snapshot the run's real OUTCOME (imported count + per-phase result + comprehend counts) into last_run and
+    persist it + the log to logs_dir(), so the truth survives a restart (the old in-memory-only log was lost)."""
+    with _lock:
+        pr = dict(_status["phase_results"])
+        comp = pr.get("comprehend") or {}
+        summary = {
+            "at": time.time(),
+            "imported": _status.get("session_saved", 0),
+            "phase_results": pr,
+            "failed": [k for k, v in pr.items() if v.get("state") == "failed"],
+            "partial": [k for k, v in pr.items() if v.get("state") == "partial"],
+            "comprehended": comp.get("done", 0), "comprehend_total": comp.get("total", 0),
+            "comprehend_errors": comp.get("errors", 0),
+        }
+        _status["last_run"] = summary
+        log_lines = list(_status["log"])
+    try:                                                        # persist so failures aren't lost on restart
+        d = logs_dir()
+        (d / "last_run.json").write_text(json.dumps(summary, ensure_ascii=False, indent=0), encoding="utf-8")
+        with (d / f"import-{date.today().isoformat()}.log").open("a", encoding="utf-8") as fh:
+            fh.write(f"\n===== run @ {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n" + "\n".join(log_lines) + "\n")
+    except Exception:
+        pass
 
 
 def _clear_phase() -> None:
@@ -269,10 +310,11 @@ def _run_archive_bg(folders: list[str], limit: int | None, filters: dict, auto_l
     except Exception as e:
         _log(f"ERROR: {type(e).__name__}: {e}")
     finally:
+        _finalize_run()                   # snapshot + persist the real outcome before clearing the live phase
         with _lock:
             _status["running"] = False
             _status["prep"] = None
-            _status["phase"] = None       # pipeline done -> stepper shows all phases complete
+            _status["phase"] = None       # pipeline done -> stepper shows per-phase outcomes (ok/partial/failed/skipped)
 
 
 def _run_links_inline(arch, harvest: bool = True, fetch: bool = False, only_message_ids=None) -> None:
@@ -295,6 +337,7 @@ def _run_links_inline(arch, harvest: bool = True, fetch: bool = False, only_mess
         _auto_link_task(arch, harvest, fetch, only_message_ids=only_message_ids)
     except Exception as e:
         _log(f"Share-link step failed: {type(e).__name__}: {e}")
+        _fail_phase("links", e)
     finally:
         with _lock:
             _linktask["running"] = False
@@ -314,6 +357,7 @@ def _post_import(cfg: dict, arch, saved_ids: list, do_fetch: bool) -> None:
             threadmod.build_threads(arch, log=_log)
         except Exception as e:
             _log(f"Thread index rebuild failed: {type(e).__name__}: {e}")
+            _fail_phase("threads", e)
         _run_links_inline(arch, harvest=True, fetch=do_fetch, only_message_ids=ids)   # BEFORE comprehend
         _maybe_autorun_comprehension(cfg)
         _set_phase("contacts", indeterminate=True)
@@ -322,7 +366,10 @@ def _post_import(cfg: dict, arch, saved_ids: list, do_fetch: bool) -> None:
             contactsmod.rebuild(arch)
         except Exception as e:
             _log(f"Contacts refresh failed: {type(e).__name__}: {e}")
+            _fail_phase("contacts", e)
     elif do_fetch:                                              # nothing new imported — don't fetch the backlog
+        for _k in ("threads", "links", "comprehend", "contacts"):   # they didn't run -> skipped, NOT done ✓
+            _skip_phase(_k)
         _log("No new mail, so no new links to download. To fetch already-catalogued links, use ⬇ Download "
              "on the Mail page — you can limit it by date or provider there.")
 
@@ -356,7 +403,7 @@ def archive_run(folders: list[str] = Form(default=[]), limit: int = Form(0),
             return JSONResponse({"ok": False, "message": "Select at least one folder."})
         _status.update(running=True, started_at=time.time(), folders={}, log=[], manifest=None,
                        stop=False, attempt=0, session_saved=0, session_saved_ids=[], prep=None,
-                       skipped_phases=[])
+                       skipped_phases=[], phase_results={})
     threading.Thread(target=_run_archive_bg, args=(folders, limit or None, filters, auto), daemon=True).start()
     bits = []
     if df or dt:
@@ -383,7 +430,7 @@ def mail_sync():
             return JSONResponse({"ok": False, "message": "A sync is already running."})
         _status.update(running=True, started_at=time.time(), folders={}, log=[], manifest=None,
                        stop=False, attempt=0, session_saved=0, session_saved_ids=[], prep=None,
-                       skipped_phases=[])
+                       skipped_phases=[], phase_results={})
     filters = {"date_from": None, "date_to": None, "size_min": None, "top_n": None}
     threading.Thread(target=_run_archive_bg, args=(folders, None, filters, True), daemon=True).start()
     return JSONResponse({"ok": True, "message": f"Syncing {len(folders)} folder(s) — new mail will appear here shortly."})
@@ -428,6 +475,8 @@ def archive_status():
             "prep": _status["prep"],
             "phase": _status["phase"],
             "skipped": list(_status["skipped_phases"]),
+            "phase_results": dict(_status["phase_results"]),   # per-phase truth: ok|partial|failed|skipped + counts
+            "last_run": _status["last_run"],
         })
 
 
@@ -501,6 +550,7 @@ def _skip_phase(key: str) -> None:
     with _lock:
         if key not in _status["skipped_phases"]:
             _status["skipped_phases"].append(key)
+        _status["phase_results"][key] = {"state": "skipped", "done": 0, "total": 0, "errors": 0, "reason": ""}
 
 
 def _maybe_autorun_comprehension(cfg: dict) -> None:
@@ -534,13 +584,23 @@ def _maybe_autorun_comprehension(cfg: dict) -> None:
                                             current=k.get("current", "")),
         )
         _record_usage(backend)
-        if out["pending"]:
-            _log(f"Comprehension: {out['done']} done, {out['pending']} still pending "
+        done, pending, errs = out["done"], out.get("pending", 0), out.get("errors", 0)
+        attempted = done + errs                                  # threads this run actually tried (excl. the cap remainder)
+        if errs and done == 0:                                  # tried some, all failed
+            _phase_result("comprehend", "failed", done=done, total=done + pending, errors=errs,
+                          reason=f"{errs} thread(s) errored, 0 succeeded")
+        elif pending or errs:                                   # capped and/or some errored -> not full success
+            _phase_result("comprehend", "partial", done=done, total=done + pending, errors=errs)
+        else:
+            _phase_result("comprehend", "ok", done=done, total=done)
+        if pending:
+            _log(f"Comprehension: {done} done, {errs} errored, {pending} still pending "
                  f"(autorun caps at {cap}/run — use the Comprehend panel for the rest).")
         else:
-            _log(f"Comprehension: {out['done']} done, all caught up.")
+            _log(f"Comprehension: {done} done, {errs} errored, all caught up.")
     except Exception as e:
         _log(f"Comprehension autorun failed: {type(e).__name__}: {e}")
+        _fail_phase("comprehend", e)
 
 
 @app.get("/threads", response_class=HTMLResponse)
