@@ -50,3 +50,28 @@ def test_matters_shows_focus(client):
 
 def test_rolodex_is_the_contacts_tab(client):
     assert "Rolodex" in client.get("/contacts").text
+
+
+def test_mail_sync_route_guards_on_mailbox(client):
+    r = client.post("/mail/sync")                        # no IMAP configured in the temp home
+    assert r.json()["ok"] is False and "mailbox" in r.json()["message"].lower()
+
+
+def test_hub_shows_comprehension_coverage(monkeypatch, tmp_path):
+    # Hub must tell the user how complete it is: X of Y conversations comprehended (punch-list point 13)
+    import json
+    monkeypatch.setenv("CLOVER_V2_HOME", str(tmp_path))
+    from clover.paths import default_archive_path
+    from clover import comprehend as cp
+    arch = default_archive_path(); arch.mkdir(parents=True, exist_ok=True)
+    (arch / "threads.jsonl").write_text(
+        json.dumps({"thread_id": "t1", "root_id": "r1", "n": 1, "subject": "A", "participants": [],
+                    "start": "2026-06-01", "end": "2026-06-01", "members": []}) + "\n" +
+        json.dumps({"thread_id": "t2", "root_id": "r2", "n": 1, "subject": "B", "participants": [],
+                    "start": "2026-06-01", "end": "2026-06-01", "members": []}) + "\n", encoding="utf-8")
+    cp.save_comprehension(arch, {"thread_id": "t1", "root_id": "r1", "subject": "A", "summary": "x",
+                                 "classification": {"domain": "Project", "category": "Design"}, "facts": {}})
+    import app.main as m
+    h = TestClient(m.app).get("/projects").text
+    assert ">1</strong> of 2 conversation" in h and "comprehended" in h   # 1 of 2 done (done is bolded)
+    assert "1 not yet" in h                                               # the uncomprehended remainder shown

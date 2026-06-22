@@ -4,16 +4,15 @@
 {% block body %}
 {% set active = 'conversations' %}{% include '_subnav_mail.html' %}
 <style>
-  .thtools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
-  .thtools input{flex:1;min-width:220px}
+  .thtools{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .thtools input{flex:1;min-width:200px}
   .thtools select{width:auto}
   .comprow{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px}
   .comprow select,.comprow input[type=date]{width:auto}
   .comprow input[type=checkbox]{width:auto;flex:none;accent-color:var(--clover);margin:0}
-  /* keep the toggle on one line (it has class "note", which otherwise breaks words mid-word) */
   .comprow label{margin:0;text-transform:none;letter-spacing:0;white-space:nowrap;overflow-wrap:normal;
     display:inline-flex;gap:6px;align-items:center;flex:none;cursor:pointer}
-  .comprow #compRunBtn,.comprow #compStopBtn{margin-left:auto}   /* push the action right, clear of the toggle */
+  .comprow #compRunBtn,.comprow #compStopBtn{margin-left:auto}
   .ctrack{height:8px;background:var(--track-bg);border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-top:10px}
   .cfill{height:100%;background:linear-gradient(90deg,var(--clover),var(--cyan));width:0;transition:width .3s ease}
   .thchips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
@@ -21,22 +20,27 @@
     background:var(--card2);color:var(--sub);cursor:pointer}
   .chip:hover{border-color:var(--clover);color:var(--ink)}
   .chip.active{background:var(--clover);color:var(--btn-ink);border-color:var(--clover)}
+  .chip.cat.active{background:var(--cyan);border-color:var(--cyan)}
+  .toolzone{margin-top:18px}
+  .toolzone>summary{cursor:pointer;font-size:14px;color:var(--ink);list-style:none;display:flex;align-items:center;gap:8px;padding:4px 0}
+  .toolzone>summary::-webkit-details-marker{display:none}
+  .tcap{font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--sub);margin:16px 0 8px}
+  .tcap:first-child{margin-top:4px}
+  @media (max-width:640px){ .thtools input{min-width:0} }
 </style>
 
 <div class="runhdr">
   <div><h1>Mail</h1>
-    <p class="note">Clover links your emails into one
-      chronological conversation <strong>across folders</strong> — your Sent copy, the inbound reply, and a
-      filed or deleted copy in Trash all stitch into a single timeline. Click one to read it; conversations
-      and their share links are built automatically after each archive.</p>
-    <p class="note" style="margin:6px 0 0;display:flex;gap:12px;flex-wrap:wrap;align-items:center">
-      <span><span class="leaf">🍀</span> comprehended (AI-read)</span>
-      <span><span class="leaf stale">🍀</span> out of date — re-comprehend</span>
-      <span>📎 attachment</span>
-      <span><span style="color:var(--clover)">🔗</span> link fetched · <span style="color:var(--amber)">🔗</span> link to fetch</span>
-      <span><span class="cbadge proj">🏗 name</span> project</span>
-      <span><span class="cbadge warn">review</span> needs your check</span>
-      <span class="help" tabindex="0" role="note" data-tip="Each row: 🍀 comprehended (brown = out of date), 📎 has an attachment, 🔗 has a share link (green = downloaded, amber = still to fetch), 🏗 project, domain + category, and 'review' if the AI council was unsure or QAQC flagged it. Open a conversation to read it and resolve any 'review'.">?</span></p></div>
+    {% if comp_counts.done == 0 %}
+    <p class="note">Clover links your emails into one chronological conversation <strong>across folders</strong> —
+      Sent, inbound replies and filed copies stitch into a single timeline. Click one to read it.
+      <span class="help" tabindex="0" role="note" data-tip="Each row leads with a clover: green = comprehended &amp; up to date, brown = out of date, faint outline = not read by the AI yet. On the right: a paperclip for an attachment, and a chain link — with a tick when its share files are downloaded (green), or amber when there are files still to fetch. Below the subject: project, domain + category, and a 'review' flag if the AI council was unsure or QAQC flagged it.">What do the marks mean?</span></p>
+    {% endif %}
+  </div>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:none">
+    <button id="syncBtn" type="button" onclick="syncMail()" title="The one-click version of Import: fetch all new mail, then auto-stitch threads, comprehend, and update your Rolodex"><svg class="ic" aria-hidden="true"><use href="#ic-sync"/></svg>Sync mailbox</button>
+    <span id="syncMsg" class="note dim" role="status" aria-live="polite"></span>
+  </div>
 </div>
 
 {% if not has_index %}
@@ -44,20 +48,76 @@
   <h2>No conversations indexed yet</h2>
   <p class="note">Build the thread index from your archived <code>.eml</code> files — header-only, deterministic,
     takes a few seconds. (Re-runnable anytime; it never modifies your archive.)</p>
-  <button id="rebuildBtn" type="button" onclick="rebuild()" style="margin-top:10px">Build thread index →</button>
-  <div id="rebuildMsg" class="msg"></div>
+  <button id="buildIdxBtn" type="button" onclick="rebuild('buildIdxBtn')" style="margin-top:10px">Build thread index →</button>
+  <div id="rebuildMsg" class="msg" role="status" aria-live="polite"></div>
 </div>
 {% else %}
-<div class="card" id="compCard">
-  <div class="runhdr"><div>
-    <h2 style="margin:0;color:var(--ink);text-transform:none;letter-spacing:.01em;font-size:16px">🍀 Comprehend</h2>
-    <p class="note" style="margin:4px 0 0">AI reads whole threads (council classify + QAQC check) and fills projects, facts &amp; contacts.
-      <span id="compCounts"><strong>{{ comp_counts.done }}</strong> done · {{ comp_counts.pending }} new ·
-      <span style="color:var(--amber)">{{ comp_counts.stale }} out&#8209;of&#8209;date</span></span>.</p>
-  </div></div>
+
+<!-- ============ THE LIST (primary surface — first) ============ -->
+{% if not threads %}
+<div class="card"><p class="note dim" style="margin:0">No conversations yet. Import mail on the <a href="/archive">Import</a> tab, then they'll appear here automatically.</p></div>
+{% else %}
+<div class="card">
+  <div class="thtools">
+    <input id="filter" type="text" placeholder="Filter by subject, participant, or project…" aria-label="Filter conversations" oninput="apply()">
+    <select id="sort" onchange="apply()" aria-label="Sort conversations">
+      <option value="recent">Most recent</option>
+      <option value="review">Needs review first</option>
+      <option value="size">Largest</option>
+      <option value="old">Oldest</option>
+    </select>
+    <span id="count" class="note"></span>
+  </div>
+  <div class="thchips" id="thchips" role="group" aria-label="Filter conversations">
+    <button type="button" class="chip active" data-s="" aria-pressed="true" onclick="setStatus(this,'')">All</button>
+    <button type="button" class="chip" data-s="review" aria-pressed="false" onclick="setStatus(this,'review')">Needs review</button>
+    <button type="button" class="chip" data-s="uncomprehended" aria-pressed="false" onclick="setStatus(this,'uncomprehended')">Not comprehended</button>
+    <button type="button" class="chip" data-s="stale" aria-pressed="false" onclick="setStatus(this,'stale')">Out of date</button>
+    {% for cat in cats %}<button type="button" class="chip cat" data-c="{{ cat }}" aria-pressed="false" onclick="setCat(this)" title="Show only this category">{{ cat }}</button>{% endfor %}
+  </div>
+  <div id="list" class="thlist">
+    {% for t in threads %}
+    {% set c = comps.get(t.thread_id) %}
+    {% set lk = linkstate.get(t.thread_id) %}
+    {% set is_stale = t.thread_id in stale %}
+    {% set needs = c and (c.classification.consensus == 'asked' or (c.qaqc and c.qaqc.needs_review)) %}
+    <a class="throw" href="/threads/{{ t.thread_id }}"
+       data-n="{{ t.n }}" data-end="{{ t.end or '' }}" data-start="{{ t.start or '' }}"
+       data-cat="{{ c.classification.category if c else '' }}"
+       data-status="{{ 'comprehended' if c else 'uncomprehended' }}{% if needs %} review{% endif %}{% if is_stale %} stale{% endif %}"
+       data-q="{{ (t.subject ~ ' ' ~ (t.participants|join(' ')) ~ ' ' ~ (c.classification.domain if c else '') ~ ' ' ~ (c.classification.category if c else '') ~ ' ' ~ ((c.facts.project if (c and c.facts) else '')) ~ ' ' ~ (c.summary if c else '') ~ ' ' ~ ((c.tags|join(' ')) if c else '') ~ ' ' ~ ('comprehended' if c else 'not comprehended') ~ (' review' if needs else '') ~ (' out of date' if is_stale else ''))|lower }}">
+      <div class="thmain">
+        <span class="thsubj">{% if c %}{% if is_stale %}<span class="leaf stale" role="img" aria-label="Comprehended, out of date">🍀</span>{% else %}<span class="leaf" role="img" aria-label="Comprehended, up to date">🍀</span>{% endif %}{% else %}<svg class="leaf ghost" role="img" aria-label="Not comprehended yet" style="width:14px;height:14px;color:var(--dim);vertical-align:-.12em;fill:currentColor"><use href="#ic-clover"/></svg>{% endif %} {{ t.subject }}</span>
+        {% if c %}
+        <span class="thmeta note">{{ c.summary or (c.classification.category ~ ' — comprehended') }}</span>
+        <span class="cbadges">{% if needs %}<span class="cbadge warn" tabindex="0" title="{% if c.classification.consensus == 'asked' %}The AI council was split and couldn't agree on the category. {% endif %}{% if c.qaqc and c.qaqc.needs_review %}QAQC check flagged: {{ (c.qaqc.issues or ['faithfulness/completeness'])|join('; ') }}. {% endif %}→ Open this conversation and use ‘Resolve / reclassify’ to set the correct domain &amp; category.">review</span>{% endif %}{% if is_stale %}<span class="cbadge stale" title="Comprehended before the thread changed — re-comprehend to update.">out of date</span>{% endif %}{% if c.facts and c.facts.project %}<span class="cbadge proj">🏗 {{ c.facts.project }}</span>{% endif %}<span class="cbadge dom">{{ c.classification.domain }}</span><span class="cbadge">{{ c.classification.category }}</span></span>
+        {% else %}
+        <span class="thmeta note"><span class="cbadge pend" style="margin-right:6px">awaiting AI</span>{{ t.participants[:3]|join(', ') }}{% if t.participants|length > 3 %} +{{ t.participants|length - 3 }} more{% endif %}</span>
+        {% endif %}
+      </div>
+      <div class="thside">
+        <span class="thn">{{ t.n }} msg{{ 's' if t.n != 1 }}</span>
+        <span class="note mono">{{ (t.start or '')[:10] }}{% if t.n > 1 %} → {{ (t.end or '')[:10] }}{% endif %}</span>
+        {% if t.has_attach or lk %}<span class="thicons">
+          {%- if t.has_attach %}<svg class="ic" role="img" aria-label="Has an attachment"><title>Has an attachment</title><use href="#ic-paperclip"/></svg>{% endif -%}
+          {%- if lk %}{% if lk.pending %}<svg class="ic wait" role="img" aria-label="Share links still to fetch"><title>{{ lk.pending }} share link(s) still to fetch{% if lk.fetched %}, {{ lk.fetched }} downloaded{% endif %} — use Download below, or open the thread</title><use href="#ic-link"/></svg>{% elif lk.fetched %}<svg class="ic on" role="img" aria-label="Share links downloaded"><title>{{ lk.fetched }} share link(s) downloaded</title><use href="#ic-link-check"/></svg>{% endif %}{% endif -%}
+        </span>{% endif %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  <p id="empty" class="note dim" style="display:none;margin:6px 2px 0">No conversations match your filters. <button type="button" class="linkbtn" onclick="clearFilter()">Clear filters</button></p>
+</div>
+{% endif %}
+
+<!-- ============ PROCESSING & TOOLS (operational — below the list, collapsed when idle) ============ -->
+<details class="card toolzone" id="toolZone"{% if comp_counts.pending or comp_counts.stale or link_stats.get('pending', 0) %} open{% endif %}>
+  <summary><svg class="ic" aria-hidden="true"><use href="#ic-gear"/></svg> Processing &amp; tools
+    <span class="note" id="toolSummary">— <strong>{{ comp_counts.done }}</strong> comprehended{% if comp_counts.pending %} · {{ comp_counts.pending }} new{% endif %}{% if comp_counts.stale %} · <span style="color:var(--amber)">{{ comp_counts.stale }} out of date</span>{% endif %}{% if link_stats.get('pending', 0) %} · {{ link_stats['pending'] }} links pending{% endif %}</span></summary>
+
+  <div class="tcap">Comprehend <span class="note" style="text-transform:none;letter-spacing:0">— AI reads whole threads (council classify + QAQC) and fills projects, facts &amp; contacts</span></div>
   {% if not ai_ready %}
-  <p class="note dim" style="margin:10px 0 0">AI reader not set up yet — install the Claude CLI
-    (<code>npm i -g @anthropic-ai/claude-code</code>) and log in, then reload.</p>
+  <p class="note dim">AI reader not set up yet — install the Claude CLI (<code>npm i -g @anthropic-ai/claude-code</code>) and log in, then reload.</p>
   {% else %}
   <div class="comprow">
     <select id="compMode" onchange="compModeChange()" aria-label="What to comprehend">
@@ -73,116 +133,99 @@
     </span>
     <label class="note"><input type="checkbox" id="compRedo"> re-comprehend ones already done</label>
     <button id="compRunBtn" type="button" onclick="compRun()">Comprehend</button>
-    <button id="compStopBtn" type="button" class="ghost" onclick="compStop()" style="display:none">⏹ Stop</button>
+    <button id="compStopBtn" type="button" class="ghost" onclick="compStop()" style="display:none"><svg class="ic" aria-hidden="true"><use href="#ic-stop"/></svg>Stop</button>
   </div>
   <div id="compProgWrap" style="display:none">
-    <div class="ctrack"><div id="compFill" class="cfill"></div></div>
-    <p class="note" id="compProg" style="margin:6px 0 0"></p>
+    <div class="ctrack" role="progressbar" aria-label="Comprehension progress"><div id="compFill" class="cfill"></div></div>
+    <p class="note" id="compProg" role="status" aria-live="polite" style="margin:6px 0 0"></p>
     <p class="note dim" id="compProg2" style="margin:2px 0 0"></p>
     <pre class="log" id="compLog" style="display:none;max-height:120px;margin-top:6px"></pre>
   </div>
   <div id="compMsg" class="msg" role="status" aria-live="polite"></div>
   {% endif %}
-</div>
-{% if link_total %}
-<div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px;padding:12px 16px">
-  <span class="note" style="flex:1;min-width:240px">🔗 Share links: {{ link_total }} found —
-    <strong id="lsDownloaded">{{ link_stats.get('downloaded', 0) }}</strong> downloaded,
-    <span id="lsPending">{{ link_stats.get('pending', 0) }}</span> pending,
-    {{ link_stats.get('needs-auth', 0) }} need sign-in,
-    {{ link_stats.get('dead', 0) }} dead{% if link_stats.get('needs-confirm', 0) %},
-    <strong style="color:var(--amber)">{{ link_stats['needs-confirm'] }} large — open the thread to confirm</strong>{% endif %}.<span id="lsLive" class="dim"></span></span>
-  <button id="fetchBtn" type="button" onclick="fetchLinks()"{% if not link_stats.get('pending', 0) %} style="display:none"{% endif %} title="Download every not-yet-downloaded link file in your archive (headless browser, runs in the background)">⬇ Download <span id="fetchN">{{ link_stats.get('pending', 0) }}</span> pending</button>
-  <button id="stopLinksBtn" type="button" class="ghost" onclick="stopLinks()" title="Halt a running download" style="display:none">⏹ Stop</button>
-  <div id="lsTriage" class="note" style="flex-basis:100%"></div>
-</div>
-{% endif %}
-<details style="margin-top:10px">
-  <summary class="note" style="cursor:pointer">⚙ Maintenance — rebuild conversations / re-scan links (normally automatic after each archive)</summary>
-  <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-    <button id="rebuildBtn" type="button" class="ghost" onclick="rebuild()" title="Re-link emails into conversations">↻ Rebuild conversations</button>
-    <button id="harvestBtn" type="button" class="ghost" onclick="harvestLinks()" title="Re-scan the archive for share links">🔗 Re-scan links</button>
-    <a href="/rules" class="ghost" style="display:inline-flex;align-items:center;text-decoration:none">⚖ Classification rules</a>
-  </div>
-</details>
-<div id="rebuildMsg" class="msg" role="status" aria-live="polite"></div>
 
-{% if not threads %}
-<div class="card"><p class="note dim" style="margin:0">No conversations yet. Import mail on the <a href="/archive">Import</a> tab, then they'll appear here automatically.</p></div>
-{% else %}
-<div class="card">
-  <div class="thtools">
-    <input id="filter" type="text" placeholder="Filter by subject, participant, project, or category…" aria-label="Filter conversations by subject or participant" oninput="apply()">
-    <select id="sort" onchange="apply()" aria-label="Sort conversations">
-      <option value="recent">Most recent</option>
-      <option value="size">Largest</option>
-      <option value="old">Oldest</option>
-    </select>
-    <span id="count" class="note"></span>
-  </div>
-  <div class="thchips" id="thchips">
-    <button type="button" class="chip active" data-s="" onclick="setStatus(this,'')">All</button>
-    <button type="button" class="chip" data-s="review" onclick="setStatus(this,'review')">⚠ Needs review</button>
-    <button type="button" class="chip" data-s="uncomprehended" onclick="setStatus(this,'uncomprehended')">Not comprehended</button>
-    <button type="button" class="chip" data-s="stale" onclick="setStatus(this,'stale')">Out of date</button>
-    {% for cat in cats %}<button type="button" class="chip" onclick="setCat('{{ cat }}')" title="Filter to {{ cat }}">{{ cat }}</button>{% endfor %}
-  </div>
-  <div id="list" class="thlist">
-    {% for t in threads %}
-    {% set c = comps.get(t.thread_id) %}
-    {% set lk = linkstate.get(t.thread_id) %}
-    {% set is_stale = t.thread_id in stale %}
-    {% set needs = c and (c.classification.consensus == 'asked' or (c.qaqc and c.qaqc.needs_review)) %}
-    <a class="throw" href="/threads/{{ t.thread_id }}"
-       data-n="{{ t.n }}" data-end="{{ t.end or '' }}" data-start="{{ t.start or '' }}"
-       data-status="{{ 'comprehended' if c else 'uncomprehended' }}{% if needs %} review{% endif %}{% if is_stale %} stale{% endif %}"
-       data-q="{{ (t.subject ~ ' ' ~ (t.participants|join(' ')) ~ ' ' ~ (c.classification.domain if c else '') ~ ' ' ~ (c.classification.category if c else '') ~ ' ' ~ ((c.facts.project if (c and c.facts) else '')) ~ ' ' ~ (c.summary if c else '') ~ ' ' ~ ((c.tags|join(' ')) if c else '') ~ ' ' ~ ('comprehended' if c else 'not comprehended') ~ (' review' if needs else '') ~ (' out of date' if is_stale else ''))|lower }}">
-      <div class="thmain">
-        <span class="thsubj">{% if c %}{% if t.thread_id in stale %}<span class="leaf stale" title="Comprehended — out of date (thread changed since)">🍀</span>{% else %}<span class="leaf" title="Comprehended (up to date)">🍀</span>{% endif %} {% endif %}{% if t.has_attach %}<span title="Has an attachment">📎</span> {% endif %}{% if lk %}{% if lk.pending %}<span style="color:var(--amber)" title="{{ lk.pending }} share link(s) still to fetch{% if lk.fetched %}, {{ lk.fetched }} downloaded{% endif %} — use ⬇ Download on this page or open the thread">🔗</span> {% elif lk.fetched %}<span style="color:var(--clover)" title="{{ lk.fetched }} share link(s) downloaded">🔗</span> {% endif %}{% endif %}{{ t.subject }}</span>
-        {% if c %}
-        <span class="thmeta note">{{ c.summary or (c.classification.category ~ ' — comprehended') }}</span>
-        <span class="cbadges">{% if c.facts and c.facts.project %}<span class="cbadge proj">🏗 {{ c.facts.project }}</span>{% endif %}<span class="cbadge dom">{{ c.classification.domain }}</span><span class="cbadge">{{ c.classification.category }}</span>{% if needs %}<span class="cbadge warn" tabindex="0" title="{% if c.classification.consensus == 'asked' %}The AI council was split and couldn't agree on the category. {% endif %}{% if c.qaqc and c.qaqc.needs_review %}QAQC check flagged: {{ (c.qaqc.issues or ['faithfulness/completeness'])|join('; ') }}. {% endif %}→ Open this conversation and use ‘Resolve / reclassify’ to set the correct domain &amp; category.">review</span>{% endif %}{% if is_stale %}<span class="cbadge warn" title="Comprehended before the thread changed — re-comprehend to update.">out of date</span>{% endif %}</span>
-        {% else %}
-        <span class="thmeta note">{{ t.participants[:3]|join(', ') }}{% if t.participants|length > 3 %} +{{ t.participants|length - 3 }} more{% endif %}</span>
-        {% endif %}
+  {% if link_total %}
+  <div class="tcap">Share links</div>
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:9px;padding:12px 14px">
+    <span class="note" style="flex:1;min-width:240px"><svg class="ic" aria-hidden="true"><use href="#ic-link"/></svg> {{ link_total }} found —
+      <strong id="lsDownloaded">{{ link_stats.get('downloaded', 0) }}</strong> downloaded,
+      <span id="lsPending">{{ link_stats.get('pending', 0) }}</span> pending,
+      {{ link_stats.get('needs-auth', 0) }} need sign-in,
+      {{ link_stats.get('dead', 0) }} dead{% if link_stats.get('needs-confirm', 0) %},
+      <strong style="color:var(--amber)">{{ link_stats['needs-confirm'] }} large — confirm below</strong>{% endif %}.<span id="lsLive" class="dim" role="status" aria-live="polite"></span></span>
+    <button id="fetchBtn" type="button" onclick="fetchLinks()"{% if not link_stats.get('pending', 0) %} style="display:none"{% endif %} title="Download not-yet-downloaded link files (headless browser, background). Use Filter to limit by date or provider."><svg class="ic" aria-hidden="true"><use href="#ic-download"/></svg>Download <span id="fetchN">{{ link_stats.get('pending', 0) }}</span> pending</button>
+    {% if link_stats.get('pending', 0) %}<button id="lsFilterBtn" type="button" class="ghost" onclick="toggleLinkFilter()" title="Limit the download to a date range and/or provider"><svg class="ic" aria-hidden="true"><use href="#ic-filter"/></svg>Filter…</button>{% endif %}
+    <button id="stopLinksBtn" type="button" class="ghost" onclick="stopLinks()" title="Halt a running download" style="display:none"><svg class="ic" aria-hidden="true"><use href="#ic-stop"/></svg>Stop</button>
+    <span id="linksMsg" class="msg" role="status" aria-live="polite" style="flex-basis:100%;margin:0"></span>
+    {% if link_stats.get('pending', 0) %}
+    <div id="lsFilter" style="display:none;flex-basis:100%;gap:14px;align-items:flex-start;flex-wrap:wrap;padding:10px 12px;margin-top:4px;border:1px solid var(--line);border-radius:8px">
+      <label class="note" style="display:flex;flex-direction:column;gap:3px">Emails from
+        <input type="date" id="lsFrom" style="padding:4px 6px"></label>
+      <label class="note" style="display:flex;flex-direction:column;gap:3px">to
+        <input type="date" id="lsTo" style="padding:4px 6px"></label>
+      {% if link_providers %}
+      <div class="note" style="display:flex;flex-direction:column;gap:3px">Providers
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          {% for p in link_providers %}<label style="display:inline-flex;gap:4px;align-items:center;font-weight:400"><input type="checkbox" class="lsProv" value="{{ p }}"> {{ p }}</label>{% endfor %}
+        </div></div>
+      {% endif %}
+      <span class="note dim" style="flex-basis:100%">Blank = no limit. Only pending links in range are fetched; the rest stay queued.</span>
+    </div>
+    {% endif %}
+    {% if link_confirm %}
+    <div style="flex-basis:100%;border:1px solid rgba(240,178,74,.4);border-radius:8px;background:rgba(240,178,74,.08);padding:10px 12px;margin-top:4px">
+      <div class="note" style="color:var(--amber);font-weight:700;margin-bottom:4px">{{ link_confirm|length }} large file(s) paused — they can be multi-GB, so Clover waits for your OK. Confirm to download:</div>
+      {% for lc in link_confirm %}
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:5px 0;border-top:1px solid var(--line)">
+        <span class="tag">{{ lc.provider }}</span>
+        <span class="note mono" style="flex:1;min-width:140px;overflow:hidden;text-overflow:ellipsis">{{ lc.url }}</span>
+        <span class="note" style="color:var(--amber);font-weight:600">~{{ lc.gb }} GB</span>
+        <button type="button" class="ghost lcbtn" style="font-size:12px;padding:6px 12px" data-mid="{{ lc.message_id }}" data-url="{{ lc.url }}"><svg class="ic" aria-hidden="true"><use href="#ic-download"/></svg>Download it</button>
       </div>
-      <div class="thside">
-        <span class="thn">{{ t.n }} msg{{ 's' if t.n != 1 }}</span>
-        <span class="note mono">{{ (t.start or '')[:10] }}{% if t.n > 1 %} → {{ (t.end or '')[:10] }}{% endif %}</span>
-      </div>
-    </a>
-    {% endfor %}
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div id="lsTriage" class="note" style="flex-basis:100%"></div>
   </div>
-  <p id="empty" class="note dim" style="display:none;margin:6px 2px 0">No conversations match your filter. <button type="button" class="linkbtn" onclick="clearFilter()">Clear filter</button></p>
-</div>
-{% endif %}
+  {% endif %}
+
+  <div class="tcap">Maintenance</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button id="rebuildBtn" type="button" class="ghost" onclick="rebuild('rebuildBtn')" title="Re-link emails into conversations"><svg class="ic" aria-hidden="true"><use href="#ic-refresh"/></svg>Rebuild conversations</button>
+    <button id="harvestBtn" type="button" class="ghost" onclick="harvestLinks()" title="Re-scan the archive for share links"><svg class="ic" aria-hidden="true"><use href="#ic-link"/></svg>Re-scan links</button>
+    <a href="/rules" class="ghost" style="display:inline-flex;align-items:center;gap:5px;text-decoration:none"><svg class="ic" aria-hidden="true"><use href="#ic-scale"/></svg>Classification rules</a>
+  </div>
+  <div id="rebuildMsg" class="msg" role="status" aria-live="polite"></div>
+</details>
 {% endif %}
 
 <script>
 const $ = id => document.getElementById(id);
-let _statusFilter = "";
+function reloadKeepScroll(){ try{ sessionStorage.setItem("mailScroll", window.scrollY); }catch(e){} location.reload(); }
+let _statusFilter = "", _catFilter = "";
 function setStatus(btn, val){
   _statusFilter = val;
-  document.querySelectorAll(".chip[data-s]").forEach(b => b.classList.toggle("active", b === btn));
+  document.querySelectorAll(".chip[data-s]").forEach(b => { const on = b === btn; b.classList.toggle("active", on); b.setAttribute("aria-pressed", on); });
   apply();
 }
-function setCat(cat){
-  _statusFilter = "";
-  document.querySelectorAll(".chip[data-s]").forEach(b => b.classList.toggle("active", b.dataset.s === ""));
-  if($("filter")) $("filter").value = cat;
+function setCat(btn){
+  const cat = btn.dataset.c;                                       // read the value, never interpolate it into JS (XSS-safe)
+  _catFilter = (_catFilter === cat) ? "" : cat;                    // real toggle, AND-combines with status + search
+  document.querySelectorAll(".chip.cat").forEach(b => { const on = b.dataset.c === _catFilter; b.classList.toggle("active", on); b.setAttribute("aria-pressed", on); });
   apply();
 }
 function _initThreadFilters(){
-  const rows = [...document.querySelectorAll(".throw")];           // annotate status chips with counts
+  const rows = [...document.querySelectorAll(".throw")];
   const cnt = sel => rows.filter(r => (r.dataset.status || "").includes(sel)).length;
-  [["review", "⚠ Needs review"], ["uncomprehended", "Not comprehended"], ["stale", "Out of date"]].forEach(([s, base]) => {
+  [["review", "Needs review"], ["uncomprehended", "Not comprehended"], ["stale", "Out of date"]].forEach(([s, base]) => {
     const b = document.querySelector('.chip[data-s="' + s + '"]'); const c = cnt(s);
-    if(b) b.textContent = base + (c ? " (" + c + ")" : "");
+    if(b){ if(c){ b.textContent = base + " (" + c + ")"; } else { b.style.display = "none"; } }   // hide dead filters
   });
   const p = new URLSearchParams(location.search);
-  if(p.get("category") && $("filter")) $("filter").value = p.get("category");
+  const cat = p.get("category");
+  if(cat){ const b = document.querySelector('.chip.cat[data-c="' + CSS.escape(cat) + '"]'); if(b){ setCat(b); } }
   const st = p.get("status");
-  if(st){ const b = document.querySelector('.chip[data-s="' + st + '"]'); if(b){ setStatus(b, st); return; } }
+  if(st){ const b = document.querySelector('.chip[data-s="' + CSS.escape(st) + '"]'); if(b){ b.style.display = ""; setStatus(b, st); return; } }  // re-show a hidden (0-count) chip so the active filter is visible
   apply();
 }
 function apply(){
@@ -192,32 +235,36 @@ function apply(){
   let shown = 0;
   rows.forEach(r => {
     const ok = (!q || (r.dataset.q || "").includes(q)) &&
-               (!_statusFilter || (r.dataset.status || "").includes(_statusFilter));
+               (!_statusFilter || (r.dataset.status || "").includes(_statusFilter)) &&
+               (!_catFilter || (r.dataset.cat || "") === _catFilter);
     r.style.display = ok ? "" : "none"; if(ok) shown++;
   });
   const vis = rows.filter(r => r.style.display !== "none");
   vis.sort((a,b) => {
+    if(sort === "review") return ((b.dataset.status||"").includes("review")?1:0) - ((a.dataset.status||"").includes("review")?1:0)
+                                 || (b.dataset.end || "").localeCompare(a.dataset.end || "");
     if(sort === "size") return (+b.dataset.n) - (+a.dataset.n);
     if(sort === "old")  return (a.dataset.start || "").localeCompare(b.dataset.start || "");
     return (b.dataset.end || "").localeCompare(a.dataset.end || "");
   });
   const list = $("list"); vis.forEach(r => list.appendChild(r));
-  if($("count")) $("count").textContent = shown + " thread(s)";
-  if($("empty")) $("empty").style.display = (shown === 0 && q) ? "" : "none";
+  if($("count")) $("count").textContent = shown + " of " + rows.length;
+  if($("empty")) $("empty").style.display = (shown === 0 && rows.length > 0) ? "" : "none";
 }
 function clearFilter(){
   if($("filter")) $("filter").value = "";
+  _catFilter = ""; document.querySelectorAll(".chip.cat").forEach(b => { b.classList.remove("active"); b.setAttribute("aria-pressed", "false"); });
   const all = document.querySelector('.chip[data-s=""]'); if(all) setStatus(all, ""); else apply();
   if($("filter")) $("filter").focus();
 }
-async function rebuild(){
-  const b = $("rebuildBtn"), m = $("rebuildMsg");
+async function rebuild(btnId){
+  const b = $(btnId), m = $("rebuildMsg");
   if(b) b.disabled = true;
   if(m){ m.className = "msg ok"; m.textContent = "Rebuilding…"; }
   try{
     const res = await (await fetch("/threads/rebuild", {method:"POST"})).json();
     if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }
-    if(res.ok) setTimeout(() => location.reload(), 900); else if(b) b.disabled = false;
+    if(res.ok) setTimeout(reloadKeepScroll, 900); else if(b) b.disabled = false;
   }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Rebuild failed: " + e; } if(b) b.disabled = false; }
 }
 async function harvestLinks(){
@@ -230,17 +277,42 @@ async function harvestLinks(){
   }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Harvest failed: " + e; } }
   if(b) b.disabled = false;
 }
+function toggleLinkFilter(){
+  const f = $("lsFilter"); if(!f) return;
+  f.style.display = (f.style.display === "none" || !f.style.display) ? "flex" : "none";
+}
 async function fetchLinks(){
-  const n = $("fetchN") ? $("fetchN").textContent : "the pending";
-  if(!confirm("Download " + n + " pending link file(s)?\n\nRuns in the background. Identical links download once and very large files pause for your confirmation — but this can still use significant storage and bandwidth.")) return;
-  const m = $("rebuildMsg");
+  const from = $("lsFrom") ? $("lsFrom").value : "", to = $("lsTo") ? $("lsTo").value : "";
+  const provs = Array.from(document.querySelectorAll(".lsProv:checked")).map(c => c.value);
+  const filtered = from || to || provs.length;
+  const scope = filtered ? (" matching your filter (" +
+      [ (from||to) ? ((from||"…")+" → "+(to||"…")) : null, provs.length ? provs.join(", ") : null ]
+        .filter(Boolean).join("; ") + ")") : "";
+  if(!confirm("Download pending link file(s)" + scope + "?\n\nRuns in the background. Identical links download once and very large files pause for your confirmation — but this can still use significant storage and bandwidth.")) return;
+  const m = $("linksMsg");
   if(m){ m.className = "msg ok"; m.textContent = "Starting link download…"; }
   try{
-    const res = await (await fetch("/threads/fetch-links", {method:"POST"})).json();
+    const body = new URLSearchParams();
+    if(from) body.set("date_from", from);
+    if(to) body.set("date_to", to);
+    if(provs.length) body.set("providers", provs.join(","));
+    const res = await (await fetch("/threads/fetch-links", {method:"POST", body})).json();
     if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }
     pollLinks();
   }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Fetch failed: " + e; } }
 }
+async function confirmBig(btn){
+  const orig = btn.innerHTML; btn.disabled = true; btn.textContent = "…";
+  try{
+    const fd = new FormData(); fd.append("message_id", btn.dataset.mid); fd.append("url", btn.dataset.url);
+    const r = await (await fetch("/threads/confirm-link", {method:"POST", body:fd})).json();
+    if(r.ok){
+      await fetch("/threads/fetch-links", {method:"POST"});
+      btn.textContent = "✓ downloading"; pollLinks();
+    } else { btn.disabled = false; btn.innerHTML = orig; }
+  }catch(e){ btn.disabled = false; btn.innerHTML = orig; }
+}
+document.addEventListener("click", e => { const b = e.target.closest(".lcbtn"); if(b) confirmBig(b); });
 let _linkPoll = null;
 async function pollLinks(){
   try{
@@ -257,7 +329,7 @@ async function pollLinks(){
         (s.current ? ' · ' + s.current.slice(0,46) : '') + (s.failed ? ' · ' + s.failed + ' failed' : '');
       clearTimeout(_linkPoll); _linkPoll = setTimeout(pollLinks, 3000);
     } else { if(live) live.textContent = ""; _linkPoll = null; }
-    const tri = $("lsTriage");                               // needs-auth / dead triage (actionable)
+    const tri = $("lsTriage");
     if(tri){
       const na = s.needs_auth || [], dd = s.dead || [], esc = u => (u||"").replace(/"/g,"&quot;");
       let h = "";
@@ -272,13 +344,12 @@ async function pollLinks(){
   }catch(e){ _linkPoll = null; }
 }
 async function stopLinks(){
-  const m = $("rebuildMsg");
+  const m = $("linksMsg");
   try{
     const res = await (await fetch("/threads/stop-links", {method:"POST"})).json();
     if(m){ m.className = "msg " + (res.ok ? "ok" : "err"); m.textContent = res.message; }
   }catch(e){ if(m){ m.className = "msg err"; m.textContent = "Stop failed: " + e; } }
 }
-// ---- batch comprehension ----
 function compModeChange(){
   const m = $("compMode").value;
   $("compProject").style.display = m === "project" ? "" : "none";
@@ -306,6 +377,7 @@ let _compPoll = null, _compSawRun = false;
 async function pollComp(){
   try{
     const s = await (await fetch("/comprehend/status")).json();
+    if(s.running && $("toolZone")) $("toolZone").open = true;        // surface the run without hunting
     if($("compRunBtn")) $("compRunBtn").style.display = s.running ? "none" : "";
     if($("compStopBtn")) $("compStopBtn").style.display = s.running ? "" : "none";
     if($("compProgWrap")) $("compProgWrap").style.display = (s.running || s.total) ? "" : "none";
@@ -325,17 +397,49 @@ async function pollComp(){
       const lg = $("compLog");
       if(lg && s.log && s.log.length){ lg.style.display = ""; lg.textContent = s.log.join("\n"); lg.scrollTop = lg.scrollHeight; }
     }
-    if(s.counts && $("compCounts"))
-      $("compCounts").innerHTML = "<strong>" + s.counts.done + "</strong> done · " + s.counts.pending +
-        " new · <span style='color:var(--amber)'>" + s.counts.stale + " out‑of‑date</span>";
+    if(s.counts && $("toolSummary"))
+      $("toolSummary").innerHTML = "— <strong>" + s.counts.done + "</strong> comprehended" + (s.counts.pending ? " · " + s.counts.pending + " new" : "") +
+        (s.counts.stale ? " · <span style='color:var(--amber)'>" + s.counts.stale + " out of date</span>" : "");
     if(s.running){ _compSawRun = true; clearTimeout(_compPoll); _compPoll = setTimeout(pollComp, 2500); }
     else {
       _compPoll = null;
       if(s.message){ const m = $("compMsg"); m.className = "msg ok"; m.textContent = s.message; }
-      if(_compSawRun){ _compSawRun = false; setTimeout(() => location.reload(), 1200); }   // refresh clovers
+      if(_compSawRun){ _compSawRun = false; setTimeout(reloadKeepScroll, 1200); }
     }
   }catch(e){ _compPoll = null; }
 }
-document.addEventListener("DOMContentLoaded", () => { if($("list")) _initThreadFilters(); if($("lsLive")) pollLinks(); if($("compMode")) pollComp(); });
+async function syncMail(){
+  const b = $("syncBtn"), m = $("syncMsg");
+  b.disabled = true; m.style.color = "var(--sub)"; m.textContent = "Starting sync…";
+  try {
+    const r = await (await fetch("/mail/sync", {method:"POST"})).json();
+    m.textContent = r.message;
+    if(!r.ok){ b.disabled = false; m.style.color = "var(--amber)"; return; }
+    pollSync();
+  } catch(e){ b.disabled = false; m.style.color = "var(--amber)"; m.textContent = "Sync failed to start."; }
+}
+async function pollSync(){
+  const b = $("syncBtn"), m = $("syncMsg");
+  try {
+    const s = await (await fetch("/archive/status")).json();
+    if(s.running){
+      let done = 0, total = 0; (s.folders||[]).forEach(f => { done += (f.skipped||0)+(f.saved||0); total += (f.total||0); });
+      if(b) b.disabled = true;
+      m.style.color = "var(--sub)";
+      m.textContent = "Syncing… " + done + (total ? " / " + total : "") + (s.session_saved ? " · " + s.session_saved + " new" : "");
+      setTimeout(pollSync, 1500);
+    } else {
+      m.style.color = "var(--clover-d)"; m.textContent = "Sync complete — refreshing…";
+      setTimeout(reloadKeepScroll, 1200);
+    }
+  } catch(e){ setTimeout(pollSync, 2500); }
+}
+document.addEventListener("DOMContentLoaded", () => {
+  try{ const y = sessionStorage.getItem("mailScroll"); if(y){ window.scrollTo(0, +y); sessionStorage.removeItem("mailScroll"); } }catch(e){}
+  if($("list")) _initThreadFilters();
+  if($("lsLive")) pollLinks();
+  if($("compMode")) pollComp();
+  if($("syncBtn")) fetch("/archive/status").then(r => r.json()).then(s => { if(s.running) pollSync(); }).catch(() => {});
+});
 </script>
 {% endblock %}

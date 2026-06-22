@@ -145,10 +145,48 @@ class _DSU:
 
 
 # ---------------------------------------------------------------- builder
+def _hdr_cache_path(archive: Path) -> Path:
+    return archive / "_thread_hdrs.json"
+
+
+def _load_hdr_cache(archive: Path) -> dict:
+    """path -> extracted threading headers, parsed once. Archived .eml are immutable, so a path is a stable
+    key — a rebuild reuses cached headers and only parses newly-imported files."""
+    p = _hdr_cache_path(archive)
+    if p.exists():
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _parse_thread_headers(raw_msg) -> dict:
+    """The subset of headers threading needs, pulled from a parsed .eml header block (so the cache holds
+    everything build_threads uses — no second open)."""
+    return {
+        "mid": _norm_id(raw_msg.get("Message-ID")),
+        "date": _to_utc_iso(raw_msg.get("Date")),
+        "from": str(raw_msg.get("From", "") or ""),
+        "to": str(raw_msg.get("To", "") or ""),
+        "subject": str(raw_msg.get("Subject", "") or ""),
+        "refs": _ids_in(raw_msg.get("In-Reply-To")) + _ids_in(raw_msg.get("References")),
+        "attach": "multipart/mixed" in str(raw_msg.get("Content-Type", "") or "").lower(),
+    }
+
+
 def build_threads(archive_path, log=print) -> dict:
-    """Link every archived message into a thread; write <archive>/threads.jsonl. Returns a summary."""
+    """Link every archived message into a thread; write <archive>/threads.jsonl. Returns a summary.
+
+    A per-message header cache (_thread_hdrs.json) means each .eml is parsed from disk only ONCE — a
+    rebuild after importing one email re-parses one file, not the whole archive (the old behaviour, which
+    made every import re-read thousands of .eml)."""
     archive = Path(archive_path)
     rows = read_index(archive)
+    cache = _load_hdr_cache(archive)
+    new_cache: dict[str, dict] = {}
+    parsed = 0
     dsu = _DSU()
     members: dict[str, dict] = {}                # node -> member record
 
@@ -156,31 +194,41 @@ def build_threads(archive_path, log=print) -> dict:
         rel = row.get("path")
         if not rel:
             continue
-        try:
-            with (archive / rel).open("rb") as fh:
-                h = _HEADER_PARSER.parse(fh)
-        except Exception as e:
-            log(f"  ! skip unreadable {rel}: {type(e).__name__}")
-            continue
-        mid = _norm_id(h.get("Message-ID"))
+        h = cache.get(rel)
+        if h is None:                            # not cached yet -> parse this .eml once
+            try:
+                with (archive / rel).open("rb") as fh:
+                    h = _parse_thread_headers(_HEADER_PARSER.parse(fh))
+            except Exception as e:
+                log(f"  ! skip unreadable {rel}: {type(e).__name__}")
+                continue
+            parsed += 1
+        new_cache[rel] = h
+        mid = h["mid"]
         # a missing Message-ID can't be referenced by others and uid_ ids aren't globally unique,
         # so key such a message by its (unique) path -> guarantees it's its own node
         node = mid if mid else f"path::{rel}"
         m = members.get(node)
         if m is None:
             m = members[node] = {
-                "message_id": mid or node, "date": _to_utc_iso(h.get("Date")),
-                "from": str(h.get("From", "") or ""), "to": str(h.get("To", "") or ""),
-                "subject": str(h.get("Subject", "") or ""), "locations": [],
+                "message_id": mid or node, "date": h["date"],
+                "from": h["from"], "to": h["to"],
+                "subject": h["subject"], "locations": [],
             }
         loc = {"folder": row.get("folder", "?"), "path": rel}
         if loc not in m["locations"]:            # cross-folder dup -> one member, many locations
             m["locations"].append(loc)
-        if "multipart/mixed" in str(h.get("Content-Type", "") or "").lower():
+        if h["attach"]:
             m["attach"] = True                   # header-only attachment hint (mixed = a file is attached)
         dsu.find(node)
-        for ref in _ids_in(h.get("In-Reply-To")) + _ids_in(h.get("References")):
+        for ref in h["refs"]:
             dsu.union(node, ref)
+
+    if parsed or set(new_cache) != set(cache):   # persist when we parsed new files or dropped stale ones
+        try:
+            _hdr_cache_path(archive).write_text(json.dumps(new_cache, ensure_ascii=False), encoding="utf-8")
+        except Exception as e:
+            log(f"  ! couldn't write header cache: {type(e).__name__}")
 
     comps: dict[str, list[str]] = {}
     for node in members:
@@ -212,7 +260,9 @@ def build_threads(archive_path, log=print) -> dict:
         for t in threads:
             fh.write(json.dumps(t, ensure_ascii=False) + "\n")
     _invalidate_threads_cache(out)               # we just rewrote — drop the stale cache
-    return _finish_build(threads, out, log)
+    summary = _finish_build(threads, out, log)
+    summary["parsed"] = parsed                    # how many .eml were parsed this run (0 = fully cache-hit)
+    return summary
 
 
 def _finish_build(threads, out, log):

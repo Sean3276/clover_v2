@@ -57,6 +57,21 @@ def test_to_utc_iso_normalizes_timezone():
 
 
 # ---------------------------------------------------------------- builder
+def test_build_threads_caches_headers_and_parses_only_new(tmp_path):
+    # perf: a rebuild must NOT re-parse every .eml — only newly-added messages (1 new email != full reparse)
+    _write_eml(tmp_path, "INBOX", "1", mid="a@x")
+    _write_eml(tmp_path, "INBOX", "2", mid="b@x", irt="a@x")
+    s1 = th.build_threads(tmp_path, log=lambda *_: None)
+    assert s1["parsed"] == 2                        # cold cache: both .eml parsed
+    s2 = th.build_threads(tmp_path, log=lambda *_: None)
+    assert s2["parsed"] == 0                        # warm cache: nothing re-parsed
+    assert s2["threads"] == s1["threads"]
+    _write_eml(tmp_path, "INBOX", "3", mid="c@x", refs=["a@x", "b@x"])
+    s3 = th.build_threads(tmp_path, log=lambda *_: None)
+    assert s3["parsed"] == 1                        # ONLY the new message parsed
+    assert s3["threads"] == 1 and th.read_threads(tmp_path)[0]["n"] == 3   # threading still correct
+
+
 def test_links_chain_by_references(tmp_path):
     _write_eml(tmp_path, "INBOX", "1", mid="a@x", date="Thu, 01 Jan 2026 00:00:00 +0000")
     _write_eml(tmp_path, "INBOX", "2", mid="b@x", irt="a@x", date="Thu, 02 Jan 2026 00:00:00 +0000")
@@ -206,6 +221,24 @@ def test_thread_routes_lazy_load(tmp_path, monkeypatch):
     assert c.get("/threads/deadbeef/msg/0").status_code == 404
 
 
+def test_mail_category_chip_is_xss_safe(tmp_path, monkeypatch):
+    # an AI-produced category containing a quote must NOT be interpolated into an inline onclick (stored-XSS)
+    import json as _json
+    from starlette.testclient import TestClient
+    import app.main as m
+    from clover import comprehend as cp
+    (tmp_path / "threads.jsonl").write_text(_json.dumps(
+        {"thread_id": "t1", "root_id": "r1", "n": 1, "subject": "A", "participants": [],
+         "start": "2026-06-01", "end": "2026-06-01", "members": []}) + "\n", encoding="utf-8")
+    cp.save_comprehension(tmp_path, {"thread_id": "t1", "root_id": "r1", "subject": "A", "summary": "x",
+                                     "classification": {"domain": "D", "category": "x'),alert(1)//"}, "facts": {}})
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: {"auth": {"imap": {}}, "archive_path": str(tmp_path)})
+    h = TestClient(m.app).get("/threads").text
+    assert "setCat(this)" in h                              # category chips drive off data-c, not interpolation
+    assert "setCat(this,'" not in h                         # the value is never injected into the JS string
+    assert "),alert(1)//')" not in h                        # the payload never reaches an executable position
+
+
 def test_confirm_link_route_and_needs_confirm_render(tmp_path, monkeypatch):
     from starlette.testclient import TestClient
     import app.main as m
@@ -226,7 +259,7 @@ def test_confirm_link_route_and_needs_confirm_render(tmp_path, monkeypatch):
 
     r = c.get(f"/threads/{tid}/msg/0")
     assert r.status_code == 200
-    assert "Download anyway" in r.text and "needs-confirm" in r.text and "GB" in r.text
+    assert "Download it anyway" in r.text and "needs-confirm" in r.text and "GB" in r.text
 
     rec = ls.read_link_shares(tmp_path)[0]
     resp = c.post("/threads/confirm-link", data={"message_id": rec["message_id"], "url": rec["url"]})
@@ -268,7 +301,7 @@ def test_sending_is_gated_off_by_default(tmp_path, monkeypatch):
     c = TestClient(m.app)
     tid = th.read_threads(tmp_path)[0]["thread_id"]
     assert 'id="composer"' not in c.get(f"/threads/{tid}").text          # no compose UI
-    assert "↩ Reply" not in c.get(f"/threads/{tid}/msg/0").text          # no reply buttons
+    assert "openCompose" not in c.get(f"/threads/{tid}/msg/0").text       # no reply/forward buttons (gated off)
     assert c.post("/send", data={"thread_id": tid, "idx": 0, "action": "reply", "to": "x@y.com"}).status_code == 403
     assert c.post(f"/threads/{tid}/compose", data={"idx": 0, "action": "reply"}).status_code == 403
 

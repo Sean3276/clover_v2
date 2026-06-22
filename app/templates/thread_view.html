@@ -100,7 +100,7 @@
   {% if stale %}
   <p class="note" style="margin:6px 0 0;color:var(--amber)"><span class="leaf stale">🍀</span>
     <strong>Out of date.</strong> New messages have arrived since this was last comprehended — re-comprehend to refresh.
-    {% if ai_ready %}<button type="button" class="linkbtn" onclick="comprehend()">↻ Re-comprehend now</button>{% endif %}</p>
+    {% if ai_ready %}<button type="button" class="linkbtn" onclick="comprehend()"><svg class="ic" aria-hidden="true"><use href="#ic-refresh"/></svg>Re-comprehend now</button>{% endif %}</p>
   {% endif %}
   {% if comp.qaqc and comp.qaqc.needs_review and comp.qaqc.issues %}
   <p class="note dim" style="margin:6px 0 0"><strong>QAQC:</strong> {{ comp.qaqc.issues|join('; ') }}</p>
@@ -207,10 +207,10 @@
 {% if link_saved or link_pending or link_needs_confirm %}
 <div class="tbar" style="margin-bottom:8px;flex-wrap:wrap">
   {% if link_pending %}
-  <button id="threadFetchBtn" type="button" class="ghost" onclick="fetchThreadLinks()" title="Download the files shared via links in this conversation that aren't saved yet">⬇ Download {{ link_pending }} linked file(s)</button>
+  <button id="threadFetchBtn" type="button" class="ghost" onclick="fetchThreadLinks()" title="Download the files shared via links in this conversation that aren't saved yet"><svg class="ic" aria-hidden="true"><use href="#ic-download"/></svg>Download {{ link_pending }} linked file(s)</button>
   {% endif %}
   {% if link_needs_confirm %}
-  <button type="button" class="ghost" onclick="expandAll(true)" title="Large files need your confirmation — open the messages and click ‘Download anyway’" style="color:var(--amber);border-color:var(--amber)">⚠ Confirm {{ link_needs_confirm }} large file(s)</button>
+  <button type="button" class="ghost" onclick="expandAll(true)" title="Large files need your confirmation — open the messages and click ‘Download it anyway’" style="color:var(--amber);border-color:var(--amber)">⚠ Confirm {{ link_needs_confirm }} large file(s)</button>
   {% endif %}
   {% if link_saved %}
   <button type="button" class="ghost" onclick="toggleSavedFiles()" title="These link files are already downloaded and kept in your archive">📁 {{ link_saved|length }} file(s) downloaded</button>
@@ -222,7 +222,7 @@
   <div class="note" style="margin:0 0 6px">Downloaded from links in this conversation:</div>
   {% for r in link_saved %}
   <div class="lrow"><span class="lprov">{{ r.provider }}</span>
-    <a href="/linkfile/{{ r.file }}" target="_blank" rel="noopener">⬇ {{ r.file.split('/')|last }}</a></div>
+    <a href="/linkfile/{{ r.file }}" target="_blank" rel="noopener"><svg class="ic" aria-hidden="true"><use href="#ic-download"/></svg> {{ r.file.split('/')|last }}</a></div>
   {% endfor %}
 </div>
 {% endif %}
@@ -245,7 +245,7 @@
   <label for="cBody">Message</label>
   <textarea id="cBody" rows="8" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--input-bg);color:var(--ink);font:inherit"></textarea>
   <div class="tbar" style="margin-top:10px">
-    <button type="button" id="cSend" onclick="sendCompose()" style="background:var(--amber);color:#1a1205">✉ Review &amp; send</button>
+    <button type="button" id="cSend" onclick="sendCompose()" style="background:var(--amber);color:#1a1205"><svg class="ic" aria-hidden="true"><use href="#ic-mail"/></svg>Review &amp; send</button>
     <button type="button" class="ghost" onclick="closeCompose()">Cancel</button>
     <span id="cMsg" class="note dim"></span>
   </div>

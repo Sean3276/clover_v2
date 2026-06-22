@@ -297,7 +297,8 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
     dest.mkdir(parents=True, exist_ok=True)
 
     done = existing_keys(dest)
-    manifest = {"folders": {}, "saved": 0, "skipped": 0, "errors": 0, "aborted": False, "stopped": False, "archive_path": str(dest)}
+    manifest = {"folders": {}, "saved": 0, "skipped": 0, "errors": 0, "aborted": False, "stopped": False,
+                "archive_path": str(dest), "saved_ids": []}   # ids imported this run -> scope the link fetch
 
     idx_fh = open(dest / "_index.jsonl", "a", encoding="utf-8")  # incremental, resumable
     try:
@@ -409,6 +410,7 @@ def run_archive(cfg: dict, password: str, log=print, limit_per_folder: int | Non
                         idx_fh.write(json.dumps(row, ensure_ascii=False) + "\n")
                         idx_fh.flush()
                         done.add((fol, validity, str(key)))
+                        manifest["saved_ids"].append(row["id"])   # for scoping the post-import link fetch
                         saved += 1
                         consec = 0
                         if saved % step == 0:

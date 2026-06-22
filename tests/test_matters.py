@@ -197,6 +197,63 @@ def test_importance_route_marks_item(monkeypatch, tmp_path):
     assert mt.items([rec], "2026-06-21", mt.read_store(arch))[0]["important"] is True
 
 
+def test_sort_items_by_importance(tmp_path):
+    # new sort axis: important matters first, then by soonest expiry within each group
+    its = [
+        {"subject": "a", "important": False, "days_left": 1, "date": "2026-06-02"},
+        {"subject": "b", "important": True, "days_left": 5, "date": "2026-06-01"},
+        {"subject": "c", "important": True, "days_left": 2, "date": "2026-06-03"},
+    ]
+    assert [i["subject"] for i in mt.sort_items(its, "importance")] == ["c", "b", "a"]
+
+
+def test_dmy_date_filter():
+    from app.main import _dmy
+    assert _dmy("2026-06-15") == "15 Jun 2026"            # ISO date -> dd mmm yyyy
+    assert _dmy("2026-06-15T10:30:00Z") == "15 Jun 2026"  # ISO datetime -> just the date
+    assert _dmy("") == "" and _dmy(None) == ""            # empty stays empty
+    assert _dmy("2026-00-15") == "2026-00-15"             # month 00 must NOT wrap to 'Dec' — fall through raw
+    assert _dmy("2026-13-15") == "2026-13-15"             # out-of-range month -> raw
+
+
+def test_matters_firstrun_has_no_controls(monkeypatch, tmp_path):
+    # no comprehension records -> the first-run card, NOT the controls/tagPop (the global JS listeners that
+    # reference $("tagPop") must not be present without a guard — this is the page a brand-new user lands on)
+    monkeypatch.setenv("CLOVER_V2_HOME", str(tmp_path))
+    from starlette.testclient import TestClient
+    import app.main as m
+    h = TestClient(m.app).get("/todo").text
+    assert "Your matters will appear here" in h and "Import mail" in h   # first-run CTA
+    assert 'id="tagPop"' not in h and 'id="fSort"' not in h             # controls absent on first run
+
+
+def test_matters_dates_and_independent_focus_and_importance(monkeypatch, tmp_path):
+    # 14a: an item with no extracted deadline must still show a date (its last activity), never "no date"
+    # 14b: FOCUS (★ = your to-do tracking) and IMPORTANT (⚑ = importance flag) are INDEPENDENT axes — either
+    #      can be set without the other; marking important must NOT add the item to Focus, and vice versa.
+    import json
+    from starlette.testclient import TestClient
+    monkeypatch.setenv("CLOVER_V2_HOME", str(tmp_path))
+    from clover.paths import default_archive_path
+    from clover.comprehend import comprehension_path
+    arch = default_archive_path(); arch.mkdir(parents=True, exist_ok=True)
+    rec = {"thread_id": "t1", "root_id": "r1", "subject": "Cladding RFI", "summary": "awaiting reply",
+           "classification": {"domain": "Project", "category": "Design"}, "facts": {},
+           "actions": [], "source": {"end": "2026-06-15"}}        # no dated obligation
+    comprehension_path(arch).write_text(json.dumps(rec) + "\n", encoding="utf-8")
+    import app.main as m
+    h = TestClient(m.app).get("/todo").text
+    assert "15 Jun 2026" in h and "last update" in h            # dd mmm yyyy fallback to the activity date
+    assert "setImp(" in h and "cloverbtn" in h                  # star=Important + clover=Focus both present
+    key = mt.item_key("r1", "awaiting reply")
+    mt.set_importance(arch, key, "high")                         # mark important (star) WITHOUT focusing (clover)
+    assert key not in mt.read_store(arch)["pins"]               # importance did NOT add it to Focus
+    assert "star on" in TestClient(m.app).get("/todo").text     # the star shows the important (amber) state
+    mt.set_pin(arch, key, True)                                 # now focus it via the clover
+    store = mt.read_store(arch)
+    assert key in store["pins"] and store["importance"].get(key) == "high"   # both axes held independently
+
+
 def test_matters_page_renders_focus_and_happenings(monkeypatch, tmp_path):
     from starlette.testclient import TestClient
     _seed(monkeypatch, tmp_path)

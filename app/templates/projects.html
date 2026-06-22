@@ -6,6 +6,17 @@
 <h1>Hub</h1>
 <p class="note">Projects detected from <strong>comprehended</strong> conversations — grouped by the project
   name each thread is about. Comprehend more mail to see more here.</p>
+{% if coverage and coverage.total %}
+<div class="card" style="margin-top:12px;padding:13px 16px">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
+    <span class="note"><strong style="color:var(--ink);font-size:15px">{{ coverage.done }}</strong> of {{ coverage.total }} conversation{{ 's' if coverage.total != 1 }} comprehended &amp; in your Hub{% if coverage.pending %} · <span style="color:var(--amber)">{{ coverage.pending }} not yet</span>{% endif %}</span>
+    <span class="note mono">{{ (coverage.done / coverage.total * 100) | round | int }}%</span>
+  </div>
+  <div style="height:7px;background:var(--track-bg);border:1px solid var(--line);border-radius:5px;overflow:hidden;margin-top:8px">
+    <div style="height:100%;width:{{ (coverage.done / coverage.total * 100) | round(1) }}%;background:linear-gradient(90deg,var(--clover),var(--cyan));border-radius:5px"></div></div>
+  {% if coverage.pending %}<p class="note dim" style="margin:7px 0 0">The other {{ coverage.pending }} are in <a href="/threads">Mail</a> waiting to be comprehended — run <strong>Sync</strong>, or open them and click Comprehend.</p>{% endif %}
+</div>
+{% endif %}
 <style>
   .throw .mergebtn{flex:none;background:none;border:0;cursor:pointer;font-size:15px;color:var(--sub);padding:0 2px}
   .throw .mergebtn:hover{color:var(--clover-d)}
@@ -15,8 +26,9 @@
 <div class="card"><p class="note dim" style="margin:0">No projects yet — open a conversation in
   <a href="/threads">Mail</a> and click <strong>Comprehend</strong>; detected project names group here.</p></div>
 {% else %}
-<p class="note">Two names for the same project? Click <b>⛙</b> on the one to fold in, then type the target's
-  name — same as merging firms in <a href="/contacts">Rolodex</a>. The target keeps its name; merges survive re-comprehension.</p>
+<p class="note">Two names for the same project? Click the <strong>merge</strong> icon
+  <svg class="ic" aria-hidden="true" style="vertical-align:-.2em"><use href="#ic-merge"/></svg> on the one to fold in, then type
+  the target's name — same as merging firms in <a href="/contacts">Rolodex</a>. The target keeps its name; merges survive re-comprehension.</p>
 <div class="thlist" style="margin-top:12px">
   {% for p in projects %}
   <div class="throw">
@@ -27,7 +39,7 @@
     <div class="thside">
       <span class="thn">{{ p.count }} thread{{ 's' if p.count != 1 }}</span>
       <button type="button" class="mergebtn" title="Merge this project into another (type the target's name)"
-              data-key="{{ p.key }}" data-name="{{ p.name }}" onclick="mergeProject(this)">⛙</button>
+              data-key="{{ p.key }}" data-name="{{ p.name }}" onclick="mergeProject(this)"><svg class="ic" aria-label="Merge project"><use href="#ic-merge"/></svg></button>
     </div>
   </div>
   {% endfor %}

@@ -23,6 +23,15 @@ def test_exec_timeout_kills_promptly():
     assert time.monotonic() - start < 8          # killed ~1s, NOT after the 30s sleep
 
 
+def test_exec_pre_checks_stop_before_spawning():
+    # already-stopping: abort instantly at the NEXT call, without launching a process (bounds stop latency
+    # when calls fail fast and a thread is mid-way through its passes)
+    start = time.monotonic()
+    with pytest.raises(Stopped):
+        _exec([PY, "-c", "import time; time.sleep(30)"], "", timeout=60, should_stop=lambda: True)
+    assert time.monotonic() - start < 2
+
+
 def test_exec_stop_aborts_promptly():
     flag = {"stop": False}
     threading.Timer(0.5, lambda: flag.__setitem__("stop", True)).start()

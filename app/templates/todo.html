@@ -3,14 +3,19 @@
 {% block nav_matters %}active{% endblock %}
 {% block body %}
 <style>
-  .mhd{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:0 0 10px}
+  .mhd{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:0 0 4px}
   .mhd h1{font-size:20px;margin:0}
-  .ctrls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 14px;padding:10px 12px;
+  .legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:0 0 12px;font-size:12px;color:var(--sub)}
+  .legend b{font-weight:600;color:var(--ink)}
+  .legend .lg{display:inline-flex;gap:5px;align-items:center}
+  .legend .ic-clover{width:15px;height:15px;color:var(--clover)} .legend .lstar{color:var(--amber);font-size:14px}
+  .ctrls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px;padding:9px 12px;
     border:1px solid var(--line);border-radius:10px;background:var(--card2)}
   .ctrls label{margin:0;text-transform:none;letter-spacing:0;font-size:11px;color:var(--sub);display:inline-flex;gap:5px;align-items:center}
   .ctrls select,.ctrls input[type=text]{width:auto;padding:5px 9px;font-size:13px}
   .ctrls input[type=text]{min-width:150px}
   .ctrls .sp{flex:1}
+  .csep{align-self:stretch;width:1px;background:var(--line);margin:2px 3px}
   .ctrls .tog{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
   .ctrls input[type=checkbox]{width:auto;margin:0;accent-color:var(--clover)}
   .tagmenu{position:relative}
@@ -19,154 +24,251 @@
   .tagpop.open{display:block}
   .tagpop label{display:flex;gap:7px;margin:5px 0;font-size:12px;color:var(--ink);text-transform:none;letter-spacing:0}
   .msec{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--sub);margin:22px 0 10px;
-    border-top:1px solid var(--line);padding-top:14px;display:flex;align-items:baseline;gap:8px}
+    border-top:1px solid var(--line);padding-top:14px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
   .msec .note{text-transform:none;letter-spacing:0}
   .tdsum{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
   .tdchip{font-size:12px;font-weight:700;border:1px solid var(--line);border-radius:14px;padding:3px 12px;background:var(--card2);color:var(--sub)}
-  .tdchip b{color:var(--ink)} .tdchip.od{color:var(--amber);border-color:rgba(240,178,74,.4);background:rgba(240,178,74,.12)}
+  .tdchip b{color:var(--ink)} .tdchip.od{color:var(--red);border-color:rgba(255,107,94,.4);background:rgba(255,107,94,.1)}
   .row2{position:relative;overflow:hidden;display:flex;gap:12px;align-items:flex-start;padding:11px 13px;
-    border:1px solid var(--line);border-radius:9px;margin-bottom:8px;background:var(--card)}
+    border:1px solid var(--line);border-radius:9px;margin-bottom:10px;background:var(--card)}
   .row2>*{position:relative;z-index:1}
-  .row2.od{border-color:rgba(240,178,74,.45)}
+  .row2.od{border-color:rgba(255,107,94,.4)}
   .row2.pinned{border-color:var(--clover);box-shadow:inset 3px 0 0 var(--clover)}
-  .row2.sugg{border-color:rgba(150,170,255,.45)}
+  .row2.sugg{border-color:rgba(52,210,123,.4)}
+  /* due-soon left accent (always on): neutral -> amber (<=7d) -> red (overdue), independent of the opt-in gauge */
+  .row2::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:transparent;z-index:0}
+  .row2.warm::before{background:var(--amber)} .row2.hot::before{background:var(--red)}
   .gfill{display:none;position:absolute;left:0;top:0;bottom:0;z-index:0;border-radius:9px 0 0 9px;
-    background:linear-gradient(90deg,rgba(240,178,74,.20),rgba(240,178,74,.05))}
-  .gfill.hot{background:linear-gradient(90deg,rgba(255,107,94,.28),rgba(255,107,94,.06))}
+    background:linear-gradient(90deg,rgba(240,178,74,.16),rgba(240,178,74,.03))}
+  .gfill.hot{background:linear-gradient(90deg,rgba(255,107,94,.2),rgba(255,107,94,.04))}
   body.gauge-on .gfill{display:block}
-  .tddue{flex:none;width:104px;font-size:12px;font-weight:700;color:var(--ink)}
-  .tddue .dl{display:block;font-size:11px;font-weight:600;color:var(--sub)} .tddue .dl.od{color:var(--amber)}
+  .tddue{flex:none;width:96px;display:flex;flex-direction:column;gap:8px;align-items:flex-start;font-size:12.5px;font-weight:700;color:var(--ink)}
+  .tddue .dl{display:block;font-size:11px;font-weight:600;color:var(--sub)} .tddue .dl.od{color:var(--red)}
+  /* the clover = FOCUS toggle: grey when not tracked, brand-green (lit up) when in Focus */
+  .cloverbtn{background:none;border:0;cursor:pointer;color:var(--dim);line-height:0;transition:transform .12s,color .12s;
+    min-width:40px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:5px;margin:-5px}
+  .cloverbtn.on{color:var(--clover)} .cloverbtn:hover{color:var(--clover);transform:scale(1.08)}
+  .cloverbtn .ic-clover{width:30px;height:30px}
   .main{flex:1;min-width:0}
-  .l1{display:flex;gap:7px;align-items:baseline;flex-wrap:wrap;margin:0}
-  .l1 .txt{font-size:14px;color:var(--ink)}
-  .tldr{font-size:12.5px;color:var(--sub);margin:3px 0 0}
-  .meta{font-size:11.5px;color:var(--sub);display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:4px}
-  .meta a{color:var(--sub)} .meta a:hover{color:var(--clover-d)}
-  .star{background:none;border:0;font-size:16px;line-height:1;cursor:pointer;color:var(--line);padding:0;flex:none}
-  .star.on{color:var(--clover)} .star:hover{color:var(--clover-d)}
-  .pill{font-size:10px;font-weight:800;border-radius:4px;padding:1px 6px;flex:none;text-transform:uppercase;letter-spacing:.3px}
-  .pill.hi{background:rgba(240,178,74,.18);color:var(--amber);border:1px solid rgba(240,178,74,.4)}
-  .pill.rev{background:rgba(240,178,74,.16);color:var(--amber);border:1px solid rgba(240,178,74,.34)}
-  .tag{font-size:10.5px;font-weight:700;border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--sub);background:var(--card2);flex:none}
-  .impbtn{background:none;border:0;color:var(--clover-d);font-size:11px;font-weight:600;cursor:pointer;padding:0;margin-left:auto}
-  .suggbar{margin-top:7px;font-size:11.5px;color:#9bb0ff}
-  .addbtn{background:rgba(150,170,255,.14);border:1px solid rgba(150,170,255,.4);color:#9bb0ff;font-size:11px;font-weight:700;border-radius:5px;padding:1px 8px;cursor:pointer;margin-left:4px}
+  .l1{display:flex;gap:7px;align-items:baseline;margin:0}
+  .txt{font-size:15px;font-weight:600;color:var(--ink);min-width:0}
+  .tldr{font-size:12.5px;color:var(--sub);margin:3px 0 0;line-height:1.45}
+  .tagrow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px}
+  .meta{font-size:11.5px;color:var(--sub);display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:5px}
+  .meta a{color:var(--sub);display:inline-flex;gap:4px;align-items:center} .meta a:hover{color:var(--clover-d)}
+  /* the star = IMPORTANT toggle (a separate axis from Focus): amber when marked important */
+  .star{background:none;border:0;font-size:18px;line-height:1;cursor:pointer;color:var(--dim);flex:none;transition:transform .1s,color .12s;
+    min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center;padding:3px;margin:-3px}
+  .star.on{color:var(--amber)} .star:hover{color:var(--amber);transform:scale(1.15)}
+  .pill{font-size:10.5px;font-weight:800;border-radius:4px;padding:1px 6px;flex:none;text-transform:uppercase;letter-spacing:.3px}
+  .pill.rev{background:rgba(255,107,94,.12);color:var(--red);border:1px solid rgba(255,107,94,.34)}
+  .tag{font-size:11px;font-weight:700;border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--sub);background:var(--card2);flex:none}
+  .tag.fact{background:none;border-style:dashed;font-weight:600;font-family:var(--mono);font-size:10.5px}
+  .tag.more{cursor:pointer;border-style:solid;color:var(--clover-d)}
+  .tag.tagtype-off,.tag.cap-hidden{display:none}   /* tag-menu hidden vs overflow-cap hidden — separate, never fight */
+  .suggbar{margin-top:7px;font-size:11.5px;color:var(--clover-d);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .addbtn{background:rgba(52,210,123,.12);border:1px solid rgba(52,210,123,.4);color:var(--clover-d);font-size:11px;font-weight:700;
+    border-radius:6px;padding:4px 10px;cursor:pointer;display:inline-flex;gap:5px;align-items:center}
   .kw input{margin:8px 0}
   .kwchips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
   .kwchip{font-size:11.5px;border:1px solid var(--line);border-radius:13px;padding:2px 9px;background:var(--card2);color:var(--ink)}
-  .empty{padding:24px 0;text-align:center;color:var(--sub)}
+  .empty{padding:20px 0;text-align:center;color:var(--sub)}
+  .firstrun{padding:26px 20px;text-align:center;border:1px dashed var(--line);border-radius:12px;background:var(--card2);color:var(--sub)}
+  #mLive{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
   #mmsg{margin-top:8px;font-size:12px}
+  @media (max-width:640px){
+    .ctrls{flex-direction:column;align-items:stretch} .ctrls .sp,.csep{display:none}
+    .ctrls label,.ctrls input[type=text],.ctrls select{width:100%}
+    .tddue{width:auto;flex-direction:row;align-items:center;gap:12px}
+  }
 </style>
 
+<span id="mLive" role="status" aria-live="polite"></span>
+
 {% macro item_row(it) %}
-<div class="row2{% if it.overdue %} od{% endif %}{% if it.focus %} pinned{% endif %}{% if it.suggested %} sugg{% endif %}"
+<div class="row2{% if it.overdue %} od hot{% elif it.days_left is not none and it.days_left <= 7 %} warm{% endif %}{% if it.focus %} pinned{% endif %}{% if it.suggested %} sugg{% endif %}"
      data-days="{{ it.days_left if it.days_left is not none else '' }}" data-date="{{ it.date }}"
-     data-domain="{{ it.domain }}" data-cat="{{ it.category }}"
+     data-domain="{{ it.domain }}" data-cat="{{ it.category }}" data-imp="{{ 1 if it.important else 0 }}"
+     data-focus="{{ 1 if it.focus else 0 }}" data-review="{{ 1 if it.needs_review else 0 }}" data-sugg="{{ 1 if it.suggested else 0 }}"
      data-q="{{ (it.subject ~ ' ' ~ it.summary ~ ' ' ~ it.event ~ ' ' ~ (it.refs | join(' '))) | lower }}">
   <div class="gfill{% if it.gauge >= 70 %} hot{% endif %}" style="width:{{ it.gauge }}%"></div>
   <div class="tddue">
-    {% if it.due %}{{ it.due }}
-      <span class="dl{% if it.overdue %} od{% endif %}">
-        {%- if it.days_left == 0 %}today{% elif it.overdue %}{{ -it.days_left }}d overdue{% else %}in {{ it.days_left }}d{% endif -%}</span>
-    {% else %}<span class="dl">no date</span>{% endif %}
+    <div class="ddwrap">
+      {% if it.due %}<span class="dd">{{ it.due | dmy }}</span>
+        <span class="dl{% if it.overdue %} od{% endif %}">
+          {%- if it.days_left == 0 %}due today{% elif it.overdue %}{{ -it.days_left }}d overdue{% else %}due in {{ it.days_left }}d{% endif -%}</span>
+      {% elif it.date %}<span class="dd">{{ it.date | dmy }}</span><span class="dl">last update</span>
+      {% else %}<span class="dl">no date</span>{% endif %}
+    </div>
+    <button class="cloverbtn{% if it.focus %} on{% endif %}" aria-pressed="{{ 'true' if it.focus else 'false' }}"
+            aria-label="{{ 'Remove from Focus' if it.focus else 'Add to Focus' }}"
+            title="{% if it.focus %}In Focus (your to-do) — tap to remove{% else %}Tap the clover to add to Focus (your to-do list){% endif %}"
+            onclick="pin(this, '{{ it.key }}')"><svg class="ic-clover" aria-hidden="true"><use href="#ic-clover"/></svg></button>
   </div>
   <div class="main">
     <p class="l1">
-      <button class="star{% if it.focus %} on{% endif %}" title="{% if it.focus %}Remove from Focus{% else %}Add to Focus — teaches Clover what matters to you{% endif %}" onclick="pin('{{ it.key }}', {{ 0 if it.focus else 1 }})">★</button>
-      {% if it.important %}<span class="pill hi">important</span>{% endif %}
-      {% if it.needs_review %}<span class="pill rev" title="flagged for review">issue</span>{% endif %}
-      {% if it.domain %}<span class="tag t-domain">{{ it.domain }}</span>{% endif %}
-      {% if it.category %}<span class="tag t-category">{{ it.category }}</span>{% endif %}
-      {% for r in it.refs %}<span class="tag t-refs">{{ r }}</span>{% endfor %}
-      {% for a in it.amounts %}<span class="tag t-amounts">{{ a }}</span>{% endfor %}
-      {% for p in it.percents %}<span class="tag t-percents">{{ p }}</span>{% endfor %}
-      {% for f in it.facet_tags %}<span class="tag t-facet_tags">{{ f }}</span>{% endfor %}
+      <button class="star{% if it.important %} on{% endif %}" aria-pressed="{{ 'true' if it.important else 'false' }}"
+              aria-label="{{ 'Important' if it.important else 'Mark important' }}"
+              title="{% if it.important %}Marked important — tap to unmark{% else %}Mark this matter as important{% endif %}"
+              onclick="setImp(this, '{{ it.key }}')"><span aria-hidden="true">★</span></button>
       <span class="txt">{{ it.event or it.subject }}</span>
+      {% if it.needs_review %}<span class="pill rev" title="Flagged by Clover's quality check">review</span>{% endif %}
     </p>
     {% if it.summary %}<p class="tldr">{{ it.summary }}</p>{% endif %}
-    <div class="meta">
-      <a href="/threads/{{ it.thread_id }}" title="Open thread">📨 {{ it.subject }}</a>
-      {% if it.date %}<span>{{ it.date[:10] }}</span>{% endif %}
-      <button class="impbtn" onclick="setImp('{{ it.key }}', '{{ 'normal' if it.important else 'high' }}')">{{ '↓ make normal' if it.important else '↑ make important' }}</button>
+    <div class="tagrow">
+      {% if it.domain %}<span class="tag t-domain">{{ it.domain }}</span>{% endif %}
+      {% if it.category %}<span class="tag t-category">{{ it.category }}</span>{% endif %}
+      {% for r in it.refs %}<span class="tag fact t-refs">{{ r }}</span>{% endfor %}
+      {% for a in it.amounts %}<span class="tag fact t-amounts">{{ a }}</span>{% endfor %}
+      {% for p in it.percents %}<span class="tag fact t-percents">{{ p }}</span>{% endfor %}
+      {% for f in it.facet_tags %}<span class="tag fact t-facet_tags">{{ f }}</span>{% endfor %}
     </div>
-    {% if it.suggested %}<div class="suggbar">✨ Looks like something you focus on —
-      <button class="addbtn" onclick="pin('{{ it.key }}', 1)">★ Add to Focus</button></div>{% endif %}
+    <div class="meta">
+      <a href="/threads/{{ it.thread_id }}" title="{{ it.subject }}"><svg class="ic" aria-hidden="true"><use href="#ic-mail"/></svg> Open thread</a>
+    </div>
+    {% if it.suggested and not it.focus %}<div class="suggbar"><span aria-hidden="true">✨</span> Suggested for Focus —
+      <button class="addbtn" onclick="pin(this.closest('.row2').querySelector('.cloverbtn'), '{{ it.key }}')"><svg class="ic-clover" aria-hidden="true" style="width:13px;height:13px"><use href="#ic-clover"/></svg> Add to Focus</button></div>{% endif %}
   </div>
 </div>
 {% endmacro %}
 
 <div class="mhd">
   <h1>Matters</h1>
-  <span class="note">What you're focused on, and everything else going on · as of {{ today }}</span>
+  <span class="note">What you're focused on, and everything else going on · as of {{ today | dmy }}</span>
 </div>
+<p class="legend">
+  <span class="lg"><svg class="ic-clover" aria-hidden="true"><use href="#ic-clover"/></svg> <b>Focus</b> = your to-do</span>
+  <span class="lg"><span class="lstar" aria-hidden="true">★</span> <b>Important</b> = a flag</span>
+  <span class="dim">two separate marks — set either, both, or neither</span>
+</p>
 
-<!-- controls: sort · filter · gauge · tags · save -->
+{% if not has_records %}
+<div class="firstrun">
+  <p style="margin:0 0 6px;color:var(--ink);font-size:15px">Your matters will appear here.</p>
+  <p style="margin:0 0 14px">Once you import &amp; comprehend mail, tap the green <svg class="ic-clover" aria-hidden="true" style="width:15px;height:15px;color:var(--clover);vertical-align:-.2em"><use href="#ic-clover"/></svg> clover to add a matter to <b>Focus</b> (your to-do list), and the <span style="color:var(--amber)">★</span> star to flag something <b>Important</b>. They're independent.</p>
+  <a href="/archive" class="btn" style="text-decoration:none">Import mail →</a>
+</div>
+{% else %}
+
+<!-- controls: ORDER | FILTER | VIEW -->
 <div class="ctrls">
   <label>Sort <select id="fSort" onchange="applySort()">
     <option value="expiry">Expiry</option><option value="recency">Recency</option>
+    <option value="importance">Importance</option>
     <option value="domain">Domain</option><option value="category">Category</option></select></label>
+  <span class="csep"></span>
+  <label>Show <select id="fShow" onchange="applyFilter()">
+    <option value="">all</option><option value="important">Important</option>
+    <option value="review">needs review</option></select></label>
   <label>Domain <select id="fDom" onchange="applyFilter()"><option value="">all</option>
     {% for d in domains %}<option>{{ d }}</option>{% endfor %}</select></label>
   <label>Category <select id="fCat" onchange="applyFilter()"><option value="">all</option>
     {% for c in categories %}<option>{{ c }}</option>{% endfor %}</select></label>
-  <input id="fQ" type="text" placeholder="Search…" oninput="applyFilter()">
+  <input id="fQ" type="text" placeholder="Search…" oninput="applyFilter()" aria-label="Search matters">
   <span class="sp"></span>
-  <label class="tog"><input type="checkbox" id="gToggle" onchange="applyGauge()"> ⏳ urgency gauge</label>
+  <label class="tog"><input type="checkbox" id="gToggle" onchange="applyGauge()"> urgency gauge</label>
   <span class="tagmenu">
-    <button type="button" class="ghost" style="padding:6px 11px;font-size:13px" onclick="document.getElementById('tagPop').classList.toggle('open')">⚙ Tags</button>
+    <button type="button" class="ghost" style="padding:6px 11px;font-size:13px" aria-haspopup="true" aria-expanded="false" aria-controls="tagPop" onclick="toggleTags(this)"><svg class="ic" aria-hidden="true"><use href="#ic-gear"/></svg>Tags</button>
     <div class="tagpop" id="tagPop">
       {% for t in all_tags %}<label><input type="checkbox" class="tagchk" value="{{ t }}" onchange="applyTags()"{% if t in tags_on %} checked{% endif %}> {{ t.replace('_',' ') }}</label>{% endfor %}
     </div>
   </span>
-  <button type="button" onclick="saveLayout()">Save layout</button>
+  <button type="button" onclick="saveLayout(this)" title="Saves sort, visible tags and the gauge as your default (search & show are session-only)">Save layout</button>
 </div>
 
-<!-- ============ FOCUS (only what you've ★-selected) ============ -->
-<div class="msec">🎯 Focus <span class="note">— the matters you're tracking</span></div>
-{% if items %}
-<div class="tdsum">
-  <span class="tdchip"><b>{{ counts.total }}</b> tracked</span>
-  {% if counts.overdue %}<span class="tdchip od"><b>{{ counts.overdue }}</b> overdue</span>{% endif %}
-  <span class="tdchip"><b>{{ counts.soon }}</b> due in 7 days</span>
+<!-- ============ FOCUS (only what you've clover-selected) ============ -->
+<div class="msec"><svg class="ic-clover" aria-hidden="true" style="width:17px;height:17px;color:var(--clover);vertical-align:-.22em"><use href="#ic-clover"/></svg> Focus <span class="note">— the matters you're tracking (tap a clover to add)</span></div>
+<div id="focusSum" class="tdsum"{% if not items %} style="display:none"{% endif %}>
+  <span class="tdchip"><b id="cTracked">{{ counts.total }}</b> in Focus</span>
+  <span class="tdchip od" id="cOdChip"{% if not counts.overdue %} style="display:none"{% endif %}><b id="cOverdue">{{ counts.overdue }}</b> overdue</span>
+  <span class="tdchip"><b id="cSoon">{{ counts.soon }}</b> due next 7 days</span>
 </div>
 <div id="focusList">{% for i in items %}{{ item_row(i) }}{% endfor %}</div>
-{% else %}
-<div class="empty">No focus matters yet — ★-star anything below to track it here. Clover never adds items on its own.</div>
-{% endif %}
+<div id="focusEmpty" class="empty"{% if items %} style="display:none"{% endif %}>No Focus matters yet — tap the <svg class="ic-clover" aria-hidden="true" style="width:15px;height:15px;color:var(--clover);vertical-align:-.2em"><use href="#ic-clover"/></svg> clover on anything below to track it here.</div>
+<div id="focusNo" class="empty" style="display:none">No Focus matters match this filter — <button type="button" class="linkbtn" onclick="clearFilters()">clear filters</button></div>
 
-<!-- ============ FOCUS KEYWORDS (the learner — suggests, never auto-adds) ============ -->
-<details class="card kw"{% if keywords %} open{% endif %}>
-  <summary class="note" style="cursor:pointer;font-size:13px">🔑 Focus keywords <span class="dim">— what Clover has learned matters to you</span></summary>
-  <p class="note" style="margin:8px 0 0">Every time you <b>★-add</b> an item to Focus, Clover learns its key terms — references, project,
-    people, category, and salient words. It uses them only to <b>suggest</b> similar items (the “✨ Add to Focus?” prompt) — it never
-    moves anything into Focus by itself. Fully yours to edit (comma-separated):</p>
+<!-- ============ HAPPENINGS (everything else, same display) ============ -->
+<div class="msec">Happenings <span class="note">— every other matter; tap a clover to pull one into Focus<span id="happCounts"></span></span></div>
+<div id="happList">{% for h in happenings %}{{ item_row(h) }}{% endfor %}</div>
+<div id="happEmpty" class="empty"{% if happenings %} style="display:none"{% endif %}>Nothing else going on — import and comprehend mail to see what's happening.</div>
+<div id="happNo" class="empty" style="display:none">Nothing in Happenings matches this filter — <button type="button" class="linkbtn" onclick="clearFilters()">clear filters</button></div>
+
+<!-- ============ how Focus suggestions work (collapsed; the learner) ============ -->
+<details class="card kw" style="margin-top:20px">
+  <summary class="note" style="cursor:pointer;font-size:13px">How Focus suggestions work <span class="dim">— Clover only suggests, never auto-adds</span></summary>
+  <p class="note" style="margin:8px 0 0"><b>Clover never adds to Focus on its own.</b> Each time you add a matter (tap its clover), it learns that matter's
+    key terms — references, project, people, category — and uses them only to <b>suggest</b> similar items (the “Suggested for Focus” prompt). Edit the learned terms freely (comma-separated):</p>
   <input id="kwbox" type="text" value="{{ keywords | map(attribute='term') | join(', ') }}" placeholder="e.g. payment, retention, rfi-12, tender">
   <button type="button" onclick="saveKw()">Save keywords</button>
   {% if keywords %}<div class="kwchips">{% for k in keywords %}<span class="kwchip">{{ k.term }} <span class="note">×{{ k.weight }}</span></span>{% endfor %}</div>{% endif %}
-
-  <p class="note" style="margin:14px 0 0"><b>✨ Themes</b> — Clover can also read the matters you've focused on and name the higher-level
-    <i>themes</i> they share (meaning-level, beyond literal words). Themes only <b>suggest</b> matching items too.</p>
-  {% if themes %}<div class="kwchips">{% for t in themes %}<span class="kwchip" title="{{ t.terms | join(', ') }}">✨ {{ t.label }}</span>{% endfor %}</div>{% endif %}
-  <button type="button" class="ghost" style="margin-top:8px" onclick="refreshThemes()">↻ Re-infer themes (AI)</button>
-  <p id="mmsg" class="note"></p>
+  <p class="note" style="margin:14px 0 0"><b>Themes</b> — Clover can also name the higher-level <i>themes</i> across your focused matters (meaning-level, beyond literal words). Themes only suggest too.</p>
+  {% if themes %}<div class="kwchips">{% for t in themes %}<span class="kwchip" title="{{ t.terms | join(', ') }}">{{ t.label }}</span>{% endfor %}</div>{% endif %}
+  <button type="button" class="ghost" style="margin-top:8px" onclick="refreshThemes()"><svg class="ic" aria-hidden="true"><use href="#ic-refresh"/></svg>Update themes (AI)</button>
+  <p id="mmsg" class="note" role="status" aria-live="polite"></p>
 </details>
-
-<!-- ============ HAPPENINGS (everything else, same display) ============ -->
-<div class="msec">🌐 Happenings <span class="note">— everything else
-  {%- if counts.suggested %} · {{ counts.suggested }} suggested for Focus{% endif %}
-  {%- if counts.issues %} · {{ counts.issues }} flagged{% endif %}</span></div>
-{% if happenings %}
-<div id="happList">{% for h in happenings %}{{ item_row(h) }}{% endfor %}</div>
-{% else %}
-<div class="empty">Nothing comprehended yet — import and comprehend mail to see what's going on.</div>
 {% endif %}
 
 <script>
 const $ = id => document.getElementById(id);
+function announce(msg){ const r = $("mLive"); if(r){ r.textContent = ""; setTimeout(() => r.textContent = msg, 30); } }
 async function _post(u, d){ const fd = new FormData(); for(const k in d) fd.append(k, d[k]);
   return (await fetch(u, {method:"POST", body:fd})).json(); }
-async function pin(key, on){ await _post("/matters/pin", {key, on}); location.reload(); }
-async function setImp(key, level){ await _post("/matters/importance", {key, level}); location.reload(); }
+
+// --- optimistic toggles (no full-page reload — preserve filters/sort/scroll) ---
+async function pin(btn, key){
+  const row = btn.closest(".row2"), on = btn.getAttribute("aria-pressed") !== "true";
+  btn.setAttribute("aria-pressed", on); btn.classList.toggle("on", on);
+  btn.setAttribute("aria-label", on ? "Remove from Focus" : "Add to Focus");
+  row.dataset.focus = on ? "1" : "0"; row.classList.toggle("pinned", on);
+  const dest = on ? $("focusList") : $("happList"); if(dest) dest.prepend(row);
+  const sb = row.querySelector(".suggbar"); if(sb) sb.style.display = on ? "none" : "";
+  refreshSections(); applySort(); applyFilter(); announce(on ? "Added to Focus" : "Removed from Focus");
+  try{ const r = await _post("/matters/pin", {key, on: on ? 1 : 0}); if(!r.ok) throw 0; }
+  catch(e){ location.reload(); }
+}
+async function setImp(btn, key){
+  const row = btn.closest(".row2"), on = btn.getAttribute("aria-pressed") !== "true";
+  btn.setAttribute("aria-pressed", on); btn.classList.toggle("on", on);
+  btn.setAttribute("aria-label", on ? "Important" : "Mark important"); row.dataset.imp = on ? "1" : "0";
+  if($("fSort").value === "importance") applySort();
+  applyFilter(); announce(on ? "Marked important" : "Unmarked important");
+  try{ const r = await _post("/matters/importance", {key, level: on ? "high" : ""}); if(!r.ok) throw 0; }
+  catch(e){                                                    // full rollback: state + label + view recompute
+    btn.setAttribute("aria-pressed", !on); btn.classList.toggle("on", !on);
+    btn.setAttribute("aria-label", on ? "Mark important" : "Important"); row.dataset.imp = on ? "0" : "1";
+    if($("fSort").value === "importance") applySort(); applyFilter();
+  }
+}
+function refreshSections(){
+  const fl = $("focusList"); if(!fl) return;
+  const rows = [...fl.querySelectorAll(".row2")];
+  const dnum = r => r.dataset.days === "" ? null : parseInt(r.dataset.days, 10);
+  const od = rows.filter(r => dnum(r) !== null && dnum(r) < 0).length;
+  const soon = rows.filter(r => { const d = dnum(r); return d !== null && d >= 0 && d <= 7; }).length;
+  if($("cTracked")) $("cTracked").textContent = rows.length;
+  if($("cOverdue")) $("cOverdue").textContent = od;
+  if($("cSoon")) $("cSoon").textContent = soon;
+  if($("cOdChip")) $("cOdChip").style.display = od ? "" : "none";
+  if($("focusSum")) $("focusSum").style.display = rows.length ? "" : "none";
+  if($("focusEmpty")) $("focusEmpty").style.display = rows.length ? "none" : "";
+  const hl = $("happList");
+  if($("happEmpty")) $("happEmpty").style.display = (hl && hl.querySelector(".row2")) ? "none" : "";
+  renderHappCounts();
+}
+function renderHappCounts(){
+  const hl = $("happList"), el = $("happCounts"); if(!hl || !el) return;
+  const rows = [...hl.querySelectorAll(".row2")];
+  const dnum = r => r.dataset.days === "" ? null : parseInt(r.dataset.days, 10);
+  const od = rows.filter(r => { const d = dnum(r); return d !== null && d < 0; }).length;
+  const soon = rows.filter(r => { const d = dnum(r); return d !== null && d >= 0 && d <= 7; }).length;
+  const sugg = rows.filter(r => r.dataset.sugg === "1").length, rev = rows.filter(r => r.dataset.review === "1").length;
+  let h = "";
+  if(od) h += ' · <span style="color:var(--red)">' + od + ' overdue</span>';
+  if(soon) h += " · " + soon + " due this week";
+  if(sugg) h += " · " + sugg + " suggested";
+  if(rev) h += " · " + rev + " need review";
+  el.innerHTML = h;
+}
 async function saveKw(){ const r = await _post("/matters/keywords", {terms: $("kwbox").value});
   const m = $("mmsg"); m.textContent = "Saved " + r.count + " keyword(s)."; m.style.color = "var(--clover-d)"; setTimeout(() => location.reload(), 600); }
 async function refreshThemes(){ const m = $("mmsg"); m.textContent = "Inferring themes…"; m.style.color = "var(--sub)";
@@ -174,11 +276,24 @@ async function refreshThemes(){ const m = $("mmsg"); m.textContent = "Inferring 
   if(r.ok){ m.textContent = "Found " + r.count + " theme(s)."; m.style.color = "var(--clover-d)"; setTimeout(() => location.reload(), 700); }
   else { m.textContent = r.message; m.style.color = "var(--amber)"; } }
 
+function clearFilters(){ $("fShow").value=""; $("fDom").value=""; $("fCat").value=""; $("fQ").value=""; applyFilter(); }
 function applyFilter(){
   const dom = $("fDom").value, cat = $("fCat").value, q = $("fQ").value.toLowerCase();
+  const show = $("fShow") ? $("fShow").value : "";
   document.querySelectorAll(".row2").forEach(r => {
-    const ok = (!dom || r.dataset.domain === dom) && (!cat || r.dataset.cat === cat) && (!q || (r.dataset.q||"").includes(q));
+    const aspect = (show === "important") ? r.dataset.imp === "1"
+                 : (show === "review")    ? r.dataset.review === "1" : true;
+    const ok = aspect && (!dom || r.dataset.domain === dom) && (!cat || r.dataset.cat === cat)
+               && (!q || (r.dataset.q||"").includes(q));
     r.style.display = ok ? "" : "none";
+  });
+  // zero-result feedback per section
+  [["focusList","focusNo","focusEmpty"],["happList","happNo","happEmpty"]].forEach(([listId,noId,emptyId]) => {
+    const ul = $(listId); if(!ul) return;
+    const total = ul.querySelectorAll(".row2").length;
+    const shown = [...ul.querySelectorAll(".row2")].filter(r => r.style.display !== "none").length;
+    if($(noId)) $(noId).style.display = (total > 0 && shown === 0) ? "" : "none";
+    if($(emptyId) && total > 0) $(emptyId).style.display = "none";
   });
 }
 function _dnum(r){ const d = r.dataset.days; return d === "" ? 1e9 : parseInt(d, 10); }
@@ -186,6 +301,7 @@ function sortList(id){
   const ul = $(id); if(!ul) return; const key = $("fSort").value;
   [...ul.querySelectorAll(".row2")].sort((a, b) => {
     if(key === "recency") return (b.dataset.date||"").localeCompare(a.dataset.date||"");
+    if(key === "importance") return (Number(b.dataset.imp)-Number(a.dataset.imp)) || _dnum(a)-_dnum(b);
     if(key === "domain") return (a.dataset.domain||"~").localeCompare(b.dataset.domain||"~") || _dnum(a)-_dnum(b);
     if(key === "category") return (a.dataset.cat||"~").localeCompare(b.dataset.cat||"~") || _dnum(a)-_dnum(b);
     return _dnum(a) - _dnum(b);
@@ -194,17 +310,33 @@ function sortList(id){
 function applySort(){ sortList("focusList"); sortList("happList"); }
 function applyTags(){
   const on = new Set([...document.querySelectorAll(".tagchk:checked")].map(c => c.value));
-  {{ all_tags | tojson }}.forEach(t => document.querySelectorAll(".t-" + t).forEach(e => e.style.display = on.has(t) ? "" : "none"));
+  {{ all_tags | tojson }}.forEach(t => document.querySelectorAll(".t-" + t).forEach(e => e.classList.toggle("tagtype-off", !on.has(t))));
+  capTags();                                                   // recompute the +N overflow after the visible set changes
 }
 function applyGauge(){ document.body.classList.toggle("gauge-on", $("gToggle").checked); }
-async function saveLayout(){
+function capTags(){
+  document.querySelectorAll(".tagrow").forEach(row => {
+    const old = row.querySelector(".tag.more"); if(old) old.remove();              // reset prior cap
+    row.querySelectorAll(".tag.cap-hidden").forEach(t => t.classList.remove("cap-hidden"));
+    const vis = [...row.querySelectorAll(".tag")].filter(t => !t.classList.contains("tagtype-off") && !t.classList.contains("more"));
+    if(vis.length <= 6) return;                                                    // cap among the VISIBLE tags only
+    vis.slice(5).forEach(t => t.classList.add("cap-hidden"));
+    const m = document.createElement("span");
+    m.className = "tag more"; m.textContent = "+" + (vis.length - 5);
+    m.onclick = () => { vis.slice(5).forEach(t => t.classList.remove("cap-hidden")); m.remove(); };  // reveal only the capped ones
+    row.appendChild(m);
+  });
+}
+function toggleTags(btn){ const p = $("tagPop"); if(!p) return; const open = p.classList.toggle("open"); btn.setAttribute("aria-expanded", open); }
+document.addEventListener("keydown", e => { const p = $("tagPop"); if(p && e.key === "Escape") p.classList.remove("open"); });
+document.addEventListener("click", e => { const p = $("tagPop"); if(p && !e.target.closest(".tagmenu")) p.classList.remove("open"); });
+async function saveLayout(btn){
   const tags = [...document.querySelectorAll(".tagchk:checked")].map(c => c.value).join(",");
   await _post("/matters/layout", {sort: $("fSort").value, tags, gauge: $("gToggle").checked ? 1 : 0});
-  const m = $("mmsg"); m.textContent = "Layout saved as your default."; m.style.color = "var(--clover-d)";
+  const old = btn.textContent; btn.textContent = "✓ Saved as default"; setTimeout(() => btn.textContent = old, 1600);
 }
 // hydrate from the saved layout
-$("fSort").value = {{ sort | tojson }};
-$("gToggle").checked = {{ gauge_on | tojson }};
-applyGauge(); applyTags();
+if($("fSort")){ $("fSort").value = {{ sort | tojson }}; $("gToggle").checked = {{ gauge_on | tojson }};
+  applyGauge(); applyTags(); renderHappCounts(); }   // applyTags() now runs capTags() itself
 </script>
 {% endblock %}

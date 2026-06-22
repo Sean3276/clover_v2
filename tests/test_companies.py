@@ -68,6 +68,20 @@ def test_list_companies_groups_with_codes_and_projects(tmp_path):
     assert by["BuildCo Pte Ltd"]["projects"] == ["Riverside Bridge"]
 
 
+def test_company_description_roundtrip_and_in_listing(tmp_path):
+    # operator-editable "what this firm does" — deterministic (entered, not AI-inferred), surfaced on the card
+    _seed(tmp_path)
+    companies.set_description(tmp_path, "globexconstructioncompany",
+                             "Façade engineering & cladding subcontractor.")
+    assert companies.read_descriptions(tmp_path)["globexconstructioncompany"] == \
+        "Façade engineering & cladding subcontractor."
+    by = {c["name"]: c for c in companies.list_companies(tmp_path)["companies"]}
+    assert by["Globex Construction Company Ltd"]["description"] == "Façade engineering & cladding subcontractor."
+    assert by["BuildCo Pte Ltd"]["description"] == ""                  # default empty when unset
+    companies.set_description(tmp_path, "globexconstructioncompany", "")   # blank clears
+    assert "globexconstructioncompany" not in companies.read_descriptions(tmp_path)
+
+
 def test_list_companies_applies_code_override(tmp_path):
     _seed(tmp_path)
     companies.set_code(tmp_path, "globexconstructioncompany", "4C")

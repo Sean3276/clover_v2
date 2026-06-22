@@ -44,6 +44,8 @@ def _exec(cmd: list[str], stdin_text: str, timeout: int, should_stop=None):
     enforces the timeout AND a live stop signal by killing the whole PROCESS TREE — so a wedged CLI is
     actually terminated (no zombie claude.exe) and a Stop press aborts in-flight calls promptly.
     Raises TimeoutError on timeout, Stopped when should_stop() turns true."""
+    if should_stop and should_stop():        # already stopping — abort BEFORE spawning, so a thread mid-way
+        raise Stopped()                      # through its passes halts at the very next call (bounds stop latency)
     kw = {}
     if sys.platform != "win32":
         kw["start_new_session"] = True                 # own process group, so _kill_tree gets the children
@@ -255,6 +257,36 @@ class ClaudeCliComprehender(Comprehender):
         return _parse_json(text) if schema else text
 
 
+def _find_codex():
+    """Resolve the codex binary, preferring the UP-TO-DATE VS Code/Cursor ChatGPT-extension build over the
+    often-stale `~/.codex/.sandbox-bin` (that old build fails on gpt-5.5 with a bare 'exit 1'). Order:
+    newest extension binary -> PATH -> sandbox-bin fallback."""
+    import glob
+    import shutil
+    home = os.path.expanduser("~")
+    cands = []
+    for editor in (".vscode", ".vscode-server", ".vscode-insiders", ".cursor", ".windsurf"):
+        cands += glob.glob(os.path.join(home, editor, "extensions", "openai.chatgpt-*", "bin", "*", "codex*"))
+    cands = [c for c in cands if os.path.basename(c).lower() in ("codex", "codex.exe") and os.path.isfile(c)]
+
+    def _ok_platform(c):                            # the extension ships ALL platforms in bin/<plat>/ — pick ours
+        sub = os.path.basename(os.path.dirname(c)).lower()
+        if sys.platform == "win32":
+            return "win" in sub and c.lower().endswith(".exe")
+        if sys.platform == "darwin":
+            return any(k in sub for k in ("apple", "darwin", "mac"))
+        return "linux" in sub
+    cands = [c for c in cands if _ok_platform(c)]
+    if cands:
+        cands.sort(key=os.path.getmtime)            # newest install wins (robust vs version-string sorting)
+        return cands[-1]
+    onpath = shutil.which("codex")
+    if onpath:
+        return onpath
+    fb = os.path.join(home, ".codex", ".sandbox-bin", "codex.exe" if sys.platform == "win32" else "codex")
+    return fb if os.path.isfile(fb) else None
+
+
 @register
 class CodexCliComprehender(Comprehender):
     """Local Codex CLI (`codex exec … --json`). Plugs GPT-5.x via the user's Codex/ChatGPT auth — no API
@@ -269,23 +301,26 @@ class CodexCliComprehender(Comprehender):
         self.tokens = 0
         self.cost = 0.0
         self.should_stop = None   # set by run_comprehension so a Stop press aborts in-flight calls + kills the tree
+        self._exe = None          # resolved codex binary (cached)
         self._lock = threading.Lock()
 
     def generate(self, task: str, prompt: str, schema: dict | None = None):
-        import shutil
         import tempfile
-        exe = shutil.which("codex")
+        if not self._exe:
+            self._exe = _find_codex()
+        exe = self._exe
         if not exe:
-            raise RuntimeError("Codex CLI not found — install it and sign in (`codex` login once).")
+            raise RuntimeError("Codex CLI not found — install the OpenAI Codex/ChatGPT CLI and sign in.")
         p = prompt
         if schema:
             p += ("\n\nReturn ONLY valid JSON (no prose, no code fence) matching this shape:\n"
                   + json.dumps(schema))
         fd, outpath = tempfile.mkstemp(prefix="clover_codex_", suffix=".txt")   # unique per concurrent call
         os.close(fd)
-        # read-only sandbox + ephemeral session; prompt on STDIN (the trailing '-'); last message -> outpath
+        # read-only sandbox + ephemeral session; low reasoning effort (cheaper/faster for transcription work);
+        # prompt on STDIN (the trailing '-'); the final message lands in `outpath`.
         cmd = [exe, "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--ephemeral",
-               "-m", self.model, "-o", outpath, "--json", "-"]
+               "-m", self.model, "-c", "model_reasoning_effort=low", "-o", outpath, "--json", "-"]
         try:
             try:
                 rc, out, err = _exec(cmd, p, self.timeout, self.should_stop)   # kills the tree on timeout/stop
@@ -295,7 +330,8 @@ class CodexCliComprehender(Comprehender):
                     f"model slow. Try again, or in /dev pick a faster model or raise the AI timeout."
                 ) from None
             if rc != 0:
-                raise RuntimeError(f"codex CLI failed ({rc}): {err.strip()[:200]}")
+                detail = (err.strip() or out.strip() or "(no error output)")[:200]
+                raise RuntimeError(f"codex CLI failed ({rc}) using {os.path.basename(exe)}: {detail}")
             try:
                 with open(outpath, encoding="utf-8") as fh:
                     text = fh.read().strip()

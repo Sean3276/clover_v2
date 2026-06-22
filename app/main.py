@@ -50,6 +50,24 @@ _THREAD_STYLE = ("<style>html{overflow-x:hidden}body{margin:0;padding:10px;backg
 
 BASE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _dmy(iso) -> str:
+    """ISO date/datetime ('2026-06-15' or '2026-06-15T…') -> 'dd mmm yyyy' (e.g. '15 Jun 2026'); '' stays ''."""
+    s = str(iso or "")[:10]
+    try:
+        y, m, d = s.split("-")
+        mi = int(m)
+        if not 1 <= mi <= 12:                       # month 00 would index _MONTHS[-1] -> 'Dec'; fall through instead
+            return s
+        return f"{int(d):02d} {_MONTHS[mi - 1]} {y}"
+    except Exception:
+        return s
+
+
+templates.env.filters["dmy"] = _dmy
 app = FastAPI(title="Clover v2 — Phase 1")
 
 from app.dev import router as _dev_router   # developer-only control panel (/dev), separate module
@@ -58,7 +76,40 @@ app.include_router(_dev_router)
 _lock = threading.Lock()
 # live run state — per-folder progress drives the dashboard
 _status = {"running": False, "started_at": None, "folders": {}, "log": [], "manifest": None,
-           "stop": False, "attempt": 0, "session_saved": 0, "prep": None}
+           "stop": False, "attempt": 0, "session_saved": 0, "session_saved_ids": [], "prep": None,
+           "phase": None, "skipped_phases": []}
+
+# The whole-pipeline stepper. Download is step 1 (its own ring/folders); steps 2-5 run after the ring hits
+# 100% and used to be invisible — _set_phase surfaces each so the UI shows where the run actually is + ETA.
+_PHASES = [
+    ("download", "Downloading mail"),
+    ("threads", "Re-stitching threads"),
+    ("links", "Fetching share links"),
+    ("comprehend", "Comprehending threads"),
+    ("contacts", "Refreshing Rolodex"),
+]
+_PHASE_LABEL = dict(_PHASES)
+_PHASE_STEP = {k: i + 1 for i, (k, _) in enumerate(_PHASES)}
+
+
+def _set_phase(key: str, *, done: int = 0, total: int = 0, indeterminate: bool = False,
+               current: str = "") -> None:
+    """Mark the active pipeline phase (and its sub-progress) so /archive/status can drive the stepper."""
+    with _lock:
+        prev = _status.get("phase")
+        started = prev["at"] if (prev and prev.get("key") == key) else time.time()   # stable phase start -> ETA
+        _status["phase"] = {
+            "key": key, "label": _PHASE_LABEL.get(key, key),
+            "step": _PHASE_STEP.get(key, 0), "of": len(_PHASES),
+            "done": int(done), "total": int(total),
+            "indeterminate": bool(indeterminate), "current": str(current or ""),
+            "at": started,
+        }
+
+
+def _clear_phase() -> None:
+    with _lock:
+        _status["phase"] = None
 
 
 def _log(line: str) -> None:
@@ -201,40 +252,47 @@ def _run_archive_bg(folders: list[str], limit: int | None, filters: dict, auto_l
             with _lock:
                 _status["manifest"] = m
                 _status["session_saved"] += m.get("saved", 0)
+                _status["session_saved_ids"].extend(m.get("saved_ids", []))   # union across resume attempts
             return m
 
+        _set_phase("download", indeterminate=True)   # step 1 active; the ring/folders carry the live count
         archive.run_until_complete(            # auto-resume is always on (rides out flaky links)
             run_once, auto_resume=True, log=_log, sleep=time.sleep,
             should_stop=lambda: _status.get("stop", False),
         )
-        saved_new = _status.get("session_saved", 0) > 0
+        saved_ids = list(_status.get("session_saved_ids", []))
         do_fetch = auto_links and not _status.get("stop")
         # Re-stitch -> fetch share-links/attachments -> comprehend -> contacts. Links BEFORE comprehend so
         # their text is read; oversize files pause for confirmation and re-comprehend the thread on confirm.
-        _post_import(cfg, _archive_dir(cfg), saved_new, do_fetch)
+        # The link step is SCOPED to saved_ids: an import only fetches links for the mail it brought in.
+        _post_import(cfg, _archive_dir(cfg), saved_ids, do_fetch)
     except Exception as e:
         _log(f"ERROR: {type(e).__name__}: {e}")
     finally:
         with _lock:
             _status["running"] = False
             _status["prep"] = None
+            _status["phase"] = None       # pipeline done -> stepper shows all phases complete
 
 
-def _run_links_inline(arch, harvest: bool = True, fetch: bool = False) -> None:
+def _run_links_inline(arch, harvest: bool = True, fetch: bool = False, only_message_ids=None) -> None:
     """Run the share-link step SYNCHRONOUSLY (catalogue always; download when asked) so it finishes BEFORE
     comprehension reads attachment text. Cataloguing is cheap/offline; downloading is size-gated — oversize
-    files pause as needs-confirm and re-comprehend their thread once confirmed. Guarded vs a concurrent task."""
+    files pause as needs-confirm and re-comprehend their thread once confirmed. Guarded vs a concurrent task.
+    `only_message_ids` scopes BOTH catalogue and download to the just-imported mail (never the whole backlog)."""
     with _lock:
         if _linktask.get("running"):
             _log("Share-link step skipped — a link task is already running.")
             return
         _linktask.update({"running": True, "stop": False})
     try:
+        _set_phase("links", indeterminate=True)     # _linkprog fills in done/total once downloading starts
         if harvest:
-            _log("Cataloguing share links…")
+            _log("Cataloguing share links in the new mail…")
         if fetch:
-            _log("Downloading share-link files before comprehension (oversize files wait for confirmation)…")
-        _auto_link_task(arch, harvest, fetch)
+            _log("Downloading this import's share-link files before comprehension (oversize files wait "
+                 "for confirmation)…")
+        _auto_link_task(arch, harvest, fetch, only_message_ids=only_message_ids)
     except Exception as e:
         _log(f"Share-link step failed: {type(e).__name__}: {e}")
     finally:
@@ -242,27 +300,31 @@ def _run_links_inline(arch, harvest: bool = True, fetch: bool = False) -> None:
             _linktask["running"] = False
 
 
-def _post_import(cfg: dict, arch, saved_new: bool, do_fetch: bool) -> None:
+def _post_import(cfg: dict, arch, saved_ids: list, do_fetch: bool) -> None:
     """The post-download auto-pipeline, in order: re-stitch threads -> fetch share-links/attachments ->
-    comprehend (now sees attachment text) -> refresh contacts. With no new mail, a requested download just
-    runs in the background. The ORDER is the point — link files must exist before comprehension reads them."""
-    if saved_new:
+    comprehend (now sees attachment text) -> refresh contacts. The link step is SCOPED to `saved_ids` — the
+    messages this import actually brought in — so a filtered import never auto-fetches the whole pending
+    backlog. The backlog stays the manual ⬇ Download button's job (which has its own date/provider filter).
+    The ORDER is the point — link files must exist before comprehension reads them."""
+    if saved_ids:
+        ids = set(saved_ids)
+        _set_phase("threads", indeterminate=True)
         _log("Rebuilding thread index…")
         try:
             threadmod.build_threads(arch, log=_log)
         except Exception as e:
             _log(f"Thread index rebuild failed: {type(e).__name__}: {e}")
-        _run_links_inline(arch, harvest=True, fetch=do_fetch)   # BEFORE comprehend
+        _run_links_inline(arch, harvest=True, fetch=do_fetch, only_message_ids=ids)   # BEFORE comprehend
         _maybe_autorun_comprehension(cfg)
+        _set_phase("contacts", indeterminate=True)
+        _log("Refreshing the Rolodex…")
         try:                                                    # signatures + AI titles/phones -> GreenBook
             contactsmod.rebuild(arch)
         except Exception as e:
             _log(f"Contacts refresh failed: {type(e).__name__}: {e}")
-    elif do_fetch:                                              # no new mail — just catch up downloads
-        if _start_link_task(lambda: _auto_link_task(arch, False, True)):
-            _log("Share links: downloading catalogued files in the background ('Stop links' halts it).")
-        else:
-            _log("Share-link task skipped — a link task is already running.")
+    elif do_fetch:                                              # nothing new imported — don't fetch the backlog
+        _log("No new mail, so no new links to download. To fetch already-catalogued links, use ⬇ Download "
+             "on the Mail page — you can limit it by date or provider there.")
 
 
 def _parse_date(s: str):
@@ -289,11 +351,12 @@ def archive_run(folders: list[str] = Form(default=[]), limit: int = Form(0),
     filters = {"date_from": df, "date_to": dt, "size_min": size_min, "top_n": topn}
     with _lock:
         if _status["running"]:
-            return JSONResponse({"ok": False, "message": "An archive run is already in progress."})
+            return JSONResponse({"ok": False, "message": "An import run is already in progress."})
         if not folders:
             return JSONResponse({"ok": False, "message": "Select at least one folder."})
         _status.update(running=True, started_at=time.time(), folders={}, log=[], manifest=None,
-                       stop=False, attempt=0, session_saved=0, prep=None)
+                       stop=False, attempt=0, session_saved=0, session_saved_ids=[], prep=None,
+                       skipped_phases=[])
     threading.Thread(target=_run_archive_bg, args=(folders, limit or None, filters, auto), daemon=True).start()
     bits = []
     if df or dt:
@@ -303,7 +366,27 @@ def archive_run(folders: list[str] = Form(default=[]), limit: int = Form(0),
     if topn:
         bits.append(f"largest {topn}")
     suffix = (" · " + ", ".join(bits)) if bits else ""
-    return JSONResponse({"ok": True, "message": f"Archiving {len(folders)} folder(s){suffix}"})
+    return JSONResponse({"ok": True, "message": f"Importing {len(folders)} folder(s){suffix}"})
+
+
+@app.post("/mail/sync")
+def mail_sync():
+    """One-click full sync from the Mail tab — import ALL configured folders (no limit/filters), then the
+    usual auto-pipeline (re-stitch → links → comprehend → rolodex). Same engine as Import's Archive, so the
+    /archive/status poll reports its progress; saves a trip to the Import tab."""
+    cfg = cfgmod.load_config()
+    if not cfgmod.get_secret(cfgmod.SECRET_IMAP_PASSWORD) or not _imap_conn(cfg).get("host"):
+        return JSONResponse({"ok": False, "message": "Connect your mailbox first — Mail ▸ Account."})
+    folders = cfg.get("folders") or ["INBOX"]
+    with _lock:
+        if _status["running"]:
+            return JSONResponse({"ok": False, "message": "A sync is already running."})
+        _status.update(running=True, started_at=time.time(), folders={}, log=[], manifest=None,
+                       stop=False, attempt=0, session_saved=0, session_saved_ids=[], prep=None,
+                       skipped_phases=[])
+    filters = {"date_from": None, "date_to": None, "size_min": None, "top_n": None}
+    threading.Thread(target=_run_archive_bg, args=(folders, None, filters, True), daemon=True).start()
+    return JSONResponse({"ok": True, "message": f"Syncing {len(folders)} folder(s) — new mail will appear here shortly."})
 
 
 @app.post("/archive/reconcile")
@@ -343,6 +426,8 @@ def archive_status():
             "attempt": _status["attempt"],
             "session_saved": _status["session_saved"],
             "prep": _status["prep"],
+            "phase": _status["phase"],
+            "skipped": list(_status["skipped_phases"]),
         })
 
 
@@ -411,17 +496,28 @@ def _comprehension_allowed(cfg: dict) -> bool:
     return True   # policy gate seam — subscription/tier entitlement check plugs in here later
 
 
+def _skip_phase(key: str) -> None:
+    """Record that a pipeline phase was skipped this run, so the stepper shows it as skipped (not ✓ done)."""
+    with _lock:
+        if key not in _status["skipped_phases"]:
+            _status["skipped_phases"].append(key)
+
+
 def _maybe_autorun_comprehension(cfg: dict) -> None:
     c = _comp_cfg(cfg)
     if not c.get("autorun"):
+        _skip_phase("comprehend")
         return
     if not _comprehension_allowed(cfg):
         _log("Comprehension autorun skipped (policy gate).")
+        _skip_phase("comprehend")
         return
     if not _backend_available(cfg):
         _log("Comprehension autorun skipped — AI backend not set up "
              "(install Claude CLI: npm i -g @anthropic-ai/claude-code).")
+        _skip_phase("comprehend")
         return
+    _set_phase("comprehend", indeterminate=True)   # flips to a real done/total once the first thread reports
     _log("Comprehending new threads…")
     try:
         backend = _comprehender(cfg)
@@ -433,6 +529,8 @@ def _maybe_autorun_comprehension(cfg: dict) -> None:
             allowed=lambda: _comprehension_allowed(cfg),
             concurrency=modelsmod.get_concurrency(cfg),   # parallel workers (developer-controlled in /dev)
             include_stale=False,    # autorun stays cheap: only NEW threads; stale ones go brown for a manual refresh
+            progress=lambda **k: _set_phase("comprehend", done=k.get("done", 0), total=k.get("total", 0),
+                                            current=k.get("current", "")),
         )
         _record_usage(backend)
         if out["pending"]:
@@ -466,10 +564,15 @@ def threads_page(request: Request):
             for loc in (mm.get("locations") or []):
                 if loc.get("path"):
                     path2t[loc["path"].replace("\\", "/")] = t["thread_id"]
-    linkstate, link_stats = {}, {}
+    linkstate, link_stats, link_providers, link_confirm = {}, {}, set(), []
     for r in lsmod.read_link_shares(arch):
         s = r.get("status", "pending")
         link_stats[s] = link_stats.get(s, 0) + 1
+        if s == "pending" and r.get("provider"):
+            link_providers.add(r["provider"])
+        if s == "needs-confirm":                              # big file paused — let the user OK it right here
+            link_confirm.append({"message_id": r.get("message_id"), "url": r.get("url"),
+                                 "provider": r.get("provider") or "", "gb": round((r.get("size") or 0) / 1073741824, 2)})
         tid = mid2t.get(r.get("message_id")) or path2t.get((r.get("eml") or "").replace("\\", "/"))
         if not tid:
             continue
@@ -493,6 +596,8 @@ def threads_page(request: Request):
         "projects": projmod.list_projects(arch),
         "link_stats": link_stats,
         "link_total": sum(link_stats.values()),
+        "link_providers": sorted(link_providers),
+        "link_confirm": link_confirm,
     })
 
 
@@ -507,8 +612,11 @@ def todo_page(request: Request):
     store = mattersmod.read_store(arch)
     focus = mattersmod.focus(recs, today, store)            # Focus: ONLY the matters you ★-selected
     happ = mattersmod.happenings(recs, today, store)        # Happenings: everything else (same display)
+    _soon = lambda i: i["days_left"] is not None and 0 <= i["days_left"] <= 7
     overdue = sum(1 for i in focus if i["overdue"])
-    soon = sum(1 for i in focus if i["days_left"] is not None and 0 <= i["days_left"] <= 7)
+    soon = sum(1 for i in focus if _soon(i))
+    happ_overdue = sum(1 for i in happ if i["overdue"])     # surface workload sitting in Happenings too
+    happ_soon = sum(1 for i in happ if _soon(i))
     layout = store.get("layout") or {}
     domains = sorted({i["domain"] for i in focus + happ if i["domain"]})
     categories = sorted({i["category"] for i in focus + happ if i["category"]})
@@ -518,9 +626,11 @@ def todo_page(request: Request):
         "sort": layout.get("sort") or "expiry", "gauge_on": bool(layout.get("gauge")),
         "tags_on": layout.get("tags") or mattersmod.DEFAULT_TAGS, "all_tags": mattersmod.AVAILABLE_TAGS,
         "domains": domains, "categories": categories,
+        "has_records": bool(recs),
         "counts": {"total": len(focus), "overdue": overdue, "soon": soon,
                    "undated": sum(1 for i in focus if i["days_left"] is None),
-                   "happenings": len(happ), "suggested": sum(1 for h in happ if h.get("suggested")),
+                   "happenings": len(happ), "happ_overdue": happ_overdue, "happ_soon": happ_soon,
+                   "suggested": sum(1 for h in happ if h.get("suggested")),
                    "issues": sum(1 for h in happ if h["needs_review"])},
     })
 
@@ -590,8 +700,16 @@ def projects_page(request: Request):
     name_by_key = {p["key"]: p["name"] for p in projs}
     merged = [{"from_key": fk, "to_name": name_by_key.get(projmod._resolve_merge(tk, merges), tk)}
               for fk, tk in merges.items()]
+    # coverage: how complete is the Hub vs Mail — how many conversations have actually been comprehended
+    if (arch / "threads.jsonl").exists():
+        threads = threadmod.read_threads(arch)
+        by_root = compmod.latest_by_root(arch)
+        done = sum(1 for t in threads if t.get("root_id") in by_root)
+        coverage = {"done": done, "total": len(threads), "pending": len(threads) - done}
+    else:
+        coverage = {"done": 0, "total": 0, "pending": 0}
     return templates.TemplateResponse(request, "projects.html",
-                                      {"cfg": cfg, "projects": projs, "merged": merged})
+                                      {"cfg": cfg, "projects": projs, "merged": merged, "coverage": coverage})
 
 
 @app.post("/projects/merge")
@@ -715,6 +833,13 @@ def contacts_set_name(key: str = Form(...), name: str = Form("")):
     """Operator override of a firm's display name (fill in a domain-only firm / fix a wrong one)."""
     stored = companiesmod.set_name(_archive_dir(cfgmod.load_config()), key.strip(), name)
     return JSONResponse({"ok": True, "name": stored})
+
+
+@app.post("/contacts/description")
+def contacts_set_description(key: str = Form(...), description: str = Form("")):
+    """Operator's note on what a firm does (business / industry). Deterministic — typed, never AI-guessed."""
+    stored = companiesmod.set_description(_archive_dir(cfgmod.load_config()), key.strip(), description)
+    return JSONResponse({"ok": True, "description": stored})
 
 
 @app.post("/contacts/merge")
@@ -1084,6 +1209,8 @@ _linktask = {"running": False, "stop": False, "current": "", "done": 0, "total":
 
 def _linkprog(done=0, total=0, current="", provider="", failed=0, **_):
     _linktask.update({"done": done, "total": total, "current": current, "failed": failed, "phase": "fetching"})
+    if (_status.get("phase") or {}).get("key") == "links":   # an import pipeline is on its link phase
+        _set_phase("links", done=done, total=total, current=current)
 
 
 def _start_link_task(target) -> bool:
@@ -1105,17 +1232,25 @@ def _start_link_task(target) -> bool:
     return True
 
 
-def _auto_link_task(arch, do_harvest=True, do_fetch=False):
+def _auto_link_task(arch, do_harvest=True, do_fetch=False, only_message_ids=None):
     """Post-archive link automation. Cataloguing (harvest) always runs after new mail — it's cheap,
     offline and idempotent; downloading (fetch) is opt-in. Fetch runs in batches of 50 — each batch
-    persists (crash-safe) and is stoppable; oversize links pause as needs-confirm."""
+    persists (crash-safe) and is stoppable; oversize links pause as needs-confirm. With
+    `only_message_ids`, BOTH catalogue and download are scoped to just those messages — so an import
+    with a date/size/folder filter only fetches links for the mail it actually brought in, never the
+    whole pending backlog (that's what the manual ⬇ Download button, optionally filtered, is for)."""
     if do_harvest:
-        lsmod.harvest(arch, log=_log)
+        lsmod.harvest(arch, log=_log, only_message_ids=only_message_ids)
     if do_fetch:
         while not _linktask.get("stop"):
-            r = lsmod.fetch_links(arch, limit=50, headless=True, log=_log,
-                                  should_stop=lambda: _linktask.get("stop", False), progress=_linkprog)
+            r = lsmod.fetch_links(arch, limit=50, headless=True, only_message_ids=only_message_ids,
+                                  log=_log, should_stop=lambda: _linktask.get("stop", False),
+                                  progress=_linkprog)
             if r.get("remaining", 0) <= 0:
+                break
+            progress = sum(r.get(k, 0) for k in                      # belt-and-suspenders: never spin on a batch
+                           ("downloaded", "reused", "needs_confirm", "dead", "needs_auth"))
+            if progress == 0:                                       # that resolved nothing (no forward progress)
                 break
 
 
@@ -1129,14 +1264,24 @@ def harvest_links():
 
 
 @app.post("/threads/fetch-links")
-def fetch_links_route(limit: int = Form(100)):
+def fetch_links_route(limit: int = Form(100), date_from: str = Form(""), date_to: str = Form(""),
+                      providers: str = Form("")):
     cfg = cfgmod.load_config()
+    df = date_from.strip() or None                       # blank field = no filter (fetch everything)
+    dt = date_to.strip() or None
+    provs = [p.strip() for p in providers.split(",") if p.strip()] or None
     if not _start_link_task(lambda: lsmod.fetch_links(
-            _archive_dir(cfg), limit=limit, headless=True, log=_log,
-            should_stop=lambda: _linktask.get("stop", False), progress=_linkprog)):
+            _archive_dir(cfg), limit=limit, headless=True, date_from=df, date_to=dt, providers=provs,
+            log=_log, should_stop=lambda: _linktask.get("stop", False), progress=_linkprog)):
         return JSONResponse({"ok": False, "message": "A link task (harvest or fetch) is already running."})
+    scope = []
+    if df or dt:
+        scope.append(f"{df or '…'} → {dt or '…'}")
+    if provs:
+        scope.append(", ".join(provs))
+    suffix = f" (filtered: {'; '.join(scope)})" if scope else ""
     return JSONResponse({"ok": True, "message":
-                         "Fetching link files in the background (headless browser). "
+                         f"Fetching link files in the background (headless browser){suffix}. "
                          "Reopen a thread to see statuses update."})
 
 

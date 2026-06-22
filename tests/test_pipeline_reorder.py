@@ -76,8 +76,30 @@ def test_post_import_fetches_links_before_comprehend(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_run_links_inline", lambda *a, **k: order.append("links"))
     monkeypatch.setattr(m, "_maybe_autorun_comprehension", lambda *a, **k: order.append("comprehend"))
     monkeypatch.setattr(m.contactsmod, "rebuild", lambda *a, **k: order.append("contacts"))
-    m._post_import({}, tmp_path, saved_new=True, do_fetch=True)
+    m._post_import({}, tmp_path, ["a@x", "b@x"], do_fetch=True)          # the ids this import brought in
     assert order == ["restitch", "links", "comprehend", "contacts"]      # links BEFORE comprehend
+
+
+def test_post_import_scopes_links_to_imported_ids(tmp_path, monkeypatch):
+    # the link step must be scoped to the messages THIS import brought in — not the whole backlog
+    import app.main as m
+    cap = {}
+    monkeypatch.setattr(m.threadmod, "build_threads", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_maybe_autorun_comprehension", lambda *a, **k: None)
+    monkeypatch.setattr(m.contactsmod, "rebuild", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_run_links_inline", lambda arch, **k: cap.update(k))
+    m._post_import({}, tmp_path, ["a@x", "b@x"], do_fetch=True)
+    assert cap["only_message_ids"] == {"a@x", "b@x"} and cap["fetch"] is True
+
+
+def test_post_import_no_new_mail_does_not_fetch_backlog(tmp_path, monkeypatch):
+    # empty import + download-on must NOT fetch every pending link (that was the "fetch all is meaningless" bug)
+    import app.main as m
+    called = {"links": False}
+    monkeypatch.setattr(m, "_run_links_inline", lambda *a, **k: called.__setitem__("links", True))
+    monkeypatch.setattr(m, "_start_link_task", lambda *a, **k: called.__setitem__("links", True) or True)
+    m._post_import({}, tmp_path, [], do_fetch=True)
+    assert called["links"] is False                                       # nothing auto-fetched
 
 
 def test_run_links_inline_harvests_then_fetches(tmp_path, monkeypatch):

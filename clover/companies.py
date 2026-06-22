@@ -23,6 +23,7 @@ from . import threads as threadmod
 _CODES = "company_codes.json"
 _NAMES = "company_names.json"
 _MERGES = "company_merges.json"
+_DESCS = "company_descriptions.json"
 _CODE_DROP = re.compile(r"(?i)\b(?:pte|ltd|sdn|bhd|llp|llc|inc|gmbh|corp|corporation|berhad|limited|co)\b\.?")
 _CODE_STOP = {"and", "of", "the", "for", "a", "an", "&"}
 
@@ -54,6 +55,36 @@ def set_name(archive_path, key: str, name: str) -> str:
     tmp.write_text(json.dumps(names, ensure_ascii=False, indent=0), encoding="utf-8")
     tmp.replace(names_path(archive_path))
     return name
+
+
+# ── company descriptions (operator's "what this firm does" note; deterministic, never AI-inferred) ──
+def descs_path(archive_path) -> Path:
+    return Path(archive_path) / _DESCS
+
+
+def read_descriptions(archive_path) -> dict:
+    p = descs_path(archive_path)
+    if p.exists():
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def set_description(archive_path, key: str, description: str) -> str:
+    """Operator's note on what a firm does (business / industry). Blank clears it. Returns the stored text."""
+    descs = read_descriptions(archive_path)
+    description = re.sub(r"\s+", " ", (description or "")).strip()[:240]
+    if description:
+        descs[key] = description
+    else:
+        descs.pop(key, None)
+    tmp = descs_path(archive_path).with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(descs, ensure_ascii=False, indent=0), encoding="utf-8")
+    tmp.replace(descs_path(archive_path))
+    return description
 
 
 # ── firm merges (operator folds one firm into another; survives Refresh) ──────
@@ -264,7 +295,7 @@ def list_companies(archive_path) -> dict:
         else:
             individuals.append(c)
 
-    code_ov, name_ov = read_codes(arch), read_names(arch)
+    code_ov, name_ov, desc_ov = read_codes(arch), read_names(arch), read_descriptions(arch)
     out, used_codes = [], {}
     for k, group in groups.items():
         domain = next((c.get("domain") for c in group if c.get("domain")), "") or k
@@ -284,7 +315,7 @@ def list_companies(archive_path) -> dict:
         used_codes[code] = k
         people = sorted(group, key=lambda c: (c.get("name") or c.get("email") or "").casefold())
         out.append({"key": k, "name": name, "code": code, "count": len(group),
-                    "unverified": unverified, "domain": domain,
+                    "unverified": unverified, "domain": domain, "description": desc_ov.get(k, ""),
                     "people": people, "projects": sorted(company_projects.get(k, set()), key=str.casefold)})
     out.sort(key=lambda g: (g["unverified"], g["name"].casefold()))   # named firms first, then unverified
     individuals.sort(key=lambda c: (c.get("name") or c.get("email") or "").casefold())

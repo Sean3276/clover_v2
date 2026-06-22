@@ -33,6 +33,26 @@
     width:0;transition:width .3s ease}
   .prep .pfill.indet{width:35%;animation:slide 1.1s ease-in-out infinite}
   @keyframes slide{0%{margin-left:-35%}100%{margin-left:100%}}
+  /* whole-pipeline stepper — makes the 5 phases (and which one is live) visible after the ring fills */
+  .steps{display:flex;gap:7px;margin:0 0 18px;flex-wrap:wrap}
+  .step{flex:1;min-width:96px;display:flex;flex-direction:column;gap:6px;padding:9px 11px;
+    border:1px solid var(--line);border-radius:9px;background:var(--tile-bg);transition:border-color .2s,opacity .2s}
+  .step .sh{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--sub)}
+  .step .sn{flex:none;width:19px;height:19px;border-radius:50%;background:var(--track-bg);color:var(--sub);
+    font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center}
+  .step .sct{margin-left:auto;font-size:11px}
+  .step .sbar{height:5px;background:var(--track-bg);border-radius:4px;overflow:hidden}
+  .step .sbar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--clover),var(--cyan));
+    border-radius:4px;transition:width .4s ease}
+  .step.done{border-color:var(--clover-d)}
+  .step.done .sn,.step.active .sn{background:var(--clover);color:#04140b}
+  .step.done .sh,.step.active .sh{color:var(--ink)}
+  .step.active{border-color:var(--clover);box-shadow:0 0 0 1px var(--clover) inset}
+  .step.active .sh{font-weight:600}
+  .step.active .sbar>i.indet{width:38%;animation:slide 1.1s ease-in-out infinite}
+  .step.pending{opacity:.5}
+  .step.skipped{opacity:.55;border-style:dashed}
+  .step.skipped .sn{background:var(--track-bg);color:var(--sub)}
   .selrow{display:flex;justify-content:space-between;align-items:baseline}
   .filterbox{margin-top:16px;border:1px solid var(--line);border-radius:10px;background:var(--tile-bg);padding:0 14px}
   .filterbox summary{cursor:pointer;padding:12px 2px;font-size:14px;color:var(--ink);list-style:none;display:flex;align-items:center;gap:8px}
@@ -54,8 +74,9 @@
   .flowcard[open] .caret{transform:rotate(90deg)}
   .flow{list-style:none;margin:0 0 16px;padding:0;display:grid;gap:11px}
   .flow li{display:flex;gap:12px;align-items:flex-start}
-  .fnum{flex:none;width:26px;height:26px;border-radius:50%;background:var(--clover-d);color:#04140b;
-    font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;margin-top:1px}
+  .fnum{flex:none;width:30px;height:30px;border-radius:50%;background:var(--clover);color:var(--btn-ink);
+    font-weight:800;font-size:16px;display:flex;align-items:center;justify-content:center;margin-top:1px;
+    box-shadow:0 0 0 3px rgba(52,210,123,.16)}
   .flow b{color:var(--ink);font-size:13.5px}
   .flow .opt{font-size:10px;font-weight:700;color:var(--sub);border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-left:5px}
   @media (max-width:640px){ .filtergrid{grid-template-columns:1fr} .tiles{grid-template-columns:repeat(2,1fr)} }
@@ -65,13 +86,13 @@
   <div><h1>Import</h1>
     <p class="note">Mailbox <a href="/setup#user" title="Change in Account settings"><code>{{ cfg.auth.imap.user or "not set" }}</code></a> ·
       Destination <a href="/setup#archive_path" title="Change in Account settings"><code>{{ cfg.archive_path }}</code></a></p>
-    <p class="note dim" style="margin:4px 0 0">Select folders, optionally filter, then <strong>Archive selected</strong>. <span class="help" tabindex="0" role="note" data-tip="Read-only: nothing on the server is moved, deleted, or marked read. It auto-resumes if the connection drops, and skips anything already archived.">?</span></p>
+    <p class="note dim" style="margin:4px 0 0">Select folders, optionally filter, then <strong>Import selected</strong>. <span class="help" tabindex="0" role="note" data-tip="Read-only: nothing on the server is moved, deleted, or marked read. It auto-resumes if the connection drops, and skips anything already imported.">?</span></p>
     <p id="sessionLine" class="note dim" style="margin:4px 0 0"></p></div>
   <span id="runPill" class="pill down">● idle</span>
 </div>
 
 <details class="card flowcard" open>
-  <summary><span class="caret">▶</span> What happens when you archive
+  <summary><span class="caret">▶</span> What happens when you import
     <span class="note" style="text-transform:none;letter-spacing:0;font-weight:400">— one click runs the whole pipeline, in order</span></summary>
   <ol class="flow">
     <li><span class="fnum">1</span><div><b>Download your mail</b><br>
@@ -104,6 +125,7 @@
       <div class="ptrack"><div id="prepFill" class="pfill indet"></div></div>
     </div>
   </div>
+  <div id="stepper" class="steps"></div>
   <div class="top">
     <div class="ringwrap">
       <svg viewBox="0 0 120 120" width="150" height="150">
@@ -117,7 +139,7 @@
       <div class="ringtxt"><span id="ringPct" class="pct">0%</span><span id="ringSub" class="sub">0 / 0</span></div>
     </div>
     <div class="tiles">
-      <div class="tile"><div class="k">Archived</div><div id="cSaved" class="v">0</div></div>
+      <div class="tile"><div class="k">Imported</div><div id="cSaved" class="v">0</div></div>
       <div class="tile"><div class="k">Remaining</div><div id="cRemain" class="v">0</div></div>
       <div class="tile err"><div class="k">Errors</div><div id="cErr" class="v">0</div></div>
       <div class="tile"><div class="k">Emails/s</div><div id="cRate" class="v">—</div></div>
@@ -132,7 +154,7 @@
   <h2>Folders to archive</h2>
   {% if folder_err %}
     <div class="msg err" style="display:block">{{ folder_err }}
-      <button type="button" class="linkbtn" style="font-size:13px;margin-left:4px" onclick="location.reload()">↻ Retry</button>
+      <button type="button" class="linkbtn" style="font-size:13px;margin-left:4px" onclick="location.reload()"><svg class="ic" aria-hidden="true"><use href="#ic-refresh"/></svg>Retry</button>
       once you're back online, or check your connection details on <a href="/setup">Setup</a>.</div>
   {% elif not folders %}
     <p class="note">No folders loaded. Save IMAP credentials on the <a href="/setup">Setup</a> page first.</p>
@@ -199,13 +221,13 @@
 
     <label style="display:flex;gap:8px;align-items:center;margin:2px 0 12px;font-size:13px;cursor:pointer">
       <input type="checkbox" name="auto_links" value="1" checked style="width:auto;margin:0;flex:none">
-      <span>Also <strong>download share links</strong> after archiving
-        <span class="help" tabindex="0" role="note" data-tip="Links are always catalogued automatically; ticking this also downloads the files (SharePoint/OneDrive, Drive, Dropbox, WeTransfer, Box). Runs a headless browser in the background; identical links download once, very large files pause for confirmation in Mail, and 'Stop links' halts it.">?</span>
+      <span>Also <strong>download share links</strong> from this import
+        <span class="help" tabindex="0" role="note" data-tip="Downloads the share files (SharePoint/OneDrive, Drive, Dropbox, WeTransfer, Box) found in the mail THIS run imports — so a filtered import only fetches its own links, never the whole backlog. Runs a headless browser in the background; identical links download once, very large files pause for confirmation in Mail, and 'Stop links' halts it. To fetch other already-catalogued links later, use ⬇ Download on the Mail page (it has its own date/provider filter).">?</span>
         <span style="color:var(--amber)">— can use significant storage &amp; data.</span></span>
     </label>
 
     <div class="actions">
-      <button id="runBtn" type="button" onclick="run()">Archive selected →</button>
+      <button id="runBtn" type="button" onclick="run()">Import selected →</button>
       <button id="stopBtn" type="button" class="ghost" onclick="stop()" disabled>Stop</button>
       <span class="note dim">Auto-resume is always on — dropped connections retry until the selection completes.</span>
     </div>
@@ -262,6 +284,28 @@ function onSize(){
   $("topNWrap").style.display = (v==="top") ? "" : "none";
 }
 
+// the 5 pipeline phases, in order — keys match the server's _PHASES
+const STEPS = [["download","Download"],["threads","Threads"],["links","Links"],
+               ["comprehend","Comprehend"],["contacts","Rolodex"]];
+function renderSteps(s, a){
+  const ph = s.phase, active = ph ? ph.step : (a.finished ? 99 : 0);
+  const skipped = new Set(s.skipped || []);          // phases the server skipped this run (e.g. comprehend off)
+  $("stepper").innerHTML = STEPS.map((st,i)=>{
+    const n=i+1, key=st[0]; let cls, indet=false, barW=0, ct="";
+    if(skipped.has(key)){ cls="skipped"; }            // skipped wins over 'done' — never show a ✓ for it
+    else if(a.finished || n<active){ cls="done"; barW=100; }
+    else if(ph && n===active){
+      cls="active";
+      if(ph.key==="download"){ if(a.totalAll>0){ barW=a.dlPct; ct=`${a.doneAll}/${a.totalAll}`; } else indet=true; }
+      else if(ph.total>0){ barW=ph.done/ph.total*100; ct=`${ph.done}/${ph.total}`; }
+      else indet=true;
+    } else cls="pending";
+    const mark = (cls==="done") ? "✓" : (cls==="skipped") ? "–" : n;
+    return `<div class="step ${cls}"><div class="sh"><span class="sn">${mark}</span><span>${st[1]}</span>`
+      + (ct?`<span class="sct mono dim">${ct}</span>`:"") + (cls==="skipped"?`<span class="sct dim">skipped</span>`:"") + `</div>`
+      + `<div class="sbar"><i class="${indet?'indet':''}"${indet?'':` style="width:${barW}%"`}></i></div></div>`;
+  }).join("");
+}
 function render(s){
   // CUMULATIVE across attempts: done = already-archived (skipped) + this attempt's saved; total = folder size
   let doneAll=0, totalAll=0, errs=0, savedAttempt=0;
@@ -272,16 +316,41 @@ function render(s){
     savedAttempt += f.saved||0;
   });
   const remaining = Math.max(0, totalAll - doneAll);
-  const pct = totalAll>0 ? doneAll/totalAll*100 : 0;
-  $("ring").style.strokeDashoffset = C*(1-pct/100);
-  $("ringPct").textContent = Math.round(pct)+"%";
-  $("ringSub").textContent = doneAll+" / "+totalAll;
+  const ph = s.phase;
+  const finished = !!(s.manifest && !s.running && !(s.manifest.stopped || s.manifest.aborted));
+  const dlPct = totalAll>0 ? doneAll/totalAll*100 : ((ph && ph.key!=="download") || finished ? 100 : 0);
+
+  // OVERALL pipeline % — each phase is 1/5 of the ring; the active phase adds its own sub-progress, so the
+  // ring only reaches 100% when ALL phases finish (fixes the old 'ring at 100% but still working' confusion).
+  const stopped = !!(s.manifest && !s.running && (s.manifest.stopped || s.manifest.aborted));
+  let overall = 0;
+  if(finished) overall = 100;
+  else if(ph){
+    let sub = (ph.key==="download") ? dlPct/100 : (ph.total>0 ? ph.done/ph.total : 0.12);
+    overall = Math.min(100, ((ph.step-1) + Math.max(0, Math.min(1, sub))) / STEPS.length * 100);
+  }
+  else if(stopped && totalAll>0){ overall = doneAll/totalAll/STEPS.length*100; }   // keep partial download progress
+  $("ring").style.strokeDashoffset = C*(1-overall/100);
+  $("ringPct").textContent = Math.round(overall)+"%";
+  $("ringSub").textContent = ph ? ph.label : (finished ? "Complete" : (stopped ? "stopped" : (s.running ? "…" : "idle")));
+
   $("cSaved").textContent = doneAll; $("cRemain").textContent = remaining; $("cErr").textContent = errs;
   const elapsed = s.started_at ? (Date.now()/1000 - s.started_at) : 0;
   const sessionProgress = (s.session_saved||0) + savedAttempt;   // effective throughput incl. reconnect waits
   const rate = elapsed>1 ? sessionProgress/elapsed : 0;
   $("cRate").textContent = rate>0 ? rate.toFixed(2) : "—";
-  $("cEta").textContent = (rate>0 && remaining>0) ? fmtETA(remaining/rate) : (s.running? "…" : "—");
+
+  // ETA is phase-aware: a countable phase (download/links/comprehend) uses its OWN rate since it started
+  let etaTxt = "—";
+  if(ph && ph.total>0 && ph.done>0 && ph.at){
+    const pe = Date.now()/1000 - ph.at, pr = pe>1 ? ph.done/pe : 0;
+    if(pr>0) etaTxt = fmtETA((ph.total - ph.done)/pr);
+  } else if(ph && ph.key==="download" && rate>0 && remaining>0){
+    etaTxt = fmtETA(remaining/rate);
+  } else if(s.running){ etaTxt = "…"; }
+  $("cEta").textContent = etaTxt;
+
+  renderSteps(s, {doneAll, totalAll, dlPct, finished});
 
   const pb = $("prepBox");
   if(s.prep){
@@ -319,7 +388,7 @@ function render(s){
         <span class="mono dim">${fdone}/${ftot}${e}</span></div>
         <div class="track"><div class="fill" style="width:${p}%"></div></div></div>`;
     }).join("");
-  } else { box.innerHTML = '<p class="note dim">No active run — select folders below and click Archive selected.</p>'; }
+  } else { box.innerHTML = '<p class="note dim">No active run — select folders below and click Import selected.</p>'; }
 
   const logEl = $("log");
   if((s.log||[]).length){ logEl.style.display="block"; logEl.textContent=s.log.join("\n"); logEl.scrollTop=logEl.scrollHeight; }

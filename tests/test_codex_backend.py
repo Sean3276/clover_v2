@@ -25,7 +25,7 @@ def _fake_exec_to_outfile(payload):
 
 def test_generate_reads_last_message_file_and_accrues_tokens(monkeypatch):
     b = CodexCliComprehender(timeout=30)
-    monkeypatch.setattr(shutil, "which", lambda _n: "codex")
+    monkeypatch.setattr(cmod, "_find_codex", lambda: "codex")
     monkeypatch.setattr(cmod, "_exec", _fake_exec_to_outfile("The comprehension result."))
     assert b.generate("comprehend", "prompt") == "The comprehension result."
     assert b.tokens == 20                                   # 12 + 8 from the JSONL usage event
@@ -33,7 +33,7 @@ def test_generate_reads_last_message_file_and_accrues_tokens(monkeypatch):
 
 def test_generate_parses_json_with_schema(monkeypatch):
     b = CodexCliComprehender()
-    monkeypatch.setattr(shutil, "which", lambda _n: "codex")
+    monkeypatch.setattr(cmod, "_find_codex", lambda: "codex")
     monkeypatch.setattr(cmod, "_exec", _fake_exec_to_outfile('{"abstract": "x", "summary": "y"}'))
     out = b.generate("distill_summary", "prompt", schema={"abstract": "str"})
     assert out == {"abstract": "x", "summary": "y"}
@@ -41,7 +41,7 @@ def test_generate_parses_json_with_schema(monkeypatch):
 
 def test_timeout_is_friendly(monkeypatch):
     b = CodexCliComprehender(timeout=5)
-    monkeypatch.setattr(shutil, "which", lambda _n: "codex")
+    monkeypatch.setattr(cmod, "_find_codex", lambda: "codex")
     def _boom(*a, **k):
         raise TimeoutError()
     monkeypatch.setattr(cmod, "_exec", _boom)
@@ -52,7 +52,7 @@ def test_timeout_is_friendly(monkeypatch):
 
 def test_missing_cli_is_friendly(monkeypatch):
     b = CodexCliComprehender()
-    monkeypatch.setattr(shutil, "which", lambda _n: None)
+    monkeypatch.setattr(cmod, "_find_codex", lambda: None)
     with pytest.raises(RuntimeError) as ei:
         b.generate("comprehend", "p")
     assert "codex" in str(ei.value).lower()

@@ -16,6 +16,9 @@
   .codebox:focus{border-style:solid}
   .codelbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
   .coprojs{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 2px;align-items:center}
+  .codesc{font-size:13px;color:var(--ink);margin:6px 0 2px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+  .codesc .dtext{color:var(--sub)}
+  .codesc .descbtn{font-size:11px;display:inline-flex;align-items:center;gap:3px}
   .alias{font-size:11px;color:var(--dim)}
   .azbar{display:flex;flex-wrap:wrap;gap:3px;align-items:center}
   .azbtn{min-width:25px;text-align:center;padding:3px 6px;border:1px solid var(--line);border-radius:6px;
@@ -43,8 +46,8 @@
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
       <button id="rebuildBtn" type="button" class="ghost" onclick="rebuildContacts()"
-              title="Re-read each sender's latest signature and rebuild firms, codes and merges">↻ Refresh from signatures</button>
-      <a href="/contacts/export.csv" class="btn ghost" style="text-decoration:none" title="Download the whole green book as CSV">⬇ Export CSV</a>
+              title="Re-read each sender's latest signature and rebuild firms, codes and merges"><svg class="ic" aria-hidden="true"><use href="#ic-refresh"/></svg>Refresh from signatures</button>
+      <a href="/contacts/export.csv" class="btn ghost" style="text-decoration:none" title="Download the whole green book as CSV"><svg class="ic" aria-hidden="true"><use href="#ic-download"/></svg>Export CSV</a>
       <span id="rebuildMsg" class="msg" role="status" aria-live="polite" style="margin:0"></span>
     </div>
   </div>
@@ -81,17 +84,22 @@
 {% for co in companies %}
 <div class="card co" data-letter="{{ co.name[:1]|upper }}" data-q="{{ (co.name ~ ' ' ~ co.code ~ ' ' ~ (co.projects|join(' ')) ~ ' ' ~ (co.people|map(attribute='name')|join(' ')) ~ ' ' ~ (co.people|map(attribute='email')|join(' ')))|lower }}">
   <div class="cohdr">
-    {% if co.unverified %}<h2 class="unverified" title="Company name not detected from signatures — this is the email domain. Click ✎ to set the real name.">{{ co.domain }}</h2>
+    {% if co.unverified %}<h2 class="unverified" title="Company name not detected from signatures — this is the email domain. Click the pencil to set the real name.">{{ co.domain }}</h2>
     <span class="utag">name not detected</span>
     {% else %}<h2>{{ co.name }}</h2>{% endif %}
-    <button type="button" class="editname" title="Set / correct the company name" data-key="{{ co.key }}" data-name="{{ co.name }}" onclick="editName(this)">✎</button>
-    <button type="button" class="editname" title="Merge this firm into another (give the target's code)" data-key="{{ co.key }}" data-name="{{ co.name }}" onclick="mergeFirm(this)">⛙</button>
+    <button type="button" class="editname" title="Set / correct the company name" data-key="{{ co.key }}" data-name="{{ co.name }}" onclick="editName(this)"><svg class="ic" aria-label="Edit name"><use href="#ic-edit"/></svg></button>
+    <button type="button" class="editname mergebtn" title="Merge this firm into another (give the target's code)" data-key="{{ co.key }}" data-name="{{ co.name }}" onclick="mergeFirm(this)"><svg class="ic" aria-label="Merge firm"><use href="#ic-merge"/></svg></button>
     <span class="codelbl">code</span>
     <input class="codebox" value="{{ co.code }}" data-key="{{ co.key }}" maxlength="8"
            aria-label="Company code" title="Click to edit this firm's code (must be unique)"
            onfocus="this.dataset.prev=this.value" onchange="saveCode(this)">
     <span class="note" style="margin-left:auto">{{ co.count }} {{ 'person' if co.count == 1 else 'people' }}</span>
   </div>
+  <p class="codesc">
+    {% if co.description %}<span class="dtext">{{ co.description }}</span>{% else %}<span class="dim">What does this firm do? —</span>{% endif %}
+    <button type="button" class="linkbtn descbtn" title="Describe what this firm does (industry / what they supply)"
+            data-key="{{ co.key }}" data-desc="{{ co.description }}" onclick="editDesc(this)"><svg class="ic" aria-hidden="true"><use href="#ic-edit"/></svg>{{ 'edit' if co.description else 'add a note' }}</button>
+  </p>
   {% if co.projects %}
   <div class="coprojs">
     <span class="note">Worked together on:</span>
@@ -179,6 +187,15 @@ async function editName(btn){
     const res = await (await fetch('/contacts/name', {method:'POST', body:fd})).json();
     if(res.ok) location.reload();
   }catch(e){ alert('Could not save name: ' + e); }
+}
+async function editDesc(btn){
+  const v = prompt('What does “' + (btn.dataset.name || btn.closest('.co').querySelector('h2').textContent) + '” do? (industry / what they supply — leave blank to clear):', btn.dataset.desc || '');
+  if(v === null) return;
+  try{
+    const fd = new FormData(); fd.append('key', btn.dataset.key); fd.append('description', v.trim());
+    const res = await (await fetch('/contacts/description', {method:'POST', body:fd})).json();
+    if(res.ok) location.reload();
+  }catch(e){ alert('Could not save description: ' + e); }
 }
 async function mergeFirm(btn){
   const code = prompt('Merge “' + (btn.dataset.name || '') + '” INTO which firm?\nType the target firm\'s CODE (shown on its card):', '');

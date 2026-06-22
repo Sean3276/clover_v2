@@ -102,8 +102,8 @@ Many emails reference files behind share links (SharePoint/OneDrive, Google Driv
 - **Status outcomes:** `downloaded · needs-confirm · needs-auth (gated/expired — open it yourself) · dead (404/410) · error`.
 - **Considerations:** background, **one link task at a time** (no concurrent writes); re-runnable (only touches `pending`); cancellable via *Stop* (`POST /threads/stop-links`). The Mail list shows a live status summary. URL-dedup also covers `dead`/`needs-auth`, so a known-bad link is never re-tried per duplicate email.
 
-### Action: **Download anyway** (confirm a large link) · `POST /threads/confirm-link`
-- **Trigger:** for a `needs-confirm` link, click *Download anyway* in the thread (the row names the link, its email, and its size).
+### Action: **Download it anyway** (confirm a large link) · `POST /threads/confirm-link`
+- **Trigger:** for a `needs-confirm` link, click *Download it anyway* in the thread or on the Mail page (the row names the link, its email, and its size).
 - **Does:** clears the size gate for that link and re-queues it (`confirmed`); the next *Fetch files* downloads it in full.
 
 ### Action: **Stop links** · `POST /threads/stop-links`

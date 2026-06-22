@@ -202,6 +202,8 @@ def sort_items(its: list[dict], key: str = "expiry") -> list[dict]:
     'recency' = newest message first; 'domain'/'category' = grouped, then by expiry within the group."""
     if key == "recency":
         return sorted(its, key=lambda it: it.get("date") or "", reverse=True)
+    if key == "importance":                              # important first, then soonest-expiry within each group
+        return sorted(its, key=lambda it: (0 if it.get("important") else 1, _expiry_key(it)))
     if key in ("domain", "category"):
         return sorted(its, key=lambda it: ((it.get(key) or "~").lower(), _expiry_key(it)))
     return sorted(its, key=_expiry_key)

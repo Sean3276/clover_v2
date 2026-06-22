@@ -112,14 +112,19 @@ def links_for_member(archive_path, message_id: str, locations=None) -> list[dict
     return out
 
 
-def harvest(archive_path, log=print) -> dict:
-    """Scan every archived .eml for share links; append new ones to link_shares.jsonl (idempotent
-    on (message_id, url)). Returns a summary. Detection only — no downloads (that's 4b/4c)."""
+def harvest(archive_path, log=print, only_message_ids=None) -> dict:
+    """Scan archived .eml for share links; append new ones to link_shares.jsonl (idempotent on
+    (message_id, url)). Returns a summary. Detection only — no downloads (that's 4b/4c). With
+    `only_message_ids`, scan ONLY those messages (incremental — the post-import pipeline passes the
+    ids it just imported instead of re-reading the whole store every run)."""
     dest = Path(archive_path)
+    only = set(only_message_ids) if only_message_ids is not None else None
     existing = {(r.get("message_id"), r.get("url")) for r in read_link_shares(dest)}
     added, msgs, by_provider = 0, set(), {}
     with link_shares_path(dest).open("a", encoding="utf-8") as fh:
         for r in read_index(dest):
+            if only is not None and r.get("id") not in only:   # not part of this import — skip
+                continue
             rel = r.get("path")
             if not rel:
                 continue
@@ -350,8 +355,20 @@ def mark_confirmed(archive_path, message_id: str, url: str) -> None:
     _update_records(archive_path, {(message_id, url): {"confirmed": True, "status": "pending"}})
 
 
+def _email_date_iso(date_hdr: str | None) -> str:
+    """RFC-2822 Date header -> 'YYYY-MM-DD' (UTC date part), or '' if unparseable/missing."""
+    if not date_hdr:
+        return ""
+    try:
+        dt = email.utils.parsedate_to_datetime(date_hdr)
+    except Exception:
+        return ""
+    return dt.date().isoformat() if dt else ""
+
+
 def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=60,
-                confirm_over_mb=1024, only_message_ids=None, log=print, should_stop=lambda: False,
+                confirm_over_mb=1024, only_message_ids=None, date_from=None, date_to=None,
+                providers=None, log=print, should_stop=lambda: False,
                 progress=lambda **k: None) -> dict:
     """Download up to `limit` pending links into _linkfiles/<message-id>/, updating each record's
     status (downloaded | needs-confirm | dead | needs-auth | error). Re-runnable (only touches 'pending').
@@ -361,7 +378,12 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
     (critical at scale: ~85% of a real corpus is repeated links). Size gate: a download exceeding
     `confirm_over_mb` is NOT kept — it's marked
     'needs-confirm' (with its size) so the UI can ask the user; a record flagged 'confirmed' bypasses
-    the gate. `timeout` bounds the browser download wait per link (navigation capped separately)."""
+    the gate. `timeout` bounds the browser download wait per link (navigation capped separately).
+
+    Selection filters (all optional, AND-combined): `date_from`/`date_to` ('YYYY-MM-DD', inclusive) keep
+    only links whose source email falls in that window — an email with no parseable date is EXCLUDED while
+    a date filter is active (you asked for a range), but kept when no date filter is set; `providers` (a
+    list of provider names) keeps only links from those providers. Unselected links stay 'pending'."""
     import inspect
     limit_bytes = int(confirm_over_mb * 1024 * 1024) if confirm_over_mb else None
     if fetcher:
@@ -380,8 +402,27 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
                 for r in recs if r.get("status") == "needs-confirm"}
     dead_urls = {r.get("url") for r in recs if r.get("status") == "dead"}        # don't re-try a known-dead link
     auth_urls = {r.get("url") for r in recs if r.get("status") == "needs-auth"}  # ...or a known-gated one
+    provset = {p for p in providers} if providers else None     # None -> all providers
+    mid_date = None                                              # message_id -> 'YYYY-MM-DD', built lazily
+    if date_from or date_to:
+        mid_date = {r.get("id"): _email_date_iso(r.get("date")) for r in read_index(archive_path)}
+
+    def _selected(r) -> bool:
+        if provset is not None and r.get("provider") not in provset:
+            return False
+        if mid_date is not None:                                # a date window is active
+            d = mid_date.get(r.get("message_id"), "")
+            if not d:                                           # undated email -> not in any dated range
+                return False
+            if date_from and d < date_from:
+                return False
+            if date_to and d > date_to:
+                return False
+        return True
+
     pending = [r for r in recs if r.get("status") == "pending"
-               and (only_message_ids is None or r.get("message_id") in only_message_ids)]
+               and (only_message_ids is None or r.get("message_id") in only_message_ids)
+               and _selected(r)]
     updates = {}
     done = reused = confirm = dead = auth = 0
     batch = pending[:limit]
@@ -435,7 +476,12 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
                 auth += 1
                 auth_urls.add(url)
     _update_records(archive_path, updates)
-    remaining = sum(1 for r in read_link_shares(archive_path) if r.get("status") == "pending")
+    # remaining must honour the SAME scope (only_message_ids + provider/date filters) used to pick the batch —
+    # otherwise a caller looping until remaining<=0 never terminates while an out-of-scope backlog stays pending.
+    remaining = sum(1 for r in read_link_shares(archive_path)
+                    if r.get("status") == "pending"
+                    and (only_message_ids is None or r.get("message_id") in only_message_ids)
+                    and _selected(r))
     log(f"link fetch: {done} downloaded ({reused} reused), {confirm} need-confirm, "
         f"{dead} dead, {auth} need-auth · {remaining} pending")
     return {"downloaded": done, "reused": reused, "needs_confirm": confirm,

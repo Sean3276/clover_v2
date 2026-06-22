@@ -894,7 +894,9 @@ def test_thread_attachment_and_mail_icons(tmp_path, monkeypatch):
          "status": "pending", "file": None}) + "\n", encoding="utf-8")
     monkeypatch.setattr(m.cfgmod, "load_config", lambda: {"auth": {"imap": {}}, "archive_path": str(tmp_path)})
     body = TestClient(m.app).get("/threads").text
-    assert "📎" in body and "🔗" in body and "still to fetch" in body
+    # icons now live in a small muted .thicons cluster (right column) as inline SVG, not emoji in the subject
+    assert 'class="thicons"' in body
+    assert "#ic-paperclip" in body and "#ic-link" in body and "still to fetch" in body
 
 
 def test_review_badge_tooltip_explains_action(tmp_path, monkeypatch):

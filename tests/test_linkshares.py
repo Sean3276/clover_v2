@@ -175,6 +175,90 @@ def test_fetch_links_dedup_dead_and_auth_across_messages(tmp_path):
     assert sum(1 for r in ls.read_link_shares(tmp_path) if r["status"] == "pending") == 0
 
 
+def _emld(tmp, key, mid, body, date):
+    """Like _eml but with a caller-chosen Date (drives the index date used for range-filtering)."""
+    m = EmailMessage()
+    m["Message-ID"] = f"<{mid}>"; m["From"] = "a@x.com"; m["To"] = "b@x.com"; m["Subject"] = "Hi"
+    if date:
+        m["Date"] = date
+    m.set_content(body)
+    rel = f"INBOX/{key}.eml"
+    (tmp / "INBOX").mkdir(parents=True, exist_ok=True)
+    (tmp / rel).write_bytes(m.as_bytes())
+    with (tmp / "_index.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"id": mid, "folder": "INBOX", "key": key, "path": rel,
+                            "date": date, "from": "a@x.com", "subject": "Hi", "size": 1}) + "\n")
+
+
+def test_fetch_links_date_range_filter(tmp_path):
+    # only links whose email falls inside [date_from, date_to] are fetched
+    _emld(tmp_path, "1", "jan@x", "https://www.dropbox.com/s/x/jan.pdf", "Thu, 01 Jan 2026 00:00:00 +0000")
+    _emld(tmp_path, "2", "jun@x", "https://www.dropbox.com/s/x/jun.pdf", "Mon, 15 Jun 2026 00:00:00 +0000")
+    _emld(tmp_path, "3", "dec@x", "https://www.dropbox.com/s/x/dec.pdf", "Tue, 15 Dec 2026 00:00:00 +0000")
+    ls.harvest(tmp_path, log=lambda *_: None)
+    got = []
+    fake = lambda u, p: (got.append(u), ("downloaded", "f.pdf", b"x"))[1]
+    s = ls.fetch_links(tmp_path, fetcher=fake, date_from="2026-06-01", date_to="2026-06-30", log=lambda *_: None)
+    assert s["downloaded"] == 1
+    assert got == ["https://www.dropbox.com/s/x/jun.pdf"]   # Jan + Dec links skipped
+
+
+def test_fetch_links_provider_filter(tmp_path):
+    # only the chosen provider(s) get fetched; others stay pending
+    _emld(tmp_path, "1", "m1@x", "https://www.dropbox.com/s/x/a.pdf", "Thu, 01 Jan 2026 00:00:00 +0000")
+    _emld(tmp_path, "2", "m2@x", "https://drive.google.com/file/d/ABCDEFGHIJ/view", "Thu, 01 Jan 2026 00:00:00 +0000")
+    ls.harvest(tmp_path, log=lambda *_: None)
+    got = []
+    fake = lambda u, p: (got.append(p), ("downloaded", "f.pdf", b"x"))[1]
+    s = ls.fetch_links(tmp_path, fetcher=fake, providers=["Dropbox"], log=lambda *_: None)
+    assert s["downloaded"] == 1 and got == ["Dropbox"]          # Google Drive link not fetched
+    assert sum(1 for r in ls.read_link_shares(tmp_path) if r["status"] == "pending") == 1
+
+
+def test_fetch_links_remaining_is_scoped(tmp_path):
+    # 'remaining' must reflect the SCOPED pending count — else _auto_link_task's auto loop (which breaks on
+    # remaining<=0) never terminates when a pre-existing backlog of other-message pending links exists.
+    _eml(tmp_path, "INBOX", "1", "in@x", "https://www.dropbox.com/s/a/in.pdf")    # this import's message
+    _eml(tmp_path, "INBOX", "2", "old@x", "https://www.dropbox.com/s/b/old.pdf")  # pre-existing backlog
+    ls.harvest(tmp_path, log=lambda *_: None)
+    s = ls.fetch_links(tmp_path, fetcher=lambda u, p: ("downloaded", "f.pdf", b"x"),
+                       only_message_ids={"in@x"}, log=lambda *_: None)
+    assert s["downloaded"] == 1
+    assert s["remaining"] == 0       # the scoped link is done; the out-of-scope backlog must NOT keep it >0
+    assert any(r["message_id"] == "old@x" and r["status"] == "pending"   # backlog left untouched for a manual run
+               for r in ls.read_link_shares(tmp_path))
+
+
+def test_harvest_scopes_to_only_message_ids(tmp_path):
+    # incremental harvest: scan ONLY the just-imported messages, not the whole archive every run
+    _eml(tmp_path, "INBOX", "1", "a@x", "doc https://www.dropbox.com/s/x/a.pdf")
+    _eml(tmp_path, "INBOX", "2", "b@x", "doc https://www.dropbox.com/s/y/b.pdf")
+    s = ls.harvest(tmp_path, only_message_ids={"a@x"}, log=lambda *_: None)
+    assert s["added"] == 1                                  # message b never scanned
+    assert {r["message_id"] for r in ls.read_link_shares(tmp_path)} == {"a@x"}
+
+
+def test_auto_link_task_scopes_to_imported_ids(tmp_path, monkeypatch):
+    # the post-import pipeline must pass the imported message-ids down to BOTH harvest and fetch
+    import app.main as m
+    cap = {}
+    monkeypatch.setattr(m.lsmod, "harvest", lambda arch, **kw: (cap.__setitem__("h", kw), {"added": 0})[1])
+    monkeypatch.setattr(m.lsmod, "fetch_links", lambda arch, **kw: (cap.__setitem__("f", kw), {"remaining": 0})[1])
+    m._auto_link_task(tmp_path, do_harvest=True, do_fetch=True, only_message_ids={"a@x", "b@x"})
+    assert cap["h"]["only_message_ids"] == {"a@x", "b@x"}
+    assert cap["f"]["only_message_ids"] == {"a@x", "b@x"}
+
+
+def test_fetch_links_undated_excluded_when_date_filter_active(tmp_path):
+    # an email with no parseable date must NOT match a dated query (you asked for a range)
+    _emld(tmp_path, "1", "nd@x", "https://www.dropbox.com/s/x/nd.pdf", "")
+    ls.harvest(tmp_path, log=lambda *_: None)
+    s = ls.fetch_links(tmp_path, fetcher=lambda u, p: ("downloaded", "f.pdf", b"x"),
+                       date_from="2026-01-01", log=lambda *_: None)
+    assert s["downloaded"] == 0
+    assert ls.read_link_shares(tmp_path)[0]["status"] == "pending"   # left for an unfiltered run
+
+
 def test_fetch_links_oversize_needs_confirm_then_confirm(tmp_path):
     _eml(tmp_path, "INBOX", "1", "m@x", "big https://www.dropbox.com/s/x/big.zip")
     ls.harvest(tmp_path, log=lambda *_: None)
@@ -245,3 +329,36 @@ def test_link_status_route_exposes_triage(tmp_path, monkeypatch):
     s = TestClient(m.app).get("/threads/link-status").json()
     assert s["stats"].get("dead") == 1 and s["stats"].get("needs-auth") == 1
     assert len(s["needs_auth"]) == 1 and len(s["dead"]) == 1
+
+
+def test_fetch_links_route_forwards_filters(tmp_path, monkeypatch):
+    # the Fetch-files button must forward date range + chosen providers to fetch_links
+    import threading
+    from starlette.testclient import TestClient
+    import app.main as m
+    m._linktask["running"] = False                                   # clean slate
+    captured, done = {}, threading.Event()
+    monkeypatch.setattr(m.lsmod, "fetch_links",
+                        lambda arch, **kw: (captured.update(kw), done.set(), {"remaining": 0})[2])
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: {"auth": {"imap": {}}, "archive_path": str(tmp_path)})
+    r = TestClient(m.app).post("/threads/fetch-links",
+                               data={"date_from": "2026-06-01", "date_to": "2026-06-30",
+                                     "providers": "Dropbox, Google Drive"})
+    assert r.json()["ok"] is True and done.wait(2)
+    assert captured["date_from"] == "2026-06-01" and captured["date_to"] == "2026-06-30"
+    assert captured["providers"] == ["Dropbox", "Google Drive"]      # comma-split + trimmed
+
+
+def test_fetch_links_route_blank_filters_become_none(tmp_path, monkeypatch):
+    # empty fields = "fetch everything" -> filters passed as None, not "" / [""]
+    import threading
+    from starlette.testclient import TestClient
+    import app.main as m
+    m._linktask["running"] = False
+    captured, done = {}, threading.Event()
+    monkeypatch.setattr(m.lsmod, "fetch_links",
+                        lambda arch, **kw: (captured.update(kw), done.set(), {"remaining": 0})[2])
+    monkeypatch.setattr(m.cfgmod, "load_config", lambda: {"auth": {"imap": {}}, "archive_path": str(tmp_path)})
+    TestClient(m.app).post("/threads/fetch-links", data={"date_from": "", "date_to": "", "providers": ""})
+    assert done.wait(2)
+    assert captured["date_from"] is None and captured["date_to"] is None and captured["providers"] is None

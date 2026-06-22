@@ -161,6 +161,15 @@ def test_run_archive_stops_promptly_midrun(tmp_path):
     assert m["saved"] < 10            # stopped before archiving all 10
 
 
+def test_run_archive_records_saved_ids(tmp_path):
+    # the manifest must report WHICH messages were imported, so the post-import link fetch can scope to them
+    fake = _FakeSource({"1": _raw("a@x"), "2": _raw("b@x")})
+    cfg = {"auth": {"imap": {}}, "folders": ["INBOX"], "archive_path": str(tmp_path)}
+    m = ar.run_archive(cfg, "pw", log=lambda *_: None, source=fake)
+    assert m["saved"] == 2
+    assert set(m["saved_ids"]) == {"a@x", "b@x"}
+
+
 def test_run_archive_skips_hung_fetch(tmp_path):
     fake = _FakeSource({"1": _raw("a@x"), "2": "SLOW", "3": _raw("b@x")})
     cfg = {"auth": {"imap": {}}, "folders": ["INBOX"], "archive_path": str(tmp_path)}
