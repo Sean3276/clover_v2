@@ -295,21 +295,22 @@ function onSize(){
 const STEPS = [["download","Download"],["threads","Threads"],["links","Links"],
                ["comprehend","Comprehend"],["contacts","Rolodex"]];
 function renderSteps(s, a){
-  const ph = s.phase, active = ph ? ph.step : (a.finished ? 99 : 0);
+  const ph = s.phase, active = ph ? ph.step : 0;     // a ✓ now needs an explicit 'ok' result — never just a.finished
   const skipped = new Set(s.skipped || []);
-  const pr = s.phase_results || {};                  // server-recorded OUTCOME per phase — the truth
+  const pr = s.phase_results || {};                  // server-recorded OUTCOME per phase — the only source of a ✓
   $("stepper").innerHTML = STEPS.map((st,i)=>{
-    const n=i+1, key=st[0], res = pr[key]; let cls, indet=false, barW=0, ct="";
-    if(res && res.state==="failed"){ cls="failed"; ct = res.errors ? `${res.errors} errored` : ""; }     // failed wins over everything
-    else if(res && res.state==="partial"){ cls="partial"; barW=100; ct = `${res.done} of ${res.total}` + (res.errors?` · ${res.errors} err`:""); }
-    else if(skipped.has(key) || (res && res.state==="skipped")){ cls="skipped"; }
-    else if(ph && n===active){
+    const n=i+1, key=st[0], res = pr[key], state = res && res.state; let cls, indet=false, barW=0, ct="";
+    if(state==="failed"){ cls="failed"; ct = res.errors ? `${res.errors} errored` : ""; }                // failure wins
+    else if(state==="partial"){ cls="partial"; barW=100; ct = `${res.done} of ${res.total}` + (res.errors?` · ${res.errors} err`:""); }
+    else if(state==="skipped" || skipped.has(key)){ cls="skipped"; }
+    else if(state==="ok"){ cls="done"; barW=100; }                                                        // ✓ ONLY on real completion
+    else if(state==="running" || (ph && n===active)){                                                     // in progress now
       cls="active";
-      if(ph.key==="download"){ if(a.totalAll>0){ barW=a.dlPct; ct=`${a.doneAll}/${a.totalAll}`; } else indet=true; }
-      else if(ph.total>0){ barW=ph.done/ph.total*100; ct=`${ph.done}/${ph.total}`; }
+      if(ph && ph.key==="download"){ if(a.totalAll>0){ barW=a.dlPct; ct=`${a.doneAll}/${a.totalAll}`; } else indet=true; }
+      else if(ph && n===active && ph.total>0){ barW=ph.done/ph.total*100; ct=`${ph.done}/${ph.total}`; }
       else indet=true;
     }
-    else if(a.finished || n<active){ cls="done"; barW=100; }
+    else if(a.finished){ cls="skipped"; }            // run ended but this phase recorded nothing -> it did NOT run (not a ✓)
     else cls="pending";
     const mark = cls==="done" ? "✓" : cls==="failed" ? "!" : cls==="skipped" ? "–" : cls==="partial" ? "◐" : n;
     const note = cls==="failed" ? `<span class="sct" style="color:var(--red)">failed</span>`
@@ -344,10 +345,12 @@ function render(s){
   }
   else if(stopped && totalAll>0){ overall = doneAll/totalAll/STEPS.length*100; }   // keep partial download progress
   const hasIssues = Object.values(s.phase_results||{}).some(v => v.state==="failed" || v.state==="partial");
+  const newMail = (s.session_saved||0) + savedAttempt;
   $("ring").style.strokeDashoffset = C*(1-overall/100);
   $("ringPct").textContent = Math.round(overall)+"%";
   $("ringSub").textContent = ph ? ph.label
-    : (finished ? (hasIssues ? "done — with issues" : "Complete") : (stopped ? "stopped" : (s.running ? "…" : "idle")));
+    : (finished ? (hasIssues ? "done — with issues" : (newMail ? "Complete" : "no new mail"))
+       : (stopped ? "stopped" : (s.running ? "…" : "idle")));
   // honest one-line outcome of the last finished run (survives nav; persisted server-side too)
   const lr = s.last_run, lel = $("lastRun");
   if(lel){
@@ -358,6 +361,8 @@ function render(s){
       else if(c.total) bits.push("comprehended "+c.done+" of "+c.total+(c.errors?(' · <span style="color:var(--red)">'+c.errors+" errored</span>"):""));
       const fails = (lr.failed||[]).filter(k=>k!=="comprehend");
       if(fails.length) bits.push('<span style="color:var(--red)">'+fails.join(", ")+" failed</span>");
+      const partials = (lr.partial||[]).filter(k=>k!=="comprehend");
+      if(partials.length) bits.push('<span style="color:var(--amber)">'+partials.join(", ")+" incomplete</span>");
       lel.innerHTML = "Last import — " + bits.join(" · ");
       lel.style.display = "";
     } else lel.style.display = "none";

@@ -106,8 +106,8 @@ def _set_phase(key: str, *, done: int = 0, total: int = 0, indeterminate: bool =
             "indeterminate": bool(indeterminate), "current": str(current or ""),
             "at": started,
         }
-        # default the outcome to running/ok-so-far; _fail_phase / _phase_result override with the truth
-        _status["phase_results"].setdefault(key, {"state": "ok", "done": 0, "total": 0, "errors": 0, "reason": ""})
+        # an active phase is 'running' (NOT a completed ✓); _phase_result/_fail_phase set the real outcome
+        _status["phase_results"].setdefault(key, {"state": "running", "done": 0, "total": 0, "errors": 0, "reason": ""})
         _status["phase_results"][key].update({"done": int(done), "total": int(total)})
 
 
@@ -120,6 +120,58 @@ def _phase_result(key: str, state: str, *, done: int = 0, total: int = 0, errors
 
 def _fail_phase(key: str, reason) -> None:
     _phase_result(key, "failed", reason=f"{type(reason).__name__}: {reason}" if isinstance(reason, BaseException) else str(reason))
+
+
+def _mark_active_phase_failed(reason) -> None:
+    """A crash OUTSIDE a phase's own try/except (e.g. mid-download) must flip the ACTIVE phase to failed,
+    not leave its optimistic 'running' — else the stepper and the persisted last_run hide the error."""
+    ph = _status.get("phase")
+    if ph and ph.get("key"):
+        _fail_phase(ph["key"], reason)
+
+
+def _record_download_outcome() -> None:
+    """Record the download phase's REAL result from the run manifest + per-folder errors, so a
+    stopped/aborted/partly-errored download is never painted as a clean ✓."""
+    man = _status.get("manifest") or {}
+    saved = int(_status.get("session_saved", 0) or 0)
+    errs = sum(int((f or {}).get("errors") or 0) for f in _status.get("folders", {}).values())
+    if _status.get("stop") or man.get("stopped") or man.get("aborted"):
+        _phase_result("download", "partial", done=saved, total=saved + errs, errors=errs,
+                      reason="stopped before finishing")
+    elif errs:
+        _phase_result("download", "partial", done=saved, total=saved + errs, errors=errs,
+                      reason=f"{errs} message(s) failed to fetch")
+    else:
+        _phase_result("download", "ok", done=saved, total=saved)
+
+
+def _links_phase_outcome(arch, only_message_ids, did_fetch):
+    """Real outcome for the share-link phase, scoped to THIS import's messages. 'ok' only when every
+    in-scope link resolved to downloaded/reused; 'partial' when some remain pending / needs-auth /
+    needs-confirm / dead; 'skipped' when we only catalogued (did not fetch). Returns
+    (state, done, total, errors, reason)."""
+    if not did_fetch:
+        return ("skipped", 0, 0, 0, "catalogued, not fetched")
+    ids = set(only_message_ids or [])
+    recs = [r for r in lsmod.read_link_shares(arch) if (not ids or r.get("message_id") in ids)]
+    if not recs:
+        return ("ok", 0, 0, 0, "")
+    done = sum(1 for r in recs if r.get("status") in ("downloaded", "reused"))
+    pend = sum(1 for r in recs if r.get("status") in ("pending", "needs-confirm"))
+    auth = sum(1 for r in recs if r.get("status") == "needs-auth")
+    dead = sum(1 for r in recs if r.get("status") == "dead")
+    total = len(recs)
+    if pend == 0 and auth == 0 and dead == 0:
+        return ("ok", done, total, 0, "")
+    bits = []
+    if pend:
+        bits.append(f"{pend} still to fetch")
+    if auth:
+        bits.append(f"{auth} need sign-in")
+    if dead:
+        bits.append(f"{dead} dead")
+    return ("partial", done, total, auth + dead, "; ".join(bits))
 
 
 def _finalize_run() -> None:
@@ -303,12 +355,14 @@ def _run_archive_bg(folders: list[str], limit: int | None, filters: dict, auto_l
         )
         saved_ids = list(_status.get("session_saved_ids", []))
         do_fetch = auto_links and not _status.get("stop")
+        _record_download_outcome()        # honest download result so its optimistic 'running' can't leak as ✓
         # Re-stitch -> fetch share-links/attachments -> comprehend -> contacts. Links BEFORE comprehend so
         # their text is read; oversize files pause for confirmation and re-comprehend the thread on confirm.
         # The link step is SCOPED to saved_ids: an import only fetches links for the mail it brought in.
         _post_import(cfg, _archive_dir(cfg), saved_ids, do_fetch)
     except Exception as e:
         _log(f"ERROR: {type(e).__name__}: {e}")
+        _mark_active_phase_failed(e)       # the live phase must read 'failed', not its optimistic 'running'
     finally:
         _finalize_run()                   # snapshot + persist the real outcome before clearing the live phase
         with _lock:
@@ -335,6 +389,8 @@ def _run_links_inline(arch, harvest: bool = True, fetch: bool = False, only_mess
             _log("Downloading this import's share-link files before comprehension (oversize files wait "
                  "for confirmation)…")
         _auto_link_task(arch, harvest, fetch, only_message_ids=only_message_ids)
+        state, d, tot, errs, reason = _links_phase_outcome(arch, only_message_ids, fetch)
+        _phase_result("links", state, done=d, total=tot, errors=errs, reason=reason)   # ✓ only if all in scope fetched
     except Exception as e:
         _log(f"Share-link step failed: {type(e).__name__}: {e}")
         _fail_phase("links", e)
@@ -354,7 +410,8 @@ def _post_import(cfg: dict, arch, saved_ids: list, do_fetch: bool) -> None:
         _set_phase("threads", indeterminate=True)
         _log("Rebuilding thread index…")
         try:
-            threadmod.build_threads(arch, log=_log)
+            res = threadmod.build_threads(arch, log=_log)
+            _phase_result("threads", "ok", done=int((res.get("parsed", 0) if isinstance(res, dict) else 0) or 0))
         except Exception as e:
             _log(f"Thread index rebuild failed: {type(e).__name__}: {e}")
             _fail_phase("threads", e)
@@ -364,14 +421,16 @@ def _post_import(cfg: dict, arch, saved_ids: list, do_fetch: bool) -> None:
         _log("Refreshing the Rolodex…")
         try:                                                    # signatures + AI titles/phones -> GreenBook
             contactsmod.rebuild(arch)
+            _phase_result("contacts", "ok")
         except Exception as e:
             _log(f"Contacts refresh failed: {type(e).__name__}: {e}")
             _fail_phase("contacts", e)
-    elif do_fetch:                                              # nothing new imported — don't fetch the backlog
-        for _k in ("threads", "links", "comprehend", "contacts"):   # they didn't run -> skipped, NOT done ✓
+    else:                                                       # nothing new imported — those phases did NOT run
+        for _k in ("threads", "links", "comprehend", "contacts"):   # mark skipped regardless of fetch -> never a fake ✓
             _skip_phase(_k)
-        _log("No new mail, so no new links to download. To fetch already-catalogued links, use ⬇ Download "
-             "on the Mail page — you can limit it by date or provider there.")
+        if do_fetch:
+            _log("No new mail, so no new links to download. To fetch already-catalogued links, use ⬇ Download "
+                 "on the Mail page — you can limit it by date or provider there.")
 
 
 def _parse_date(s: str):
@@ -1300,12 +1359,13 @@ def _auto_link_task(arch, do_harvest=True, do_fetch=False, only_message_ids=None
     `only_message_ids`, BOTH catalogue and download are scoped to just those messages — so an import
     with a date/size/folder filter only fetches links for the mail it actually brought in, never the
     whole pending backlog (that's what the manual ⬇ Download button, optionally filtered, is for)."""
+    stop = lambda: bool(_linktask.get("stop") or _status.get("stop"))   # import-level Stop halts the link phase too
     if do_harvest:
         lsmod.harvest(arch, log=_log, only_message_ids=only_message_ids)
     if do_fetch:
-        while not _linktask.get("stop"):
+        while not stop():
             r = lsmod.fetch_links(arch, limit=50, headless=True, only_message_ids=only_message_ids,
-                                  log=_log, should_stop=lambda: _linktask.get("stop", False),
+                                  log=_log, should_stop=stop,
                                   progress=_linkprog)
             if r.get("remaining", 0) <= 0:
                 break
