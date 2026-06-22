@@ -216,6 +216,23 @@ def test_dmy_date_filter():
     assert _dmy("2026-13-15") == "2026-13-15"             # out-of-range month -> raw
 
 
+def test_autorun_comprehension_survives_none_limit(monkeypatch, tmp_path):
+    # a config autorun_limit of None must NOT crash autorun via int(None) — that silently broke comprehension
+    # on every import (the failure was swallowed into an in-memory log), leaving new mail un-comprehended.
+    monkeypatch.setenv("CLOVER_V2_HOME", str(tmp_path))
+    import app.main as m
+    cap = {}
+    monkeypatch.setattr(m, "_backend_available", lambda cfg: True)
+    monkeypatch.setattr(m, "_comprehender", lambda cfg: type("B", (), {"tokens": 0})())
+    monkeypatch.setattr(m, "_profile", lambda cfg: None)
+    monkeypatch.setattr(m, "_operator", lambda cfg: "")
+    monkeypatch.setattr(m.modelsmod, "get_concurrency", lambda cfg: 1)
+    monkeypatch.setattr(m.compmod, "run_comprehension", lambda *a, **k: (cap.update(k), {"done": 3, "pending": 0})[1])
+    m._status["skipped_phases"] = []
+    m._maybe_autorun_comprehension({"comprehension": {"autorun": True, "autorun_limit": None}})
+    assert isinstance(cap.get("limit"), int) and cap["limit"] == 100   # a real numeric cap reached, no crash
+
+
 def test_matters_firstrun_has_no_controls(monkeypatch, tmp_path):
     # no comprehension records -> the first-run card, NOT the controls/tagPop (the global JS listeners that
     # reference $("tagPop") must not be present without a guard — this is the page a brand-new user lands on)

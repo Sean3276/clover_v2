@@ -517,6 +517,7 @@ def _maybe_autorun_comprehension(cfg: dict) -> None:
              "(install Claude CLI: npm i -g @anthropic-ai/claude-code).")
         _skip_phase("comprehend")
         return
+    cap = int(c.get("autorun_limit") or 100)       # None/0/missing -> 100 (a None here silently crashed autorun)
     _set_phase("comprehend", indeterminate=True)   # flips to a real done/total once the first thread reports
     _log("Comprehending new threads…")
     try:
@@ -524,7 +525,7 @@ def _maybe_autorun_comprehension(cfg: dict) -> None:
         out = compmod.run_comprehension(
             _archive_dir(cfg), backend=backend, profile=_profile(cfg), operator=_operator(cfg),
             budget_tokens=10 ** 12, log=_log,    # not token-capped (that caused the silent 1/68 stall)
-            limit=int(c.get("autorun_limit", 100)),   # bounded by COUNT instead — explicit, never silent
+            limit=cap,   # bounded by COUNT instead — explicit, never silent
             should_stop=lambda: _status.get("stop", False),
             allowed=lambda: _comprehension_allowed(cfg),
             concurrency=modelsmod.get_concurrency(cfg),   # parallel workers (developer-controlled in /dev)
@@ -535,7 +536,7 @@ def _maybe_autorun_comprehension(cfg: dict) -> None:
         _record_usage(backend)
         if out["pending"]:
             _log(f"Comprehension: {out['done']} done, {out['pending']} still pending "
-                 f"(autorun caps at {int(c.get('autorun_limit', 100))}/run — use the Comprehend panel for the rest).")
+                 f"(autorun caps at {cap}/run — use the Comprehend panel for the rest).")
         else:
             _log(f"Comprehension: {out['done']} done, all caught up.")
     except Exception as e:
