@@ -21,7 +21,10 @@
   .chip:hover{border-color:var(--clover);color:var(--ink)}
   .chip.active{background:var(--clover);color:var(--btn-ink);border-color:var(--clover)}
   .chip.cat.active{background:var(--cyan);border-color:var(--cyan)}
-  .toolzone{margin-top:18px}
+  /* controls reachable: the list comes first in the DOM (so it renders early), but the tools float to the
+     top visually via flex order so they're never stranded below a long list */
+  .mailwrap{display:flex;flex-direction:column}
+  .toolzone{order:-1;margin:0 0 14px}
   .toolzone>summary{cursor:pointer;font-size:14px;color:var(--ink);list-style:none;display:flex;align-items:center;gap:8px;padding:4px 0}
   .toolzone>summary::-webkit-details-marker{display:none}
   .tcap{font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--sub);margin:16px 0 8px}
@@ -52,8 +55,9 @@
   <div id="rebuildMsg" class="msg" role="status" aria-live="polite"></div>
 </div>
 {% else %}
+<div class="mailwrap">
 
-<!-- ============ THE LIST (primary surface — first) ============ -->
+<!-- ============ THE LIST (primary surface — first in DOM; tools float above via CSS order) ============ -->
 {% if not threads %}
 <div class="card"><p class="note dim" style="margin:0">No conversations yet. Import mail on the <a href="/archive">Import</a> tab, then they'll appear here automatically.</p></div>
 {% else %}
@@ -197,6 +201,7 @@
   </div>
   <div id="rebuildMsg" class="msg" role="status" aria-live="polite"></div>
 </details>
+</div>
 {% endif %}
 
 <script>
