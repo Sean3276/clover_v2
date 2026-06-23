@@ -112,12 +112,27 @@ def _to_utc_iso(date_hdr: str | None) -> str | None:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _addr_list(frm: str, to: str) -> list[str]:
+    """Ordered-unique lowercased addresses from a From + To pair. This is the slow email-address parse
+    (profiled as ~60% of a rebuild) — run ONCE per message and cached in the header cache, so a rebuild
+    never re-parses every message's addresses again."""
+    seen: list[str] = []
+    for _, addr in getaddresses([frm or "", to or ""]):
+        a = addr.strip().lower()
+        if a and a not in seen:
+            seen.append(a)
+    return seen
+
+
 def _participants(members: list[dict]) -> list[str]:
-    """Ordered-unique email addresses across every member's From + To."""
+    """Ordered-unique email addresses across every member — uses each member's pre-parsed, cached `addrs`,
+    falling back to a live parse only for records that predate the address cache."""
     seen: list[str] = []
     for m in members:
-        for _, addr in getaddresses([m.get("from", ""), m.get("to", "")]):
-            a = addr.strip().lower()
+        addrs = m.get("addrs")
+        if addrs is None:
+            addrs = _addr_list(m.get("from", ""), m.get("to", ""))
+        for a in addrs:
             if a and a not in seen:
                 seen.append(a)
     return seen
@@ -165,14 +180,17 @@ def _load_hdr_cache(archive: Path) -> dict:
 def _parse_thread_headers(raw_msg) -> dict:
     """The subset of headers threading needs, pulled from a parsed .eml header block (so the cache holds
     everything build_threads uses — no second open)."""
+    frm = str(raw_msg.get("From", "") or "")
+    to = str(raw_msg.get("To", "") or "")
     return {
         "mid": _norm_id(raw_msg.get("Message-ID")),
         "date": _to_utc_iso(raw_msg.get("Date")),
-        "from": str(raw_msg.get("From", "") or ""),
-        "to": str(raw_msg.get("To", "") or ""),
+        "from": frm,
+        "to": to,
         "subject": str(raw_msg.get("Subject", "") or ""),
         "refs": _ids_in(raw_msg.get("In-Reply-To")) + _ids_in(raw_msg.get("References")),
         "attach": "multipart/mixed" in str(raw_msg.get("Content-Type", "") or "").lower(),
+        "addrs": _addr_list(frm, to),                # parsed once, cached -> no re-parse on rebuild
     }
 
 
@@ -187,6 +205,7 @@ def build_threads(archive_path, log=print) -> dict:
     cache = _load_hdr_cache(archive)
     new_cache: dict[str, dict] = {}
     parsed = 0
+    enriched = False
     dsu = _DSU()
     members: dict[str, dict] = {}                # node -> member record
 
@@ -203,6 +222,9 @@ def build_threads(archive_path, log=print) -> dict:
                 log(f"  ! skip unreadable {rel}: {type(e).__name__}")
                 continue
             parsed += 1
+        elif "addrs" not in h:                   # pre-cache entry -> add parsed addrs WITHOUT re-reading the .eml
+            h = {**h, "addrs": _addr_list(h.get("from", ""), h.get("to", ""))}
+            enriched = True
         new_cache[rel] = h
         mid = h["mid"]
         # a missing Message-ID can't be referenced by others and uid_ ids aren't globally unique,
@@ -212,7 +234,7 @@ def build_threads(archive_path, log=print) -> dict:
         if m is None:
             m = members[node] = {
                 "message_id": mid or node, "date": h["date"],
-                "from": h["from"], "to": h["to"],
+                "from": h["from"], "to": h["to"], "addrs": h.get("addrs") or [],
                 "subject": h["subject"], "locations": [],
             }
         loc = {"folder": row.get("folder", "?"), "path": rel}
@@ -224,7 +246,7 @@ def build_threads(archive_path, log=print) -> dict:
         for ref in h["refs"]:
             dsu.union(node, ref)
 
-    if parsed or set(new_cache) != set(cache):   # persist when we parsed new files or dropped stale ones
+    if parsed or enriched or set(new_cache) != set(cache):   # persist new parses, address migration, or drops
         try:
             _hdr_cache_path(archive).write_text(json.dumps(new_cache, ensure_ascii=False), encoding="utf-8")
         except Exception as e:

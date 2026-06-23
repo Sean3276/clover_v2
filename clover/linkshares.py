@@ -120,7 +120,7 @@ def harvest(archive_path, log=print, only_message_ids=None) -> dict:
     dest = Path(archive_path)
     only = set(only_message_ids) if only_message_ids is not None else None
     existing = {(r.get("message_id"), r.get("url")) for r in read_link_shares(dest)}
-    added, msgs, by_provider = 0, set(), {}
+    added, msgs, by_provider, scanned = 0, set(), {}, 0
     with link_shares_path(dest).open("a", encoding="utf-8") as fh:
         for r in read_index(dest):
             if only is not None and r.get("id") not in only:   # not part of this import — skip
@@ -132,6 +132,7 @@ def harvest(archive_path, log=print, only_message_ids=None) -> dict:
                 text = _body_text(dest / rel)
             except Exception:
                 continue
+            scanned += 1
             links = detect_links(text)
             if links:
                 msgs.add(r.get("id"))
@@ -147,8 +148,8 @@ def harvest(archive_path, log=print, only_message_ids=None) -> dict:
                 added += 1
                 by_provider[provider] = by_provider.get(provider, 0) + 1
     _invalidate_shares_cache(link_shares_path(dest))     # we just appended — drop the stale cache
-    log(f"link harvest: {added} new link(s) across {len(msgs)} message(s)")
-    return {"added": added, "messages": len(msgs), "by_provider": by_provider,
+    log(f"link harvest: scanned {scanned} message(s) → {added} new share link(s) found")
+    return {"added": added, "messages": len(msgs), "scanned": scanned, "by_provider": by_provider,
             "total": len(read_link_shares(dest))}
 
 

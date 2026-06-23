@@ -72,6 +72,22 @@ def test_build_threads_caches_headers_and_parses_only_new(tmp_path):
     assert s3["threads"] == 1 and th.read_threads(tmp_path)[0]["n"] == 3   # threading still correct
 
 
+def test_rebuild_does_not_reparse_addresses(tmp_path, monkeypatch):
+    # profiled hot spot: a warm rebuild must NOT re-run the email-address parser over every message —
+    # the parsed addresses are cached alongside the headers (the O(N)-per-import scaling fix)
+    _write_eml(tmp_path, "INBOX", "1", mid="a@x", frm="Alice <alice@x.com>", to="bob@x.com")
+    _write_eml(tmp_path, "INBOX", "2", mid="b@x", irt="a@x", frm="bob@x.com", to="alice@x.com")
+    th.build_threads(tmp_path, log=lambda *_: None)                 # cold: parse + cache addrs
+    calls = {"n": 0}
+    real = th.getaddresses
+    monkeypatch.setattr(th, "getaddresses",
+                        lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1), real(*a, **k))[1])
+    th.build_threads(tmp_path, log=lambda *_: None)                 # warm: must reuse cached addrs
+    assert calls["n"] == 0                                          # zero address re-parsing on a warm rebuild
+    parts = th.read_threads(tmp_path)[0]["participants"]
+    assert "alice@x.com" in parts and "bob@x.com" in parts          # participants still correct
+
+
 def test_links_chain_by_references(tmp_path):
     _write_eml(tmp_path, "INBOX", "1", mid="a@x", date="Thu, 01 Jan 2026 00:00:00 +0000")
     _write_eml(tmp_path, "INBOX", "2", mid="b@x", irt="a@x", date="Thu, 02 Jan 2026 00:00:00 +0000")
