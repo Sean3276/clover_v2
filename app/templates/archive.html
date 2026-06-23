@@ -78,6 +78,22 @@
   .flowcard>summary::marker{content:""}
   .flowcard .caret{color:var(--clover);transition:transform .15s ease;display:inline-block;font-size:12px}
   .flowcard[open] .caret{transform:rotate(90deg)}
+  .importcard{padding:0 16px}
+  .importcard>summary{cursor:pointer;padding:14px 0;font-size:18px;font-weight:700;color:var(--ink);
+    list-style:none;display:flex;align-items:center;gap:8px}
+  .importcard>summary::-webkit-details-marker{display:none}
+  .importcard>summary::marker{content:""}
+  .importcard .caret{color:var(--clover);transition:transform .15s ease;display:inline-block;font-size:13px}
+  .importcard[open] .caret{transform:rotate(90deg)}
+  .importcard[open]{padding-bottom:16px}
+  .filterrow{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;margin:14px 0 4px;
+    padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--tile-bg)}
+  .filterrow .frlabel{align-self:center;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--sub)}
+  .filterrow .fitem{display:flex;flex-direction:column;gap:3px}
+  .filterrow .fitem label{margin:0;font-size:12px;color:var(--sub);text-transform:none;letter-spacing:0}
+  .filterrow select{width:auto;margin:0}
+  .filterrow input[type=date]{width:auto;margin:0}
+  .filterrow input[type=number]{width:84px;margin:0}
   .flow{list-style:none;margin:0 0 16px;padding:0;display:grid;gap:11px}
   .flow li{display:flex;gap:12px;align-items:flex-start}
   .fnum{flex:none;width:30px;height:30px;border-radius:50%;background:var(--clover);color:var(--btn-ink);
@@ -97,7 +113,7 @@
   <span id="runPill" class="pill down">● idle</span>
 </div>
 
-<details class="card flowcard" open>
+<details class="card flowcard">
   <summary><span class="caret">▶</span> What happens when you import
     <span class="note" style="text-transform:none;letter-spacing:0;font-weight:400">— one click runs the whole pipeline, in order</span></summary>
   <ol class="flow">
@@ -157,8 +173,9 @@
   <pre id="log" class="log" style="display:none"></pre>
 </div>
 
-<div class="card">
-  <h2>Folders to archive</h2>
+<details class="card importcard" open>
+  <summary><span class="caret">▶</span> Import mail
+    <span class="note" style="text-transform:none;letter-spacing:0;font-weight:400">— choose folders, optionally filter, then Import</span></summary>
   {% if folder_err %}
     <div class="msg err" style="display:block">{{ folder_err }}
       <button type="button" class="linkbtn" style="font-size:13px;margin-left:4px" onclick="location.reload()"><svg class="ic" aria-hidden="true"><use href="#ic-refresh"/></svg>Retry</button>
@@ -179,51 +196,32 @@
       {% endfor %}
     </div>
 
-    <details class="filterbox">
-      <summary><span class="caret">▶</span> Add date / size filters
-        <span class="note" style="text-transform:none;letter-spacing:0;font-weight:400">— optional; default archives everything</span></summary>
-      <div class="filtergrid">
-        <div>
-          <label>Date</label>
-          <select id="dateSel" onchange="onDate()">
-            <option value="all">All time</option>
-            <option value="yesterday">Yesterday</option>
-            <option value="3">Last 3 days</option>
-            <option value="7">Last 7 days</option>
-            <option value="30">Last 30 days</option>
-            <option value="90">Last 90 days</option>
-            <option value="year">This year</option>
-            <option value="custom">Custom range…</option>
-          </select>
-        </div>
-        <div class="custom-date" style="display:none">
-          <label>From</label><input type="date" name="date_from" id="dFrom">
-        </div>
-        <div class="custom-date" style="display:none">
-          <label>To (inclusive)</label><input type="date" name="date_to" id="dTo">
-        </div>
-        <div>
-          <label>Size</label>
-          <select id="sizeSel" onchange="onSize()">
-            <option value="all">Any size</option>
-            <option value="min">At least… (MB)</option>
-            <option value="top">Largest per folder…</option>
-          </select>
-        </div>
-        <div id="sizeMinWrap" style="display:none">
-          <label>Minimum size (MB)</label>
-          <input type="number" name="size_mb" id="sizeMb" value="5" min="0" step="0.5">
-        </div>
-        <div id="topNWrap" style="display:none">
-          <label>How many (per folder)</label>
-          <input type="number" name="top_n" id="topN" value="50" min="1" step="1">
-        </div>
-        <div>
-          <label>Limit per folder <span class="note" style="text-transform:none;letter-spacing:0">(0 = all · advanced)</span></label>
-          <input type="number" name="limit" value="0" min="0">
-        </div>
-      </div>
-    </details>
+    <div class="filterrow">
+      <span class="frlabel">Filters</span>
+      <span class="fitem"><label>Date</label>
+        <select id="dateSel" onchange="onDate()">
+          <option value="all">All time</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="3">Last 3 days</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="year">This year</option>
+          <option value="custom">Custom range…</option>
+        </select></span>
+      <span class="fitem custom-date" style="display:none"><label>From</label><input type="date" name="date_from" id="dFrom"></span>
+      <span class="fitem custom-date" style="display:none"><label>To (incl.)</label><input type="date" name="date_to" id="dTo"></span>
+      <span class="fitem"><label>Size</label>
+        <select id="sizeSel" onchange="onSize()">
+          <option value="all">Any size</option>
+          <option value="min">At least… (MB)</option>
+          <option value="top">Largest per folder…</option>
+        </select></span>
+      <span class="fitem" id="sizeMinWrap" style="display:none"><label>Min (MB)</label><input type="number" name="size_mb" id="sizeMb" value="5" min="0" step="0.5"></span>
+      <span class="fitem" id="topNWrap" style="display:none"><label>How many</label><input type="number" name="top_n" id="topN" value="50" min="1" step="1"></span>
+      <span class="fitem"><label>Limit/folder</label><input type="number" name="limit" value="0" min="0" title="0 = all (advanced)"></span>
+      <span class="note" style="flex-basis:100%;margin:0;text-transform:none;letter-spacing:0">Optional — default imports everything.</span>
+    </div>
     <input type="hidden" name="size_mode" id="sizeMode" value="all">
 
     <label style="display:flex;gap:8px;align-items:center;margin:2px 0 12px;font-size:13px;cursor:pointer">
@@ -241,7 +239,7 @@
   </form>
   {% endif %}
   <div id="runMsg" class="msg"></div>
-</div>
+</details>
 
 <div class="card">
   <h2>Archived on disk</h2>
