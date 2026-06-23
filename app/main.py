@@ -612,6 +612,14 @@ def _skip_phase(key: str) -> None:
         _status["phase_results"][key] = {"state": "skipped", "done": 0, "total": 0, "errors": 0, "reason": ""}
 
 
+def _active_model_label(cfg) -> str:
+    """Human label of the active comprehension model (for status + logs), e.g. 'Sonnet (CLI)'."""
+    am = modelsmod.active_model(cfg)
+    if am:
+        return str(am.get("label") or am.get("model") or "")
+    return str(_comp_cfg(cfg).get("model") or "")
+
+
 def _maybe_autorun_comprehension(cfg: dict) -> None:
     c = _comp_cfg(cfg)
     if not c.get("autorun"):
@@ -627,8 +635,11 @@ def _maybe_autorun_comprehension(cfg: dict) -> None:
         _skip_phase("comprehend")
         return
     cap = int(c.get("autorun_limit") or 100)       # None/0/missing -> 100 (a None here silently crashed autorun)
+    mname = _active_model_label(cfg) or "the AI"
+    conc = modelsmod.get_concurrency(cfg)
     _set_phase("comprehend", indeterminate=True)   # flips to a real done/total once the first thread reports
-    _log("Comprehending new threads…")
+    _log(f"Comprehending up to {cap} pending thread(s) with {mname} ({conc} in parallel). "
+         f"This {cap}-per-run cap is separate from how many you imported.")
     try:
         backend = _comprehender(cfg)
         out = compmod.run_comprehension(
@@ -1290,6 +1301,7 @@ def comprehend_status():
         "errors": ct.get("errors", 0), "last_done": ct.get("last_done", ""),
         "rate_per_min": round(rate * 60, 1), "eta_seconds": (round(remaining / rate) if rate > 0 else None),
         "message": ct.get("message", ""), "log": ct.get("log", [])[-8:],
+        "model": _active_model_label(cfg), "concurrency": modelsmod.get_concurrency(cfg),
         "counts": {"done": done, "stale": stale,
                    "pending": sum(1 for t in threads if t.get("root_id") not in by_root),
                    "total": len(threads)}})

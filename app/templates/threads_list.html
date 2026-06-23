@@ -116,7 +116,7 @@
 {% endif %}
 
 <!-- ============ PROCESSING & TOOLS (operational — below the list, collapsed when idle) ============ -->
-<details class="card toolzone" id="toolZone"{% if comp_counts.pending or comp_counts.stale or link_stats.get('pending', 0) %} open{% endif %}>
+<details class="card toolzone" id="toolZone">
   <summary><svg class="ic" aria-hidden="true"><use href="#ic-gear"/></svg> Processing &amp; tools
     <span class="note" id="toolSummary">— <strong>{{ comp_counts.done }}</strong> comprehended{% if comp_counts.pending %} · {{ comp_counts.pending }} new{% endif %}{% if comp_counts.stale %} · <span style="color:var(--amber)">{{ comp_counts.stale }} out of date</span>{% endif %}{% if link_stats.get('pending', 0) %} · {{ link_stats['pending'] }} links pending{% endif %}</span></summary>
 
@@ -402,6 +402,7 @@ async function pollComp(){
       const eta = s.eta_seconds == null ? "" : (s.eta_seconds < 90 ? Math.round(s.eta_seconds) + "s"
                   : Math.round(s.eta_seconds/60) + "m");
       const bits = [];
+      if(s.running && s.model) bits.push("via " + s.model + (s.concurrency > 1 ? " · " + s.concurrency + " parallel" : ""));
       if(s.last_done) bits.push("last done: " + s.last_done.slice(0,50));
       if(s.errors) bits.push("⚠ " + s.errors + " errored");
       if(s.running && s.rate_per_min) bits.push(s.rate_per_min + "/min");

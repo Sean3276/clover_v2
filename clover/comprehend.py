@@ -8,6 +8,7 @@ council with a deterministic precedence referee. Facts are verified against the 
 from __future__ import annotations
 
 import concurrent.futures
+import threading
 import json
 import re
 import time
@@ -122,6 +123,13 @@ def _attachment_text(archive, location: dict, atts: list) -> str:
 
 
 _LINK_FILE_MAX_BYTES = 25 * 1024 * 1024            # don't try to inline >25MB shared files (archives/media)
+# AI prompt budget per message: the model sees at most this many chars (~12k tokens) per call, so a single
+# giant attachment can't blow the per-call timeout. The DETERMINISTIC FLOOR still reads the full, uncapped
+# text (see floor_src in _build_once), so no-miss stays architectural — not dependent on stuffing everything
+# into one slow AI call. Lowered from 120k after live giant-attachment threads timed out at 300s/call.
+_AI_MAX_CHARS = 48_000
+_AI_ATTACH_CHARS = 8_000                           # per-attachment / per-shared-file slice the AI sees
+_ATTACH_MARK = re.compile(r"(\n\n\[(?:attachment|shared file): [^\]]*\]\n)")
 
 
 def _downloaded_files_by_mid(archive) -> dict:
@@ -161,12 +169,24 @@ def _link_file_text(archive, files) -> str:
     return "\n\n".join(parts)
 
 
-def _cap_msg(text: str, limit: int) -> str:
-    """Bound one message's text (body + attachment/link content) so a single huge attachment can't blow
-    the AI prompt and time the call out. The deterministic floor still reads the FULL, uncapped text."""
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "\n[... this message's attachment/content was truncated to fit the comprehension budget ...]"
+def _cap_msg(text: str, limit: int, attach_limit: int = _AI_ATTACH_CHARS) -> str:
+    """Bound one message FOR THE AI: cap each attachment / shared-file section to attach_limit, then the
+    whole message to limit — so a single giant attachment (or several) can't blow the per-call AI budget
+    or time the call out. The deterministic floor still reads the FULL, uncapped text (floor_src below)."""
+    parts = _ATTACH_MARK.split(text)                 # [head+body, mark1, body1, mark2, body2, ...]
+    out = [parts[0]]
+    i = 1
+    while i < len(parts):
+        out.append(parts[i])                         # the "[attachment: name]" / "[shared file: name]" marker
+        body = parts[i + 1] if i + 1 < len(parts) else ""
+        if len(body) > attach_limit:
+            body = body[:attach_limit] + "\n[… attachment truncated for the AI; the floor reads it in full …]"
+        out.append(body)
+        i += 2
+    capped = "".join(out)
+    if len(capped) > limit:
+        capped = capped[:limit] + "\n[… message truncated to fit the comprehension budget …]"
+    return capped
 
 
 def _thread_messages(archive, thread: dict) -> list[str]:
@@ -1135,7 +1155,7 @@ def _build_once(archive, thread, backend, profile, max_chars, model, operator: s
 
 
 def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Profile,
-                      *, max_chars: int = 120_000, model: str = "?", qaqc: bool = True,
+                      *, max_chars: int = _AI_MAX_CHARS, model: str = "?", qaqc: bool = True,
                       operator: str = "") -> dict:
     """Build the record, then run the FULL task verification before the task counts as COMPLETE
     (Phase-3 spec step 8). Two gates: (a) the comprehension (i) is checked for faithfulness +
@@ -1289,16 +1309,30 @@ def run_comprehension(archive, *, backend: Comprehender, profile: Profile | None
                 break
             work.append((t, est)); acc += est
 
+        inflight: dict = {}                             # thread_id -> label: what the workers are ON right now
+        inflight_lock = threading.Lock()
+        def _busy() -> str:                             # readable snapshot of live per-worker activity
+            with inflight_lock:
+                vals = list(inflight.values())
+            return " · ".join(vals[:4]) + (f" +{len(vals) - 4}" if len(vals) > 4 else "")
+
         def _job(item):
             t, est = item
             if should_stop():
                 return None
+            tid = t.get("thread_id")
+            with inflight_lock:
+                inflight[tid] = (t.get("subject") or tid or "")[:60]
+            progress(done=done, total=total, current=_busy(), errors=errors, last_done=last_done)
             try:
                 return (t, est, _one(t), None)
             except Stopped:
                 return None                             # aborted by Stop — not an error
             except Exception as e:                      # report per-thread; keep the rest going
                 return (t, est, None, e)
+            finally:
+                with inflight_lock:
+                    inflight.pop(tid, None)
 
         progress(done=0, total=total, current="", errors=0, last_done="")
         # Results are folded in THIS thread as they complete, so the counters + _append need no lock;
@@ -1309,7 +1343,7 @@ def run_comprehension(archive, *, backend: Comprehender, profile: Profile | None
                 if r is None:
                     continue
                 _record(*r)
-                progress(done=done, total=total, current="", errors=errors, last_done=last_done)
+                progress(done=done, total=total, current=_busy(), errors=errors, last_done=last_done)
 
     progress(done=done, total=total, current="", errors=errors, last_done=last_done)
     return {"done": done, "pending": len(backlog) - done, "total": total, "backlog": len(backlog),
