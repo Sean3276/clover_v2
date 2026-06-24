@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-_BACKENDS = ("claude-cli", "codex-cli", "stub")          # known comprehender backends
+_BACKENDS = ("claude-cli", "codex-cli", "ollama", "stub")   # known comprehender backends
 
 
 def _comp(cfg) -> dict:

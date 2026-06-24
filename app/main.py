@@ -583,7 +583,7 @@ def _comprehender(cfg: dict):
     backend = am["backend"] if am else _comp_cfg(cfg)["backend"]
     model = (am.get("model") if am else _comp_cfg(cfg).get("model")) or "sonnet"
     timeout = modelsmod.get_timeout(cfg)             # clamped 30..1200
-    if backend in ("claude-cli", "codex-cli"):       # CLI backends take model + timeout
+    if backend in ("claude-cli", "codex-cli", "ollama"):   # these take model + timeout
         return get_comprehender(backend, model=model, timeout=timeout)
     return get_comprehender(backend)
 

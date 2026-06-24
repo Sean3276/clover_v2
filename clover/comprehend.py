@@ -1155,13 +1155,15 @@ def _build_once(archive, thread, backend, profile, max_chars, model, operator: s
 
 
 def comprehend_thread(archive, thread: dict, backend: Comprehender, profile: Profile,
-                      *, max_chars: int = _AI_MAX_CHARS, model: str = "?", qaqc: bool = True,
+                      *, max_chars: int | None = None, model: str = "?", qaqc: bool = True,
                       operator: str = "") -> dict:
     """Build the record, then run the FULL task verification before the task counts as COMPLETE
     (Phase-3 spec step 8). Two gates: (a) the comprehension (i) is checked for faithfulness +
     completeness vs the source — re-comprehend ONCE on failure; and (b) the distilled abstract /
     one-liner / event tag (ii)-(iv) are each verified against the comprehension (i). The deterministic
     fact-check must also pass. Any failure -> `needs_review` (never silently shipped)."""
+    if max_chars is None:                                # per-backend AI budget: local models have a small context,
+        max_chars = int(getattr(backend, "max_chars", 0) or _AI_MAX_CHARS)   # cloud models a large one
     rec, full = _build_once(archive, thread, backend, profile, max_chars, model, operator)
     if not qaqc:
         return rec

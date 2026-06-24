@@ -56,7 +56,7 @@
     <div class="row3">
       <div><label for="mlabel">Label</label><input id="mlabel" placeholder="e.g. Sonnet (CLI)"></div>
       <div><label for="mbackend">Backend</label>
-        <select id="mbackend" onchange="showGuide()"><option value="claude-cli">claude-cli</option><option value="codex-cli">codex-cli</option><option value="stub">stub</option></select></div>
+        <select id="mbackend" onchange="showGuide()"><option value="claude-cli">claude-cli</option><option value="codex-cli">codex-cli</option><option value="ollama">ollama</option><option value="stub">stub</option></select></div>
       <div><label for="mmodel">Model</label><input id="mmodel" placeholder="sonnet / opus / haiku"></div>
     </div>
     <style>
@@ -82,6 +82,15 @@
           <li>Install the Codex CLI and sign in with ChatGPT (follow Codex's own install docs).</li>
           <li>Check it works: <code>codex exec -m gpt-5.5 "hi"</code></li>
           <li>Set <b>Model</b> below to <code>gpt-5.5</code> (or another Codex model), then <b>Save model</b> and <b>Activate</b> it.</li>
+        </ol>
+      </div>
+      <div class="guide" data-backend="ollama">
+        <p class="gh">Set up <b>Ollama</b> (local) — FREE, private (email never leaves your machine), no daily/rate cap.</p>
+        <ol>
+          <li>Install from <code>ollama.com</code>, then start it: <code>ollama serve</code>.</li>
+          <li>Pull a model — for mixed English/Chinese on a big-RAM box an MoE is ideal: <code>ollama pull qwen3.6:35b-a3b</code> (or the higher-quality <code>qwen3.6:35b-a3b-q8_0</code> if you have the RAM).</li>
+          <li>Check it works: <code>ollama run qwen3.6:35b-a3b "hi"</code></li>
+          <li>Set <b>Model</b> below to the exact tag (e.g. <code>qwen3.6:35b-a3b</code>), then <b>Save model</b> and <b>Activate</b>. Comprehension is slow but unlimited — it grinds in the background.</li>
         </ol>
       </div>
       <div class="guide" data-backend="stub">

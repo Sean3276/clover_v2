@@ -11,10 +11,13 @@ import json
 import os
 import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from abc import ABC, abstractmethod
 
 _REGISTRY: dict = {}
@@ -102,7 +105,51 @@ def _parse_json(text: str) -> dict:
                 return json.loads(m.group(0))
             except Exception:
                 pass
+    repaired = _repair_truncated_json(t)         # salvage a JSON object a token cap cut off mid-output
+    if repaired is not None:
+        return repaired
     raise ValueError("model did not return valid JSON")
+
+
+def _repair_truncated_json(text: str):
+    """Best-effort recovery of a JSON object truncated mid-output (a local model hitting its token cap):
+    start at the first '{', drop a dangling partial string/comma, then close the still-open [ and { in
+    order. Returns the parsed dict, or None if it still won't parse. The completed items survive; only the
+    cut-off tail is lost — far better than failing the whole pass (the deterministic floor backfills the rest)."""
+    i = text.find("{")
+    if i < 0:
+        return None
+    s = text[i:]
+    # walk back from the end to each delimiter; at the first cut that closes into valid JSON, take it
+    cuts = sorted({len(s)} | {m.end() for m in re.finditer(r'[,}\]"]', s)}, reverse=True)
+    for end in cuts:
+        cand = s[:end].rstrip().rstrip(",:").rstrip()
+        if not cand:
+            continue
+        stack, instr, esc = [], False, False
+        for ch in cand:                          # string-aware bracket scan
+            if instr:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    instr = False
+                continue
+            if ch == '"':
+                instr = True
+            elif ch in "{[":
+                stack.append(ch)
+            elif ch in "}]" and stack:
+                stack.pop()
+        if instr:                                # this cut lands inside a string — try an earlier delimiter
+            continue
+        closed = cand + "".join("}" if c == "{" else "]" for c in reversed(stack))
+        try:
+            return json.loads(closed)
+        except Exception:
+            continue
+    return None
 
 
 def _sum_token_fields(obj) -> int:
@@ -348,4 +395,96 @@ class CodexCliComprehender(Comprehender):
                 os.remove(outpath)
             except OSError:
                 pass
+        return _parse_json(text) if schema else text
+
+
+@register
+class OllamaComprehender(Comprehender):
+    """Local Ollama model over HTTP (default http://localhost:11434) — FREE, PRIVATE (email never leaves
+    the machine) and UNLIMITED (no daily/rate cap, so a backlog just grinds in the background). Structured
+    passes use Ollama's format=json for guaranteed-valid JSON — a big reliability win for smaller local
+    models. Pairs best with an MoE model such as qwen3.6:35b-a3b: ~35B-class quality at ~3B-active speed,
+    which suits a big-RAM / small-GPU machine. Swappable from the /dev model registry like the CLI backends."""
+
+    name = "ollama"
+
+    def __init__(self, model: str = "qwen3.6:35b-a3b", timeout: int = 300,
+                 host: str | None = None, num_ctx: int = 16384, num_predict: int = 3072):
+        self.model = model
+        self.timeout = timeout
+        host = (host or os.environ.get("OLLAMA_HOST") or "http://localhost:11434").strip().rstrip("/")
+        self.host = host if host.startswith("http") else "http://" + host
+        self.num_ctx = int(num_ctx)           # kept in the fast envelope — big contexts crater small-VRAM inference
+        self.num_predict = int(num_predict)   # CAP the output: without it a local model rambles to num_ctx and times out
+        # AI prompt budget (chars) — must FIT num_ctx, so the prompt is never silently truncated and inference
+        # stays fast. ~1.5 chars/token is CJK-safe. The deterministic floor still reads the FULL, uncapped text.
+        self.max_chars = max(8000, int((self.num_ctx - self.num_predict) * 1.5))
+        self.tokens = 0
+        self.cost = 0.0           # local inference = no $ cost (kept for interface parity)
+        self.should_stop = None   # set by run_comprehension so a Stop aborts the in-flight stream
+        self._lock = threading.Lock()
+
+    def generate(self, task: str, prompt: str, schema: dict | None = None):
+        p = prompt
+        if schema:
+            p += ("\n\nReturn ONLY valid JSON (no prose, no code fence) matching this shape:\n"
+                  + json.dumps(schema))
+        payload = {
+            "model": self.model, "prompt": p, "stream": True,
+            # think:false — a "thinking" model (qwen3.x) otherwise routes its output into the reasoning channel
+            # and returns an EMPTY response, which breaks format=json. These are extraction passes; no CoT needed.
+            "think": False,
+            # temperature 0 = deterministic extraction; num_predict caps the output. Do NOT pin
+            # repeat_penalty=1.0 — greedy (temp 0) + no penalty makes a local model loop and bloat the JSON
+            # until it truncates mid-object; Ollama's default penalty breaks the loop so the JSON completes.
+            "options": {"temperature": 0, "num_ctx": self.num_ctx, "num_predict": self.num_predict},
+        }
+        if schema:
+            payload["format"] = "json"                # token-level grammar -> always-valid JSON
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(self.host + "/api/generate", body,
+                                     {"Content-Type": "application/json"})
+        parts, pe, ec = [], 0, 0
+        start = time.monotonic()
+        try:
+            resp = urllib.request.urlopen(req, timeout=self.timeout)
+        except urllib.error.URLError as e:
+            reason = getattr(e, "reason", e)
+            raise RuntimeError(
+                f"Ollama not reachable at {self.host} — start it (`ollama serve`) or install from "
+                f"ollama.com, then `ollama pull {self.model}`. ({reason})"
+            ) from None
+        try:
+            for raw in resp:                          # NDJSON: one event per line, streamed
+                if self.should_stop and self.should_stop():
+                    raise Stopped()
+                if time.monotonic() - start > self.timeout:
+                    raise TimeoutError()
+                line = (raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else raw).strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except Exception:
+                    continue
+                if ev.get("error"):
+                    raise RuntimeError(f"Ollama error: {str(ev['error'])[:200]}")
+                if ev.get("response"):
+                    parts.append(ev["response"])
+                if ev.get("done"):
+                    pe = int(ev.get("prompt_eval_count") or 0)
+                    ec = int(ev.get("eval_count") or 0)
+        except (TimeoutError, socket.timeout):
+            raise RuntimeError(
+                f"AI '{task}' step timed out after {self.timeout}s — the thread may be large or the model "
+                f"slow. Raise the AI timeout in /dev, or pick a smaller/faster local model."
+            ) from None
+        finally:
+            with self._lock:
+                self.tokens += pe + ec            # accrue even on abort/error (Ollama reports counts on 'done')
+            try:
+                resp.close()
+            except Exception:
+                pass
+        text = "".join(parts).strip()
         return _parse_json(text) if schema else text
