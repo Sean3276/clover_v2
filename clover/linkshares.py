@@ -460,7 +460,7 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
             path.write_bytes(data)
             rel = str(path.relative_to(Path(archive_path))).replace("\\", "/")
             scan = malwaremod.scan_file(path)                # check the untrusted download before keeping it
-            if scan.get("clean") is False:                   # MALWARE -> quarantine: delete + flag, never comprehended
+            if scan.get("clean") is False:                   # MALWARE / unsafe archive -> quarantine: delete, never comprehended
                 try:
                     path.unlink()
                 except OSError:
@@ -469,13 +469,15 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
                                        "note": f"malware: {scan.get('threat') or 'detected'} ({scan.get('scanner')})"}
                 infected += 1
                 log(f"  !! MALWARE in {prov} download {str(url)[:50]}: {scan.get('threat')} — deleted, not comprehended")
-            else:
-                updates[(mid, url)] = {"status": "downloaded", "file": rel, "size": len(data),
-                                       "scanned": bool(scan.get("scanned"))}
+            elif not scan.get("scanned"):                    # could NOT verify -> keep on disk but do NOT comprehend; flag
+                updates[(mid, url)] = {"status": "unverified", "file": rel, "size": len(data),
+                                       "note": f"not malware-scanned: {scan.get('note') or scan.get('scanner')}"}
+                unscanned += 1
+                log(f"  ? could not malware-scan {prov} download {str(url)[:50]}: {scan.get('note')} — kept, NOT comprehended")
+            else:                                            # verified clean
+                updates[(mid, url)] = {"status": "downloaded", "file": rel, "size": len(data), "scanned": True}
                 done_files[url] = rel
                 done += 1
-                if not scan.get("scanned"):
-                    unscanned += 1
         elif status == "oversize":
             size = data if isinstance(data, int) else None
             updates[(mid, url)] = {"status": "needs-confirm", "size": size}
@@ -501,7 +503,7 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
     log(f"link fetch: {done} downloaded ({reused} reused), {confirm} need-confirm, "
         f"{dead} dead, {auth} need-auth"
         + (f", {infected} INFECTED (quarantined)" if infected else "")
-        + (f", {unscanned} unscanned (no AV)" if unscanned else "")
+        + (f", {unscanned} UNVERIFIED (kept, not comprehended)" if unscanned else "")
         + f" · {remaining} pending")
     return {"downloaded": done, "reused": reused, "needs_confirm": confirm,
             "dead": dead, "needs_auth": auth, "infected": infected, "unscanned": unscanned,

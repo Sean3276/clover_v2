@@ -103,6 +103,20 @@ def test_fetch_links_quarantines_infected_download(tmp_path, monkeypatch):
     assert not list(tmp_path.rglob("evil.exe"))                    # the malware is gone from disk
 
 
+def test_fetch_links_unverified_when_scan_cannot_complete(tmp_path, monkeypatch):
+    # a download that could NOT be malware-scanned is kept but flagged 'unverified' (not 'downloaded'), so
+    # the comprehender (which reads only status=='downloaded') never reads unverified content
+    from clover import malware
+    _eml(tmp_path, "INBOX", "1", "a@x", "doc https://www.dropbox.com/s/x/big.zip?dl=0")
+    ls.harvest(tmp_path, log=lambda *_: None)
+    monkeypatch.setattr(malware, "scan_file", lambda p, **k: {
+        "scanned": False, "clean": None, "threat": None, "scanner": "none", "note": "scan timed out"})
+    s = ls.fetch_links(tmp_path, fetcher=lambda u, pr: ("downloaded", "big.zip", b"PK"), log=lambda *_: None)
+    assert s["downloaded"] == 0 and s["infected"] == 0
+    rec = ls.read_link_shares(tmp_path)[0]
+    assert rec["status"] == "unverified" and rec["file"] and "timed out" in rec.get("note", "")
+
+
 def test_fetch_links_marks_clean_download_scanned(tmp_path, monkeypatch):
     from clover import malware
     _eml(tmp_path, "INBOX", "1", "a@x", "ok https://www.dropbox.com/s/x/ok.pdf?dl=0")

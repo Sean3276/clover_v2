@@ -732,6 +732,7 @@ def threads_page(request: Request):
         "link_confirm": link_confirm,
         "malware_scanner": malwaremod.scanner_name(),
         "link_infected": link_stats.get("infected", 0),
+        "link_unverified": link_stats.get("unverified", 0),
     })
 
 
@@ -1385,7 +1386,7 @@ def _auto_link_task(arch, do_harvest=True, do_fetch=False, only_message_ids=None
             if r.get("remaining", 0) <= 0:
                 break
             progress = sum(r.get(k, 0) for k in                      # belt-and-suspenders: never spin on a batch
-                           ("downloaded", "reused", "needs_confirm", "dead", "needs_auth"))
+                           ("downloaded", "reused", "needs_confirm", "dead", "needs_auth", "infected", "unscanned"))
             if progress == 0:                                       # that resolved nothing (no forward progress)
                 break
 
