@@ -157,7 +157,9 @@
       <span id="lsPending">{{ link_stats.get('pending', 0) }}</span> pending,
       {{ link_stats.get('needs-auth', 0) }} need sign-in,
       {{ link_stats.get('dead', 0) }} dead{% if link_stats.get('needs-confirm', 0) %},
-      <strong style="color:var(--amber)">{{ link_stats['needs-confirm'] }} large — confirm below</strong>{% endif %}.<span id="lsLive" class="dim" role="status" aria-live="polite"></span></span>
+      <strong style="color:var(--amber)">{{ link_stats['needs-confirm'] }} large — confirm below</strong>{% endif %}{% if link_infected %},
+      <strong style="color:var(--red)">{{ link_infected }} quarantined (malware)</strong>{% endif %}.<span id="lsLive" class="dim" role="status" aria-live="polite"></span></span>
+    <span class="note" style="flex-basis:100%;font-size:12px;margin:2px 0 0">{% if malware_scanner != 'none' %}<span style="color:var(--clover-d)">🛡 Downloaded files are malware-scanned ({{ malware_scanner }}) — anything infected is deleted, never opened or comprehended.</span>{% else %}<span style="color:var(--amber)">⚠ No antivirus detected — downloaded files are NOT scanned. Enable Windows Defender or install ClamAV.</span>{% endif %}</span>
     <button id="fetchBtn" type="button" onclick="fetchLinks()"{% if not link_stats.get('pending', 0) %} style="display:none"{% endif %} title="Download not-yet-downloaded link files (headless browser, background). Use Filter to limit by date or provider."><svg class="ic" aria-hidden="true"><use href="#ic-download"/></svg>Download <span id="fetchN">{{ link_stats.get('pending', 0) }}</span> pending</button>
     {% if link_stats.get('pending', 0) %}<button id="lsFilterBtn" type="button" class="ghost" onclick="toggleLinkFilter()" title="Limit the download to a date range and/or provider"><svg class="ic" aria-hidden="true"><use href="#ic-filter"/></svg>Filter…</button>{% endif %}
     <button id="stopLinksBtn" type="button" class="ghost" onclick="stopLinks()" title="Halt a running download" style="display:none"><svg class="ic" aria-hidden="true"><use href="#ic-stop"/></svg>Stop</button>

@@ -1,7 +1,18 @@
 import json
 from email.message import EmailMessage
 
+import pytest
+
 from clover import linkshares as ls
+
+
+@pytest.fixture(autouse=True)
+def _stub_malware_scan(monkeypatch):
+    """fetch_links now scans every download; stub it CLEAN for the link-logic tests so they stay fast and
+    deterministic (the scan itself is covered in test_malware.py + the quarantine test below)."""
+    from clover import malware
+    monkeypatch.setattr(malware, "scan_file",
+                        lambda p, **k: {"scanned": True, "clean": True, "threat": None, "scanner": "stub", "note": ""})
 
 
 def _eml(tmp, folder, key, mid, body):
@@ -76,6 +87,32 @@ def test_fetch_links_updates_status_and_saves(tmp_path):
     dl = [r for r in ls.read_link_shares(tmp_path) if r["status"] == "downloaded"][0]
     assert dl["file"] and (tmp_path / dl["file"]).read_bytes() == b"PDFBYTES"
     assert ls.fetch_links(tmp_path, fetcher=fake, log=lambda *_: None)["downloaded"] == 0   # idempotent
+
+
+def test_fetch_links_quarantines_infected_download(tmp_path, monkeypatch):
+    # a malicious download is DELETED, flagged 'infected', and never kept for comprehension
+    from clover import malware
+    _eml(tmp_path, "INBOX", "1", "a@x", "evil https://www.dropbox.com/s/x/evil.exe?dl=0")
+    ls.harvest(tmp_path, log=lambda *_: None)
+    monkeypatch.setattr(malware, "scan_file", lambda p, **k: {
+        "scanned": True, "clean": False, "threat": "Virus:DOS/EICAR_Test_File", "scanner": "defender", "note": ""})
+    s = ls.fetch_links(tmp_path, fetcher=lambda u, pr: ("downloaded", "evil.exe", b"MZbytes"), log=lambda *_: None)
+    assert s["downloaded"] == 0 and s["infected"] == 1
+    rec = ls.read_link_shares(tmp_path)[0]
+    assert rec["status"] == "infected" and rec["file"] is None and "EICAR" in rec.get("note", "")
+    assert not list(tmp_path.rglob("evil.exe"))                    # the malware is gone from disk
+
+
+def test_fetch_links_marks_clean_download_scanned(tmp_path, monkeypatch):
+    from clover import malware
+    _eml(tmp_path, "INBOX", "1", "a@x", "ok https://www.dropbox.com/s/x/ok.pdf?dl=0")
+    ls.harvest(tmp_path, log=lambda *_: None)
+    monkeypatch.setattr(malware, "scan_file", lambda p, **k: {
+        "scanned": True, "clean": True, "threat": None, "scanner": "defender", "note": ""})
+    s = ls.fetch_links(tmp_path, fetcher=lambda u, pr: ("downloaded", "ok.pdf", b"PDF"), log=lambda *_: None)
+    assert s["downloaded"] == 1 and s["infected"] == 0
+    rec = [r for r in ls.read_link_shares(tmp_path) if r["status"] == "downloaded"][0]
+    assert rec.get("scanned") is True and (tmp_path / rec["file"]).read_bytes() == b"PDF"
 
 
 def test_fetch_links_respects_limit(tmp_path):

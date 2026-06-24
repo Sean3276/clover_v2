@@ -27,6 +27,7 @@ from clover import comprehend as compmod
 from clover import contacts as contactsmod
 from clover import config as cfgmod
 from clover import linkshares as lsmod
+from clover import malware as malwaremod
 from clover import matters as mattersmod
 from clover import models as modelsmod
 from clover import projects as projmod
@@ -729,6 +730,8 @@ def threads_page(request: Request):
         "link_total": sum(link_stats.values()),
         "link_providers": sorted(link_providers),
         "link_confirm": link_confirm,
+        "malware_scanner": malwaremod.scanner_name(),
+        "link_infected": link_stats.get("infected", 0),
     })
 
 

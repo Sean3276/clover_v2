@@ -386,6 +386,7 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
     a date filter is active (you asked for a range), but kept when no date filter is set; `providers` (a
     list of provider names) keeps only links from those providers. Unselected links stay 'pending'."""
     import inspect
+    from . import malware as malwaremod
     limit_bytes = int(confirm_over_mb * 1024 * 1024) if confirm_over_mb else None
     if fetcher:
         try:
@@ -425,7 +426,7 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
                and (only_message_ids is None or r.get("message_id") in only_message_ids)
                and _selected(r)]
     updates = {}
-    done = reused = confirm = dead = auth = 0
+    done = reused = confirm = dead = auth = infected = unscanned = 0
     batch = pending[:limit]
     for i, r in enumerate(batch):
         if should_stop():
@@ -458,9 +459,23 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
             path = _unique_path(_dest_dir(archive_path, mid), fname or "download")  # never overwrite
             path.write_bytes(data)
             rel = str(path.relative_to(Path(archive_path))).replace("\\", "/")
-            updates[(mid, url)] = {"status": "downloaded", "file": rel, "size": len(data)}
-            done_files[url] = rel
-            done += 1
+            scan = malwaremod.scan_file(path)                # check the untrusted download before keeping it
+            if scan.get("clean") is False:                   # MALWARE -> quarantine: delete + flag, never comprehended
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+                updates[(mid, url)] = {"status": "infected", "file": None,
+                                       "note": f"malware: {scan.get('threat') or 'detected'} ({scan.get('scanner')})"}
+                infected += 1
+                log(f"  !! MALWARE in {prov} download {str(url)[:50]}: {scan.get('threat')} — deleted, not comprehended")
+            else:
+                updates[(mid, url)] = {"status": "downloaded", "file": rel, "size": len(data),
+                                       "scanned": bool(scan.get("scanned"))}
+                done_files[url] = rel
+                done += 1
+                if not scan.get("scanned"):
+                    unscanned += 1
         elif status == "oversize":
             size = data if isinstance(data, int) else None
             updates[(mid, url)] = {"status": "needs-confirm", "size": size}
@@ -484,6 +499,10 @@ def fetch_links(archive_path, *, fetcher=None, limit=50, headless=True, timeout=
                     and (only_message_ids is None or r.get("message_id") in only_message_ids)
                     and _selected(r))
     log(f"link fetch: {done} downloaded ({reused} reused), {confirm} need-confirm, "
-        f"{dead} dead, {auth} need-auth · {remaining} pending")
+        f"{dead} dead, {auth} need-auth"
+        + (f", {infected} INFECTED (quarantined)" if infected else "")
+        + (f", {unscanned} unscanned (no AV)" if unscanned else "")
+        + f" · {remaining} pending")
     return {"downloaded": done, "reused": reused, "needs_confirm": confirm,
-            "dead": dead, "needs_auth": auth, "remaining": remaining}
+            "dead": dead, "needs_auth": auth, "infected": infected, "unscanned": unscanned,
+            "remaining": remaining}
